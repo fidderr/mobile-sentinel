@@ -8,9 +8,15 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// All generated output goes to android/builds/kiosk (single
-// gitignored location for every module). See android/.gitignore.
-layout.buildDirectory.set(file("$projectDir/../../builds/kiosk"))
+// Generated output goes to a writable build root. The consumer build passes
+// -PsentinelBuildRoot=<dir> (build_sentinel sets this) so output never lands in
+// the read-only crate dir when mobile-sentinel is consumed from crates.io. Falls
+// back to the in-tree android/builds/kiosk for workspace/path-dependency dev.
+val sentinelBuildRoot = project.findProperty("sentinelBuildRoot") as String?
+layout.buildDirectory.set(
+    if (sentinelBuildRoot != null) file("$sentinelBuildRoot/kiosk")
+    else file("$projectDir/../../builds/kiosk")
+)
 
 android {
     namespace = "com.mobilesentinel.kiosk"

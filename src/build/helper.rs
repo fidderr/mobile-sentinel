@@ -31,46 +31,67 @@ const INJECTION_MARKER: &str = "<!-- mobile-sentinel:capabilities -->";
 /// app dependency lines) idempotent across repeated `build_sentinel` runs.
 const GRADLE_MARKER: &str = "mobile-sentinel:modules";
 
-/// Find the mobile-sentinel crate's android directory (absolute path).
+/// Find the mobile-sentinel crate's `android/` directory (absolute path).
+///
+/// The crate ships its `android/` tree (the Gradle `core` module + every
+/// `caps/<id>` capability module) alongside its source, so the authoritative
+/// location is always `CARGO_MANIFEST_DIR/android`. That path is captured at
+/// **compile time** via `env!`, which makes it correct in every consumption
+/// mode:
+///
+/// - workspace / path dependency → the in-tree `crates/mobile-sentinel/android`,
+/// - published crate from crates.io → the unpacked registry source at
+///   `~/.cargo/registry/src/<index>/mobile-sentinel-<ver>/android`.
+///
+/// The earlier implementation only knew about hard-coded workspace-relative
+/// paths and a *runtime* `CARGO_MANIFEST_DIR` (which Cargo does not set for an
+/// installed binary), so it panicked the moment the crate was consumed from
+/// the registry. An explicit `SENTINEL_ANDROID_DIR` env var still overrides
+/// discovery (for vendored copies), and the legacy workspace-relative paths
+/// remain as a last-ditch fallback.
 fn find_sentinel_android_dir() -> Option<PathBuf> {
+    // 1. Explicit override — wins over everything (vendored / relocated trees).
+    if let Ok(dir) = std::env::var("SENTINEL_ANDROID_DIR") {
+        let path = PathBuf::from(dir);
+        if path.exists() {
+            return Some(clean_abs(&path));
+        }
+    }
+
+    // 2. Authoritative: the crate's own bundled android/, resolved from the
+    //    compile-time manifest dir. Works for path deps AND registry installs.
+    let own = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("android");
+    if own.exists() {
+        return Some(clean_abs(&own));
+    }
+
+    // 3. Legacy workspace-relative fallbacks (older monorepo tooling layouts).
     let candidates = [
         "../../crates/mobile-sentinel/android",
         "../crates/mobile-sentinel/android",
         "crates/mobile-sentinel/android",
     ];
-
     for candidate in &candidates {
         let path = PathBuf::from(candidate);
         if path.exists() {
-            // Use canonicalize but strip the \\?\ prefix on Windows
-            if let Ok(abs) = fs::canonicalize(&path) {
-                let abs_str = abs.to_string_lossy().to_string();
-                let cleaned = abs_str
-                    .strip_prefix(r"\\?\")
-                    .unwrap_or(&abs_str)
-                    .to_string();
-                return Some(PathBuf::from(cleaned));
-            }
-            return Some(path);
-        }
-    }
-
-    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        let path = PathBuf::from(manifest_dir).join("../../crates/mobile-sentinel/android");
-        if path.exists() {
-            if let Ok(abs) = fs::canonicalize(&path) {
-                let abs_str = abs.to_string_lossy().to_string();
-                let cleaned = abs_str
-                    .strip_prefix(r"\\?\")
-                    .unwrap_or(&abs_str)
-                    .to_string();
-                return Some(PathBuf::from(cleaned));
-            }
-            return Some(path);
+            return Some(clean_abs(&path));
         }
     }
 
     None
+}
+
+/// Canonicalize a path and strip the Windows `\\?\` verbatim prefix so the
+/// result is a clean absolute path Gradle accepts in `projectDir` lines.
+fn clean_abs(path: &Path) -> PathBuf {
+    match fs::canonicalize(path) {
+        Ok(abs) => {
+            let abs_str = abs.to_string_lossy().to_string();
+            let cleaned = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str).to_string();
+            PathBuf::from(cleaned)
+        }
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 /// Prepare a host Android project so it can consume `mobile-sentinel`.
@@ -117,9 +138,12 @@ pub fn prepare_android_project_with_capabilities<S: AsRef<str>>(
     let sentinel_android = find_sentinel_android_dir().unwrap_or_else(|| {
         panic!(
             "[mobile-sentinel] could not locate the crate's android/ directory \
-             (looked in `../../crates/mobile-sentinel/android`, \
-             `../crates/mobile-sentinel/android`, `crates/mobile-sentinel/android`, \
-             and CARGO_MANIFEST_DIR/../../crates/mobile-sentinel/android)"
+             (looked at $SENTINEL_ANDROID_DIR, the crate's own \
+             CARGO_MANIFEST_DIR/android, and the legacy workspace paths \
+             `../../crates/mobile-sentinel/android`, \
+             `../crates/mobile-sentinel/android`, `crates/mobile-sentinel/android`). \
+             This usually means the crate's bundled android/ tree was excluded \
+             from the published package."
         )
     });
 

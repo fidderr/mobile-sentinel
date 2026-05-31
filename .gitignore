@@ -1,7 +1,8 @@
 target/
-# All Gradle module build output is redirected to android/builds/ (see each
-# module's build.gradle.kts: layout.buildDirectory). One ignore covers every
-# module's generated output, and `rm -rf android/builds` clears it all.
+# Gradle module build output. In a consumer build, build_sentinel passes
+# -PsentinelBuildRoot=<consumer-project>/sentinel-build, so output lands in the
+# consumer's (writable) project, not here. In workspace/path-dependency dev
+# (no property), each module falls back to android/builds/ — ignored here.
 android/builds/
 android/.gradle/
 sentinel/

@@ -40,9 +40,10 @@ fn main() {
 
     // Step 0: wipe stale Gradle module output so a previous run's modules
     // (e.g. a different app's, or a prior feature set's) never linger in the
-    // build. All modules redirect their buildDir to android/builds/<module>,
-    // so one wipe clears every module's generated output.
-    clean_module_builds();
+    // build. Every module redirects its buildDir under the consumer-side
+    // build root (see `sentinel_build_root`), so one wipe clears all module
+    // output.
+    clean_module_builds(&config.project_path);
 
     // Step 1: Wire mobile-sentinel Kotlin module + manifest attributes +
     // capability-gated permissions/components.
@@ -94,7 +95,10 @@ fn main() {
             format!(" ({})", modules.join(", "))
         }
     );
-    run_gradle(&config.project_path, &[]);
+    run_gradle(
+        &config.project_path,
+        &[sentinel_build_root_arg(&config.project_path)],
+    );
 
     let apk = config
         .project_path
@@ -428,30 +432,36 @@ fn read_sentinel_toml() -> std::collections::HashMap<String, String> {
     map
 }
 
-/// Wipe the centralized Gradle module build output (`<crate>/android/builds`)
-/// so each `build_sentinel` run starts clean. Every module redirects its
-/// `buildDirectory` there, so removing this one folder clears all module
-/// output — preventing a prior run's modules (a different app's, or a prior
-/// feature set's) from lingering. Best-effort: a failure is non-fatal (Gradle
-/// would just recompile).
-fn clean_module_builds() {
-    let candidates = [
-        "../../crates/mobile-sentinel/android/builds",
-        "../crates/mobile-sentinel/android/builds",
-        "crates/mobile-sentinel/android/builds",
-    ];
-    for c in &candidates {
-        let p = Path::new(c);
-        // Resolve relative to the android dir's existence (the parent must be
-        // a real `android` dir) to avoid deleting an unrelated path.
-        if p.parent().map(|a| a.join("core").exists()).unwrap_or(false) {
-            if p.exists() {
-                match fs::remove_dir_all(p) {
-                    Ok(()) => println!("  Cleaned stale module builds: {}", p.display()),
-                    Err(e) => eprintln!("  (warn) could not clean {}: {e}", p.display()),
-                }
-            }
-            return;
+/// The writable directory every mobile-sentinel Gradle module redirects its
+/// build output into, located inside the consumer's Android project (which is
+/// always writable, unlike the crate's own `android/` tree when consumed from
+/// crates.io). Passed to Gradle as `-PsentinelBuildRoot=<dir>`; each module's
+/// `build.gradle.kts` reads it and falls back to its in-tree `android/builds/`
+/// path only for workspace/path-dependency development.
+fn sentinel_build_root(project_path: &Path) -> PathBuf {
+    project_path.join("sentinel-build")
+}
+
+/// The `-PsentinelBuildRoot=<abs dir>` Gradle argument. Uses forward slashes
+/// so the value is valid in Gradle on Windows.
+fn sentinel_build_root_arg(project_path: &Path) -> String {
+    let root = sentinel_build_root(project_path);
+    let s = root.to_string_lossy().replace('\\', "/");
+    format!("-PsentinelBuildRoot={s}")
+}
+
+/// Wipe the centralized Gradle module build output so each `build_sentinel`
+/// run starts clean. Every module redirects its `buildDirectory` under the
+/// consumer-side build root (`<project>/sentinel-build`), so removing that one
+/// folder clears all module output — preventing a prior run's modules (a
+/// different app's, or a prior feature set's) from lingering. Best-effort: a
+/// failure is non-fatal (Gradle would just recompile).
+fn clean_module_builds(project_path: &Path) {
+    let root = sentinel_build_root(project_path);
+    if root.exists() {
+        match fs::remove_dir_all(&root) {
+            Ok(()) => println!("  Cleaned stale module builds: {}", root.display()),
+            Err(e) => eprintln!("  (warn) could not clean {}: {e}", root.display()),
         }
     }
 }
