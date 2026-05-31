@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Foreground service component. Merged into the consumer manifest by
+        Gradle ONLY when this module is a dependency (the `foreground-service`
+        firing sub-feature is enabled). Runs in MAIN process (no
+        android:process) so audio/kiosk/stop all happen same-process.
+
+        The FOREGROUND_SERVICE* / POST_NOTIFICATIONS permissions are injected
+        per the registry's `foreground_service` row by build_sentinel.
+    -->
+    <application>
+        <service
+            android:name="com.mobilesentinel.SentinelForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaPlayback" />
+    </application>
+</manifest>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Accessibility service configuration for SentinelAccessibilityService.
+
+  Minimal scope by design — we only need window-state-changed events to
+  detect escape attempts while the kiosk is engaged. Users granting this
+  permission will see the exact capabilities listed on the grant screen.
+
+  - accessibilityEventTypes=typeWindowStateChanged: we observe window
+    transitions only.
+  - canRetrieveWindowContent=false: we do NOT read window content. Pure
+    package-name + class-name inspection.
+  - isAccessibilityTool=true: signals Google Play we are a tool, not a
+    screen reader or other assistive-tech. Required on API 31+ to pass
+    Play policy review.
+  - summary / description: shown on the system grant screen. Consumer
+    apps can override via string resources if localised copy is needed.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFlags="flagReportViewIds"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:isAccessibilityTool="true"
+    android:description="@string/sentinel_accessibility_description"
+    android:summary="@string/sentinel_accessibility_summary"
+    android:notificationTimeout="100" />

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider paths for the camera capability. Exposes the app's internal
+    files dir (where SentinelCameraActivity writes the captured JPEG) so the
+    system camera app can be granted a content:// URI to write the full-res
+    photo into. Scoped to a single subdirectory to avoid exposing unrelated
+    files.
+-->
+<paths>
+    <files-path
+        name="sentinel_camera"
+        path="sentinel_camera/" />
+</paths>

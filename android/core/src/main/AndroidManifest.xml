@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        :sentinel-core MINIMAL manifest. Core is the irreducible JNI kernel:
+        the primitives facade, the native bridge, and a library-init provider
+        that sets the app context + activity tracker. It declares NO
+        permissions and NO alarm/firing/kiosk components.
+
+        Everything a consumer actually uses — firing surfaces, the alarm
+        runtime (FGS / receivers / job guardian / kiosk), and every leaf
+        capability — comes from the per-capability Gradle modules and the
+        permissions injected by `build_sentinel`, gated by the consumer's
+        enabled Cargo features. A consumer with no features ships only this
+        kernel: no permissions, no services, no receivers.
+    -->
+
+    <application>
+        <!-- Core library-init ContentProvider: sets app context + activity
+             tracker during Application.onCreate. No alarm/kiosk work. -->
+        <provider
+            android:name=".SentinelCoreInitializer"
+            android:authorities="${applicationId}.sentinel.core.init"
+            android:exported="false"
+            android:initOrder="100" />
+    </application>
+
+</manifest>

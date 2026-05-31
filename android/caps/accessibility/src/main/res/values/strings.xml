@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default strings for mobile-sentinel components. Consumers can override
+  any of these in their own app resources; Android's resource merger picks
+  the app's value over the library's.
+-->
+<resources>
+    <string name="sentinel_accessibility_summary">Keeps timers and alarms on screen</string>
+    <string name="sentinel_accessibility_description">When enabled, brings the configured activity back to the front if the user navigates away while a kiosk session is active. Only takes effect during sessions the host app has explicitly opted into. Does not read window content.</string>
+</resources>

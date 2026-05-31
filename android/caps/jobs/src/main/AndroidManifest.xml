@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Jobs library init. Merged into the consumer manifest by Gradle ONLY
+        when this module is a dependency (the `jobs` feature is enabled).
+        Registers the JOB_HEADS_UP receiver so a live MAIN process is told to
+        run the job (forwarded to Rust) instead of being relaunched.
+    -->
+    <application>
+        <provider
+            android:name="com.mobilesentinel.SentinelJobsInitializer"
+            android:authorities="${applicationId}.sentinel.jobs.init"
+            android:exported="false"
+            android:initOrder="89" />
+    </application>
+</manifest>

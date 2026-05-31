@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Exact-alarm components. Merged into the consumer manifest by Gradle
+        ONLY when this module is a dependency (the `exact-alarm` firing
+        sub-feature is enabled). A non-scheduling consumer ships none of these.
+
+        SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM are injected per the registry's
+        `exact_alarm` row by build_sentinel. RECEIVE_BOOT_COMPLETED is declared
+        here because the boot receiver lives in this module.
+
+        Class names are fully-qualified to the actual Kotlin package
+        (`com.mobilesentinel`), NOT relative — a relative `.Name` would resolve
+        against this module's Gradle namespace (`com.mobilesentinel.exactalarm`),
+        where the classes do not live.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application>
+        <!-- Exact-alarm wake receiver — activates the job file + starts the
+             guardian. Runs in :sentinel. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelAlarmReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":sentinel">
+            <intent-filter>
+                <action android:name="com.mobilesentinel.ALARM_DISPATCH" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Time / Time-Zone / Date change receiver. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelTimeChangeReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":sentinel">
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Boot completed receiver — re-arms alarms after reboot. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelBootReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Invisible boot service — runs in MAIN to trigger Rust re-arm. -->
+        <service
+            android:name="com.mobilesentinel.SentinelBootService"
+            android:enabled="true"
+            android:exported="false" />
+    </application>
+</manifest>

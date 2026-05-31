@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Kiosk library init. Merged into the consumer manifest by Gradle ONLY
+        when this module is a dependency (the `kiosk` firing sub-feature is
+        enabled). Attaches SentinelKioskController to the Application lifecycle
+        so it can relaunch the target activity on background events.
+    -->
+    <application>
+        <provider
+            android:name="com.mobilesentinel.SentinelKioskInitializer"
+            android:authorities="${applicationId}.sentinel.kiosk.init"
+            android:exported="false"
+            android:initOrder="90" />
+    </application>
+</manifest>

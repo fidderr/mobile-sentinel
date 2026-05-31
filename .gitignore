@@ -1,0 +1,7 @@
+target/
+# All Gradle module build output is redirected to android/builds/ (see each
+# module's build.gradle.kts: layout.buildDirectory). One ignore covers every
+# module's generated output, and `rm -rf android/builds` clears it all.
+android/builds/
+android/.gradle/
+sentinel/

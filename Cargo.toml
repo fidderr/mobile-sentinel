@@ -1,0 +1,173 @@
+[package]
+name = "mobile-sentinel"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.76.0"
+description = "Rust-first Android SDK — write mobile app logic in Rust, Kotlin is just the thin JNI layer"
+license = "MIT"
+authors = ["fidderr"]
+repository = "https://github.com/fidderr/mobile-sentinel"
+keywords = ["mobile", "android", "rust", "sdk", "alarm"]
+categories = ["os", "api-bindings"]
+
+[features]
+default = []
+
+# ---------------------------------------------------------------------------
+# Capability features — the single source of truth for "what a consumer
+# uses". Each gates the public entry-point(s) for one capability. Enabling
+# a feature is what makes its API callable; calling a capability whose
+# feature is not enabled is a COMPILE ERROR at the call site.
+#
+# build.rs writes the enabled set to OUT_DIR so `build_sentinel` can derive
+# the manifest/permissions/Kotlin/Gradle trimming from the exact same list.
+# ---------------------------------------------------------------------------
+# Barcode / QR scanning (CAMERA + ZXing + SentinelScanner* Kotlin).
+scanner = []
+# Photo capture via the system camera app (ACTION_IMAGE_CAPTURE + FileProvider).
+camera = []
+# Vibration / haptics.
+haptics = []
+# Non-firing audio preview (play/stop/volume of arbitrary URIs).
+audio = []
+# Draw-over-apps overlay permission (SYSTEM_ALERT_WINDOW).
+overlay = []
+# Runtime permission status/request + app-settings deep link.
+permissions = []
+# Accelerometer shake counter + hardware step counter (ACTIVITY_RECOGNITION).
+sensors = []
+# Torch / flashlight (camera flash LED).
+torch = []
+# Screen brightness control + keep-screen-on.
+display = []
+# Battery-optimization exemption (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).
+battery = []
+# System screen-pinning (lock-task).
+screen_pin = []
+# Foregrounding — finish the app activity.
+foregrounding = []
+# Native media/file picker (file import).
+media_picker = []
+# Clipboard get/set.
+clipboard = []
+# System share sheet.
+share = []
+# Encrypted key/value storage.
+secure_storage = []
+# SMS sending (SEND_SMS).
+sms = []
+# Phone dial / call state (CALL_PHONE).
+phone = []
+# Network connectivity status (ACCESS_NETWORK_STATE).
+network = []
+# Current device location (ACCESS_FINE/COARSE_LOCATION).
+location = []
+# Geocoding / reverse-geocoding.
+maps = []
+# Biometric (fingerprint/face) authentication.
+biometric = []
+# Device-admin force-lock (BIND_DEVICE_ADMIN) — POLICY-SENSITIVE.
+device_admin = []
+# Read device contacts (READ_CONTACTS).
+contacts = []
+# Calendar read/create/delete (READ_CALENDAR / WRITE_CALENDAR).
+calendar = []
+# Dismiss-guard (block back/swipe during firing). Delegates to screen-pinning
+# at the Kotlin layer, so it pulls in `screen_pin`.
+dismiss_guard = ["screen_pin"]
+# General notifications (post/update/cancel) distinct from firing FGS.
+notifications = []
+# Bundled-asset copy/list helpers.
+file_system = []
+# Accessibility-service grant flow (ultra-protection kiosk relaunch). The
+# SentinelAccessibilityService manifest component + Rust grant-flow helpers
+# ship ONLY when this feature is enabled. POLICY-SENSITIVE on Google Play.
+# Only meaningful alongside a kiosk session (the service reads
+# SentinelKioskController), so it pulls in `kiosk` — the module the service
+# relaunches through.
+accessibility = ["kiosk"]
+
+# ---- Building blocks (Tier 2) -------------------------------------------
+# Standalone building blocks — each has real independent consumer value:
+# Generic durable per-instance state store (atomic, revisioned).
+state-store = []
+# Bundled/custom/system sound resolution (backend + import/enumerate/resolve).
+sound-library = []
+# Cross-process job guardian persistence (:sentinel resurrection).
+jobs = []
+# Firing surface — the injectable FiringSink the recipe engine drives.
+# Split into granular sub-features so a consumer composes only the firing
+# surfaces it needs (a silent timer needs foreground-service but no
+# full-screen-intent/kiosk; a pure scheduler needs exact-alarm only).
+# `firing` is the convenience bundle of all six. The FiringSink trait itself
+# stays stable; each sub-feature gates its platform surface + permissions.
+# Keep the alarm CPU awake while firing (WAKE_LOCK).
+wake-lock = []
+# Alarm audio playback during firing (no extra permission).
+firing-audio = []
+# Alarm vibration during firing — a looping waveform alongside (or instead of)
+# the audio. Uses the VIBRATE permission (shared with the `haptics` capability).
+firing-vibration = []
+# Alarm foreground service so the process survives a swipe-kill while firing
+# (FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS).
+foreground-service = []
+# OS exact-alarm scheduling (SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM).
+exact-alarm = []
+# Kiosk / lock-task takeover while firing (no extra permission).
+kiosk = []
+# Full-screen intent over the lock screen while firing (USE_FULL_SCREEN_INTENT).
+full-screen-intent = []
+# Convenience bundle: the complete firing surface composed by alarm-kit.
+firing = [
+    "wake-lock",
+    "firing-audio",
+    "firing-vibration",
+    "foreground-service",
+    "exact-alarm",
+    "kiosk",
+    "full-screen-intent",
+]
+# Recipe engine / framework — the building block AlarmKit (and any custom
+# recipe) is built ON: the `Trigger` catalogue, the `Recipe` trait, the
+# dispatch boundary + registry, the typed `ContextStore`, and the recipe-
+# shared helpers (recurrence next-fire + snooze policy). Has standalone value:
+# a consumer can implement its own `Recipe` and drive it through
+# `dispatch_trigger` without pulling in AlarmKit. Needs the generic durable
+# state store for `ContextStore`.
+recipes = ["state-store"]
+# AlarmKit façade + AlarmClass recipe — a PREBUILT wrapper over the recipe
+# engine + firing/sound/jobs building blocks. Owns no engine logic of its own;
+# it composes `recipes` (the engine) with the platform surfaces an alarm needs.
+alarm-kit = ["recipes", "firing", "sound-library", "jobs"]
+
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+futures-core = "0.3"
+futures-channel = "0.3"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+once_cell = "1"
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.10", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+android_logger = "0.14"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+futures = "0.3"
+rand = "0.8"
+
+# Integration test exercising the Recipe + ContextStore + dispatch boundary;
+# only compiles when the alarm-kit subsystem is enabled.
+[[test]]
+name = "correctness_properties"
+required-features = ["alarm-kit"]
