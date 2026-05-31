@@ -10,6 +10,17 @@ repository = "https://github.com/fidderr/mobile-sentinel"
 keywords = ["mobile", "android", "rust", "sdk", "alarm"]
 categories = ["os", "api-bindings"]
 
+# Keep the published crate to source only. Generated Gradle/Kotlin build
+# output and local runtime state must never end up in the .crate tarball.
+# (cargo only honors .gitignore when the path is a committed-ignored git
+# repo, so an explicit exclude is the robust guarantee.)
+exclude = [
+    "android/builds/",
+    "android/.gradle/",
+    "sentinel/",
+    "target/",
+]
+
 [features]
 default = []
 
