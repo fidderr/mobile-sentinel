@@ -1,11 +1,20 @@
-//! build_sentinel — Wire mobile-sentinel's Kotlin module, copy assets/icon, build APK.
+//! build_sentinel — Wire mobile-sentinel's Kotlin module, copy assets/icon, build APK/AAB.
 //!
-//! # Usage
+//! # Usage (via the published crate, as used by consumers' build.sh)
 //!
 //! ```bash
-//! cargo run -p mobile-sentinel --bin build_sentinel
-//! cargo run -p mobile-sentinel --bin build_sentinel -- --activity com.example.MainActivity
+//! build_sentinel
+//! build_sentinel --release
+//! build_sentinel --release --aab
+//! build_sentinel --app alarmfree --release --aab
 //! ```
+//!
+//! For Google Play: use `--release --aab` (from your final build script) to produce
+//! an AAB under the package name from the consumer's Dioxus.toml `[bundle] identifier`
+//! (or `[android] identifier`).
+//!
+//! The `build.sh` script in the AlarmFree tree is the blessed way to do final
+//! (including release/AAB) builds because it exercises the published crate.
 //!
 //! # Configuration (`sentinel.toml`)
 //!
@@ -82,12 +91,27 @@ fn main() {
     }
     copy_assets(&config.asset_paths, &config.project_path);
 
-    // Step 3: Build APK via Gradle. Trimming is now STRUCTURAL — only the
+    // Step 3: Build APK/AAB via Gradle. Trimming is now STRUCTURAL — only the
     // enabled capability modules were wired into settings.gradle + the app
     // dependencies (see prepare_android_project_with_capabilities), so a
     // disabled capability's Kotlin/deps are never compiled. No per-build
     // exclusion properties needed.
-    println!("[3/3] Building APK...");
+    let task = if config.bundle_aab {
+        ":app:bundleRelease"
+    } else if config.release {
+        ":app:assembleRelease"
+    } else {
+        ":app:assembleDebug"
+    };
+    let artifact_label = if config.bundle_aab {
+        "AAB"
+    } else if config.release {
+        "release APK"
+    } else {
+        "APK"
+    };
+
+    println!("[3/3] Building {} via {}...", artifact_label, task);
     let modules = mobile_sentinel::build::registry::enabled_modules(&config.capabilities);
     println!(
         "  Modules: :sentinel-core + {} capability module(s){}",
@@ -101,13 +125,25 @@ fn main() {
     run_gradle(
         &config.project_path,
         &[sentinel_build_root_arg(&config.project_path)],
+        task,
     );
 
-    let apk = config
-        .project_path
-        .join("app/build/outputs/apk/debug/app-debug.apk");
+    let out_path = if config.bundle_aab {
+        config
+            .project_path
+            .join("app/build/outputs/bundle/release/app-release.aab")
+    } else if config.release {
+        // Note: may be -unsigned if no signing config provided to Gradle.
+        config
+            .project_path
+            .join("app/build/outputs/apk/release/app-release-unsigned.apk")
+    } else {
+        config
+            .project_path
+            .join("app/build/outputs/apk/debug/app-debug.apk")
+    };
     println!();
-    println!("=== APK ready: {} ===", apk.display());
+    println!("=== {} ready: {} ===", artifact_label, out_path.display());
 }
 
 struct Config {
@@ -117,18 +153,23 @@ struct Config {
     asset_paths: Vec<PathBuf>,
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
+    release: bool,
+    bundle_aab: bool,
 }
 
 fn load_config() -> Config {
     let toml = read_sentinel_toml();
 
+    let release = parse_release_cli();
+    let bundle_aab = parse_aab_cli();
+
     let activity = parse_activity_cli()
         .or_else(|| toml.get("activity").cloned())
-        .or_else(|| find_project_path().and_then(|p| detect_activity_from_manifest(&p)))
+        .or_else(|| find_project_path(release).and_then(|p| detect_activity_from_manifest(&p)))
         .expect("Activity not specified. Use --activity or set in sentinel.toml");
 
-    let project_path = find_project_path()
-        .expect("Could not find Android project. Run `dx build --platform android` first.");
+    let project_path = find_project_path(release)
+        .expect("Could not find Android project. Run `dx build --platform android [--release]` first.");
 
     let icon_path = toml.get("icon").map(PathBuf::from).filter(|p| p.exists());
 
@@ -187,6 +228,8 @@ fn load_config() -> Config {
         asset_paths,
         capabilities,
         default_screen_orientation,
+        release,
+        bundle_aab,
     }
 }
 
@@ -384,6 +427,16 @@ fn parse_app_cli() -> Option<String> {
     parse_cli_value("--app")
 }
 
+fn parse_release_cli() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter().any(|a| a == "--release" || a == "-r")
+}
+
+fn parse_aab_cli() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter().any(|a| a == "--aab" || a == "--bundle")
+}
+
 fn parse_string_list(s: &str) -> Vec<String> {
     let trimmed = s.trim();
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
@@ -487,21 +540,24 @@ fn clean_module_builds(project_path: &Path) {
     }
 }
 
-fn find_project_path() -> Option<PathBuf> {
+fn find_project_path(is_release: bool) -> Option<PathBuf> {
     let dx_dir = Path::new("target/dx");
     if !dx_dir.exists() {
         return None;
     }
 
+    let profile = if is_release { "release" } else { "debug" };
+
     // When `--app <name>` is given, build that specific consumer's project.
     if let Some(app) = parse_app_cli() {
-        let candidate = dx_dir.join(&app).join("debug/android/app");
+        let candidate = dx_dir.join(&app).join(format!("{}/android/app", profile));
         if candidate.exists() {
             return Some(candidate);
         }
         eprintln!(
-            "[mobile-sentinel] --app {app} given but {} not found; run `dx build` for it first",
-            candidate.display()
+            "[mobile-sentinel] --app {app} given but {} not found; run `dx build --platform android {}` for it first",
+            candidate.display(),
+            if is_release { "--release" } else { "" }
         );
         return None;
     }
@@ -512,7 +568,7 @@ fn find_project_path() -> Option<PathBuf> {
     // the app that was just built even if others exist.
     let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
     for entry in fs::read_dir(dx_dir).ok()?.flatten() {
-        let candidate = entry.path().join("debug/android/app");
+        let candidate = entry.path().join(format!("{}/android/app", profile));
         if !candidate.exists() {
             continue;
         }
@@ -622,7 +678,7 @@ fn copy_dir_recursive(src: &Path, dest_base: &Path, root: &Path) -> usize {
     count
 }
 
-fn run_gradle(project_path: &Path, extra_props: &[String]) {
+fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
     let ms_build = project_path.join("mobile-sentinel/build");
     if ms_build.exists() {
         let _ = fs::remove_dir_all(&ms_build);
@@ -635,7 +691,7 @@ fn run_gradle(project_path: &Path, extra_props: &[String]) {
     };
 
     let mut cmd = Command::new(&gradlew);
-    cmd.arg(":app:assembleDebug")
+    cmd.arg(task)
         .arg("--no-daemon")
         .arg("--no-build-cache");
     for prop in extra_props {
