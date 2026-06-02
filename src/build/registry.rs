@@ -170,7 +170,7 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "display",
-        description: "Screen brightness control + keep-screen-on.",
+        description: "Screen brightness + keep-screen-on + runtime requested orientation (for per-screen rotation overrides).",
         permissions: NO_PERMS,
         features: NO_FEATURES,
         components: "",

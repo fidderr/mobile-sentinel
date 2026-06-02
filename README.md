@@ -348,6 +348,7 @@ project into a wired, trimmed APK. It reads a small `sentinel.toml`:
 activity = "dev.dioxus.main.MainActivity"   # required (or pass --activity)
 icon = "path/to/icon.webp"                  # optional — copied to all mipmap densities
 assets = ["path/to/sounds"]                 # optional — copied into APK assets/
+screen_orientation = "portrait"             # optional — default lock for main activity (see display capability for runtime per-screen overrides)
 ```
 
 Capabilities are **not** declared here — they come from your Cargo features.

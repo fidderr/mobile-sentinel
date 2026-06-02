@@ -133,6 +133,31 @@ pub fn prepare_android_project_with_capabilities<S: AsRef<str>>(
     activity_fqcn: &str,
     capabilities_declared: &[S],
 ) -> ManifestInjection {
+    prepare_android_project_with_capabilities_and_orientation(
+        android_project_path,
+        activity_fqcn,
+        capabilities_declared,
+        None,
+    )
+}
+
+/// Extended form of [`prepare_android_project_with_capabilities`] that also
+/// sets a default `android:screenOrientation="..."` attribute on the
+/// consumer's main activity (the one named by `activity_fqcn`).
+///
+/// This is the mechanism for "default behaviour" locking (e.g. "portrait")
+/// at build time. Runtime overrides for specific screens (e.g. a settings
+/// page that should rotate) are performed via
+/// `mobile_sentinel::display::set_requested_orientation`.
+///
+/// Pass `None` for `default_screen_orientation` to leave the activity's
+/// orientation unspecified (system / sensor default, i.e. rotates with phone).
+pub fn prepare_android_project_with_capabilities_and_orientation<S: AsRef<str>>(
+    android_project_path: &str,
+    activity_fqcn: &str,
+    capabilities_declared: &[S],
+    default_screen_orientation: Option<&str>,
+) -> ManifestInjection {
     let project_path = Path::new(android_project_path);
 
     let sentinel_android = find_sentinel_android_dir().unwrap_or_else(|| {
@@ -156,6 +181,10 @@ pub fn prepare_android_project_with_capabilities<S: AsRef<str>>(
     add_modules_to_settings(project_path, &sentinel_path_str, &modules);
     add_module_dependencies(project_path, &modules);
     add_activity_flags(project_path, activity_fqcn);
+
+    if let Some(orient) = default_screen_orientation {
+        set_default_screen_orientation(project_path, activity_fqcn, orient);
+    }
 
     let injection = capabilities::assemble(capabilities_declared);
     inject_capabilities(project_path, &injection);
@@ -316,6 +345,104 @@ fn add_activity_flags(project_path: &Path, activity_fqcn: &str) {
             "[mobile-sentinel] Added launchMode=singleInstance, showWhenLocked, turnScreenOn to {}",
             activity_fqcn
         );
+    }
+}
+
+/// Remove an attribute like `android:foo="bar"` (and its trailing whitespace)
+/// from inside an activity (or other) tag string. Used by orientation injection
+/// so we can overwrite a previous value when the build config changes.
+fn remove_attr(tag: &str, attr_name: &str) -> String {
+    let prefix = format!("{}=\"", attr_name);
+    let mut result = String::with_capacity(tag.len());
+    let mut i = 0usize;
+    while i < tag.len() {
+        if tag[i..].starts_with(&prefix) {
+            // skip until after the closing quote, plus trailing ws
+            if let Some(qrel) = tag[i..].find('"') {
+                let mut end = i + qrel + 1;
+                let bytes = tag.as_bytes();
+                while end < bytes.len() && bytes[end].is_ascii_whitespace() {
+                    end += 1;
+                }
+                i = end;
+                continue;
+            }
+        }
+        // copy one char (UTF-8 safe? for ascii attrs ok; for full use char indices but attrs are ascii)
+        let b = tag.as_bytes()[i];
+        result.push(b as char);
+        i += 1;
+    }
+    result
+}
+
+/// Insert `attr` (e.g. `android:screenOrientation="portrait"`) immediately
+/// before the final `>` of the tag, adding a space if needed.
+fn insert_attr_before_close(tag: &str, attr: &str) -> String {
+    if let Some(pos) = tag.rfind('>') {
+        let (before, close) = tag.split_at(pos);
+        // Always need whitespace separator before a new attribute, unless
+        // there's already trailing whitespace before the '>'.
+        let needs_space = !before.ends_with(char::is_whitespace);
+        if needs_space {
+            format!("{} {}{}", before, attr, close)
+        } else {
+            format!("{}{}{}", before, attr, close)
+        }
+    } else {
+        tag.to_string()
+    }
+}
+
+/// Inject (or overwrite) `android:screenOrientation="..."` on the
+/// `<activity android:name="...">` declaration for the main app activity.
+/// Idempotent for repeated builds with the same value.
+fn set_default_screen_orientation(project_path: &Path, activity_fqcn: &str, orientation: &str) {
+    let manifest_path = project_path.join("app/src/main/AndroidManifest.xml");
+    let content = match fs::read_to_string(&manifest_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let name_needle = format!("android:name=\"{}\"", activity_fqcn);
+    let Some(name_pos) = content.find(&name_needle) else {
+        eprintln!(
+            "[mobile-sentinel] screenOrientation: could not locate activity {} in manifest",
+            activity_fqcn
+        );
+        return;
+    };
+
+    // Locate the end of *this* opening tag (first > after the name)
+    let rest = &content[name_pos..];
+    let Some(rel_close) = rest.find('>') else {
+        return;
+    };
+    let close_abs = name_pos + rel_close;
+    let tag = &content[name_pos..=close_abs];
+
+    let desired = format!("android:screenOrientation=\"{}\"", orientation);
+    if tag.contains(&desired) {
+        return; // already correct
+    }
+
+    let cleaned = remove_attr(tag, "android:screenOrientation");
+    let updated = insert_attr_before_close(&cleaned, &desired);
+
+    if updated != tag {
+        let new_content = format!(
+            "{}{}{}",
+            &content[..name_pos],
+            updated,
+            &content[close_abs + 1..]
+        );
+        match fs::write(&manifest_path, new_content) {
+            Ok(()) => eprintln!(
+                "[mobile-sentinel] Set android:screenOrientation=\"{}\" on {}",
+                orientation, activity_fqcn
+            ),
+            Err(e) => eprintln!("[mobile-sentinel] Failed to write screenOrientation: {}", e),
+        }
     }
 }
 
@@ -491,5 +618,77 @@ mod tests {
         assert!(!stripped.contains(INJECTION_MARKER));
         // Core content survives.
         assert!(stripped.contains("SentinelForegroundService"));
+    }
+
+    #[test]
+    fn remove_and_insert_attr_helpers() {
+        let tag = r#"<activity android:name="dev.example.Main" android:configChanges="foo" android:exported="true">"#;
+        let cleaned = remove_attr(tag, "android:screenOrientation");
+        assert_eq!(cleaned, tag); // no-op when absent
+
+        let with_existing = r#"<activity android:name="dev.example.Main" android:screenOrientation="landscape" android:exported="true">"#;
+        let cleaned2 = remove_attr(with_existing, "android:screenOrientation");
+        assert!(!cleaned2.contains("screenOrientation"));
+
+        let inserted = insert_attr_before_close(&cleaned2, r#"android:screenOrientation="portrait""#);
+        assert!(inserted.contains(r#"android:screenOrientation="portrait""#));
+        assert!(inserted.contains("android:exported"));
+
+        // Overwrite existing via remove+insert
+        let tag3 = r#"<activity android:name="x" android:screenOrientation="foo" >"#;
+        let c3 = remove_attr(tag3, "android:screenOrientation");
+        let u3 = insert_attr_before_close(&c3, r#"android:screenOrientation="bar""#);
+        assert!(u3.contains(r#"="bar""#));
+        assert!(!u3.contains(r#"="foo""#));
+    }
+
+    #[test]
+    fn set_default_screen_orientation_injects_and_overwrites() {
+        use std::fs;
+        // Simulate the project/app/src/main/ layout that the fn expects.
+        let base = std::env::temp_dir().join(format!(
+            "sentinel_orient_proj_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let manifest_dir = base.join("app").join("src").join("main");
+        fs::create_dir_all(&manifest_dir).unwrap();
+        let manifest_path = manifest_dir.join("AndroidManifest.xml");
+
+        let baseline = r#"<?xml version="1.0"?>
+<manifest>
+    <application>
+        <activity android:name="dev.dioxus.main.MainActivity"
+            android:configChanges="orientation|screenLayout|screenSize"
+            android:exported="true"
+            android:launchMode="singleInstance">
+        </activity>
+    </application>
+</manifest>"#;
+        fs::write(&manifest_path, baseline).unwrap();
+
+        // Inject portrait (pass the fake *project* root)
+        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "portrait");
+        let after = fs::read_to_string(&manifest_path).unwrap();
+        assert!(after.contains(r#"android:screenOrientation="portrait""#), "after: {}", after);
+        assert!(after.contains("configChanges")); // other attrs survive
+
+        // Re-inject different value (landscape) — should overwrite, not duplicate
+        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "landscape");
+        let after2 = fs::read_to_string(&manifest_path).unwrap();
+        assert!(after2.contains(r#"android:screenOrientation="landscape""#));
+        assert!(!after2.contains(r#"="portrait""#));
+        // only one occurrence
+        assert_eq!(after2.matches("screenOrientation").count(), 1);
+
+        // Calling with same is no-op (no change)
+        let before_same = fs::read_to_string(&manifest_path).unwrap();
+        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "landscape");
+        let after_same = fs::read_to_string(&manifest_path).unwrap();
+        assert_eq!(before_same, after_same);
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

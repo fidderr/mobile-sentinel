@@ -7,22 +7,18 @@ import android.util.Log
 import android.view.WindowManager
 
 /**
- * Window-level display primitives: screen brightness + keep-screen-on.
+ * Window-level display primitives: screen brightness + keep-screen-on + runtime
+ * requested orientation.
  *
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
- * around an Android `Window` API — no orchestration logic, no state
- * machines, no Recipe-specific behavior.
+ * around an Android `Window` / Activity API.
  *
- * IMPORTANT — these are WINDOW-level operations that require an Activity.
- * Brightness and keep-screen-on are applied to `activity.window`, and the
- * application context held by [SentinelPrimitives] is generally NOT an
- * Activity. When the stored context is not an Activity, the setters log a
- * warning and return `false`. [getBrightness] degrades gracefully by
- * reading the system brightness setting instead.
+ * IMPORTANT — brightness / keep-screen-on / orientation are Activity-window
+ * operations. We prefer [SentinelActivityTracker.currentResumedActivity] for
+ * the live UI Activity; we fall back to casting the app context (works in
+ * some embed scenarios). If neither yields an Activity we log and return false.
  *
- * Threading: window-attribute mutations must run on the UI thread, so each
- * setter wraps the actual work in [Activity.runOnUiThread]. Every method is
- * wrapped in try/catch and returns a safe fallback — these never throw.
+ * Threading: mutations run on the UI thread via [Activity.runOnUiThread].
  */
 object SentinelDisplayPrimitives {
     private const val TAG = "MobileSentinel.Display"
@@ -181,6 +177,54 @@ object SentinelDisplayPrimitives {
         } catch (e: Throwable) {
             Log.w(TAG, "keepScreenOn: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Set the Activity's requested screen orientation at runtime.
+     * Corresponds to `Activity.setRequestedOrientation(int)`.
+     * The int values are the ActivityInfo.SCREEN_ORIENTATION_* constants
+     * (passed from Rust).
+     */
+    @JvmStatic
+    fun setRequestedOrientation(orientation: Int): Boolean {
+        val activity = SentinelActivityTracker.currentResumedActivity
+            ?: activityOrNull()
+        if (activity == null) {
+            Log.w(TAG, "setRequestedOrientation: no Activity available (tracker or context cast)")
+            return false
+        }
+        return try {
+            activity.runOnUiThread {
+                try {
+                    activity.requestedOrientation = orientation
+                } catch (e: Throwable) {
+                    Log.w(TAG, "setRequestedOrientation(UI): ${e.message}", e)
+                }
+            }
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "setRequestedOrientation: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Read back `activity.requestedOrientation`.
+     * Returns -100 when no Activity is available (sentinel for Rust side).
+     */
+    @JvmStatic
+    fun getRequestedOrientation(): Int {
+        val activity = SentinelActivityTracker.currentResumedActivity
+            ?: activityOrNull()
+        if (activity == null) {
+            return -100
+        }
+        return try {
+            activity.requestedOrientation
+        } catch (e: Throwable) {
+            Log.w(TAG, "getRequestedOrientation: ${e.message}", e)
+            -100
         }
     }
 }

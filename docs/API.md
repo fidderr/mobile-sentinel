@@ -72,7 +72,7 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `permissions` | `permissions` | `status(&str) -> PermissionState`, `request(&str) -> PermissionState`, `open_app_settings()` | none |
 | `sensors` | `sensors` | `start_accelerometer()`, `stop_accelerometer()`, `shake_count() -> i32`, `reset_shake_count()`, `start_step_counter()`, `stop_step_counter()`, `step_count() -> i32` | `ACTIVITY_RECOGNITION`, `HIGH_SAMPLING_RATE_SENSORS` |
 | `torch` | `torch` | `on(Option<f32>)`, `off()`, `is_available() -> bool` | none |
-| `display` | `display` | `set_brightness(f32)`, `brightness() -> f32`, `set_max_brightness()`, `restore_brightness()`, `keep_screen_on(bool)` | none |
+| `display` | `display` | `set_brightness(f32)`, `brightness() -> f32`, `set_max_brightness()`, `restore_brightness()`, `keep_screen_on(bool)`, `set_requested_orientation(ScreenOrientation)`, `current_requested_orientation() -> Option<ScreenOrientation>` | none; also supports build-time `screen_orientation = "portrait"` (etc.) in sentinel.toml to set the static default on the main activity |
 | `battery` | `battery` | `is_exempt() -> bool`, `request_exemption()`, `open_settings()` | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` |
 | `screen_pin` | `screen_pin` | `pin()`, `unpin()`, `is_pinned() -> bool` | none |
 | `foregrounding` | `foregrounding` | `finish_activity()` | none |
@@ -107,6 +107,23 @@ mobile_sentinel::audio::stop(&handle)?;
 // The handle id is a plain u64 you can stash across an FFI / UI boundary:
 let id = handle.id();
 let same = mobile_sentinel::PlaybackHandle::from_id(id);
+```
+
+**Display / orientation** (app-wide portrait lock via build, per-screen override on settings):
+
+```rust
+// 1. In sentinel.toml (or via prepare fn) set a default:
+//    [android]
+//    screen_orientation = "portrait"
+
+// 2. At runtime (requires `display` feature) — only allow rotation while
+//    the settings screen is visible:
+use mobile_sentinel::display::{set_requested_orientation, ScreenOrientation};
+
+set_requested_orientation(ScreenOrientation::Unspecified); // or FullSensor
+
+// ... later, on unmount / leaving settings:
+set_requested_orientation(ScreenOrientation::Portrait);
 ```
 
 **Scanner** (blocks until the user scans or cancels):

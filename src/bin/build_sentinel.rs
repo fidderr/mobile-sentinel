@@ -14,6 +14,7 @@
 //! activity = "com.example.MainActivity"  # required (or pass --activity)
 //! icon = "path/to/icon.webp"             # optional — copies to all mipmap densities
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
+//! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
 //! ```
 //!
 //! Trimming is structural and unconditional: only the capability modules a
@@ -53,10 +54,12 @@ fn main() {
     } else {
         println!("  Capabilities: {}", config.capabilities.join(", "));
     }
-    let injection = mobile_sentinel::prepare_android_project_with_capabilities(
+    let default_orient = config.default_screen_orientation.as_deref();
+    let injection = mobile_sentinel::prepare_android_project_with_capabilities_and_orientation(
         config.project_path.to_str().unwrap(),
         &config.activity,
         &config.capabilities,
+        default_orient,
     );
     if !injection.unknown.is_empty() {
         eprintln!(
@@ -113,6 +116,7 @@ struct Config {
     icon_path: Option<PathBuf>,
     asset_paths: Vec<PathBuf>,
     capabilities: Vec<String>,
+    default_screen_orientation: Option<String>,
 }
 
 fn load_config() -> Config {
@@ -137,6 +141,8 @@ fn load_config() -> Config {
         .filter(|p| p.exists())
         .collect();
 
+    let default_screen_orientation = toml.get("screen_orientation").cloned();
+
     // Capability resolution.
     //
     // When `--app <name>` is given (multi-consumer workspace), derive the
@@ -152,12 +158,12 @@ fn load_config() -> Config {
             let caps = read_app_cargo_capabilities(&app);
             if !caps.is_empty() {
                 eprintln!(
-                    "  Feature-derived capabilities (from apps/{app}/Cargo.toml): {}",
+                    "  Feature-derived capabilities (from {app}/Cargo.toml or similar): {}",
                     caps.join(", ")
                 );
             } else {
                 eprintln!(
-                    "  No mobile-sentinel features declared by apps/{app} — kernel-only build"
+                    "  No mobile-sentinel features declared by {app} (searched apps/{app}/ etc) — kernel-only build"
                 );
             }
             caps
@@ -180,6 +186,7 @@ fn load_config() -> Config {
         icon_path,
         asset_paths,
         capabilities,
+        default_screen_orientation,
     }
 }
 
@@ -284,7 +291,8 @@ fn collect_capability_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
 }
 
 /// Derive the capability ids a consumer enables by parsing its
-/// `apps/<app>/Cargo.toml` mobile-sentinel dependency `features = [...]`.
+/// Cargo.toml (searched in apps/<app>/, <app>/, ./ , ../ etc to support
+/// different workspace layouts) mobile-sentinel dependency `features = [...]`.
 ///
 /// This is the deterministic capability source for `--app` builds: it reads
 /// exactly what the app declares, independent of any build-script output
@@ -292,13 +300,26 @@ fn collect_capability_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
 /// target dir). The feature → capability-id mapping (and the `alarm-kit` /
 /// `firing` bundle expansion) lives in `registry::capabilities_for_features`.
 fn read_app_cargo_capabilities(app: &str) -> Vec<String> {
-    let path = PathBuf::from(format!("apps/{app}/Cargo.toml"));
-    let content = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    let features = parse_mobile_sentinel_features(&content);
-    mobile_sentinel::build::registry::capabilities_for_features(&features)
+    // Try several likely locations to support both "monorepo with apps/<name>/"
+    // layouts and flat sibling layouts (e.g. <name>/ + mobile-sentinel/ at same level),
+    // and invocation from either the workspace root or from inside the app dir.
+    let candidates = [
+        format!("apps/{app}/Cargo.toml"),
+        format!("{app}/Cargo.toml"),
+        "Cargo.toml".to_string(),
+        format!("../{app}/Cargo.toml"),
+    ];
+    for p in &candidates {
+        let path = PathBuf::from(p);
+        if let Ok(content) = fs::read_to_string(&path) {
+            let features = parse_mobile_sentinel_features(&content);
+            if !features.is_empty() {
+                return mobile_sentinel::build::registry::capabilities_for_features(&features);
+            }
+            // continue; an empty features list might be from a different toml
+        }
+    }
+    Vec::new()
 }
 
 /// Extract the `features = [...]` list from the `mobile-sentinel` dependency

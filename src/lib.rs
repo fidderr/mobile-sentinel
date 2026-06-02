@@ -225,7 +225,10 @@ pub use jobs::{
 };
 
 // Build helper for Android project preparation.
-pub use build::helper::{prepare_android_project, prepare_android_project_with_capabilities};
+pub use build::helper::{
+    prepare_android_project, prepare_android_project_with_capabilities,
+    prepare_android_project_with_capabilities_and_orientation,
+};
 
 // Capability registry — declarative manifest assembly for build_sentinel.
 pub use build::registry::{assemble, capability, Capability, ManifestInjection, CAPABILITIES};
