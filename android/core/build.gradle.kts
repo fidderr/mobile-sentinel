@@ -50,6 +50,18 @@ android {
         jvmTarget = "17"
     }
 
+    buildTypes {
+        release {
+            // Keep all sentinel classes/methods. Many are reached only via
+            // JNI (exact class+method names from Rust) or manifest components
+            // (activities, receivers, providers, initializers). Without this,
+            // R8 in the release AAB minifies them away, causing "could not load class"
+            // failures for permissions, overlay, scanner, etc. The consumer-rules.pro
+            // is merged by the consuming app during its release minify.
+            consumerProguardFiles("consumer-rules.pro")
+        }
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = false
         unitTests.isReturnDefaultValues = true
