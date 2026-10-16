@@ -5,8 +5,28 @@ use std::path::PathBuf;
 /// Get the app's internal files directory.
 /// On Android: calls Context.getFilesDir() via JNI.
 /// On other platforms: returns current directory.
+///
+/// The directory never changes during a process's life, so the first
+/// successful lookup is cached. Without the cache every call did a full JNI
+/// round trip (attach, new GlobalRef, two method calls, detach) — and callers
+/// such as `jobs_dir()` and pollers hit it many times a second.
 #[cfg(target_os = "android")]
 pub fn app_files_dir() -> PathBuf {
+    static CACHED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    if let Some(dir) = CACHED.get() {
+        return dir.clone();
+    }
+    let dir = lookup_app_files_dir();
+    // Don't cache the "." fallback (e.g. `:sentinel` before any Activity
+    // context exists); a later call may succeed.
+    if dir.as_path() != std::path::Path::new(".") {
+        let _ = CACHED.set(dir.clone());
+    }
+    dir
+}
+
+#[cfg(target_os = "android")]
+fn lookup_app_files_dir() -> PathBuf {
     use crate::platform::android::context::get_activity;
 
     // ndk_context only knows about the Activity in processes that
