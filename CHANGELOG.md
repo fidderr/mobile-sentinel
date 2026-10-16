@@ -11,6 +11,17 @@ change.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-16
+
+### Fixed
+
+- `build_sentinel` now removes `android:extractNativeLibs` instead of setting
+  it to `false` (AGP warned it "should not be specified" in source manifests;
+  for minSdk >= 23 AGP already defaults to not extracting).
+- The manifest attribute remover kept the attribute's value and closing quote
+  (`landscape"`), which would corrupt the manifest when replacing an existing
+  attribute such as `screenOrientation`.
+
 ## [0.2.0] - 2026-10-16
 
 Reliability release: a ringing alarm now survives OEMs that kill every app
@@ -124,6 +135,7 @@ as it stands today; subsequent releases will track changes against it.
 - **Documentation** — rewritten `README.md` and a complete API reference at
   `docs/API.md`.
 
-[Unreleased]: https://github.com/fidderr/mobile-sentinel/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/fidderr/mobile-sentinel/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/fidderr/mobile-sentinel/releases/tag/v0.2.1
 [0.2.0]: https://github.com/fidderr/mobile-sentinel/releases/tag/v0.2.0
 [0.1.4]: https://github.com/fidderr/mobile-sentinel/releases/tag/v0.1.4

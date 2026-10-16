@@ -356,9 +356,10 @@ fn add_activity_flags(project_path: &Path, activity_fqcn: &str) {
 ///
 /// Dioxus's generated manifest sets `android:extractNativeLibs="true"`, which
 /// makes the installer copy every `.so` out of the APK — the native code then
-/// sits on disk twice. With `false`, AGP stores the libraries uncompressed and
-/// 16 KB-page-aligned (AGP ≥ 8.5.1) and the system maps them in place. Play's
-/// download stays compressed either way.
+/// sits on disk twice. Without the attribute (AGP warns against setting it in
+/// source manifests), AGP defaults to not extracting for minSdk >= 23: it stores
+/// the libraries uncompressed and 16 KB-page-aligned (AGP ≥ 8.5.1) and the
+/// system maps them in place. Play's download stays compressed either way.
 fn keep_native_libs_in_apk(project_path: &Path) {
     let manifest_path = project_path.join("app/src/main/AndroidManifest.xml");
     let Ok(content) = fs::read_to_string(&manifest_path) else {
@@ -369,16 +370,16 @@ fn keep_native_libs_in_apk(project_path: &Path) {
         if let Err(e) = fs::write(&manifest_path, updated) {
             eprintln!("[mobile-sentinel] Failed to update manifest: {}", e);
         } else {
-            eprintln!("[mobile-sentinel] Set extractNativeLibs=false (load .so from APK)");
+            eprintln!("[mobile-sentinel] Removed extractNativeLibs (load .so from APK)");
         }
     }
 }
 
 fn disable_native_lib_extraction(manifest: &str) -> String {
-    manifest.replace(
-        "android:extractNativeLibs=\"true\"",
-        "android:extractNativeLibs=\"false\"",
-    )
+    // Remove the attribute rather than setting it to "false": AGP warns that
+    // it "should not be specified" in source manifests, and without it AGP
+    // already defaults to not extracting for minSdk >= 23.
+    remove_attr(manifest, "android:extractNativeLibs")
 }
 
 /// Remove an attribute like `android:foo="bar"` (and its trailing whitespace)
@@ -390,9 +391,12 @@ fn remove_attr(tag: &str, attr_name: &str) -> String {
     let mut i = 0usize;
     while i < tag.len() {
         if tag[i..].starts_with(&prefix) {
-            // skip until after the closing quote, plus trailing ws
-            if let Some(qrel) = tag[i..].find('"') {
-                let mut end = i + qrel + 1;
+            // Skip past the value's *closing* quote (searching after the
+            // prefix — the prefix itself ends with the opening quote), plus
+            // trailing whitespace.
+            let value_start = i + prefix.len();
+            if let Some(qrel) = tag[value_start..].find('"') {
+                let mut end = value_start + qrel + 1;
                 let bytes = tag.as_bytes();
                 while end < bytes.len() && bytes[end].is_ascii_whitespace() {
                     end += 1;
@@ -608,8 +612,12 @@ mod tests {
         let m = r#"<application android:hasCode="true"
         android:extractNativeLibs="true" android:label="x">"#;
         let out = disable_native_lib_extraction(m);
-        assert!(out.contains(r#"android:extractNativeLibs="false""#));
-        assert!(!out.contains(r#"android:extractNativeLibs="true""#));
+        assert!(!out.contains("extractNativeLibs"));
+        assert_eq!(
+            out,
+            "<application android:hasCode=\"true\"
+        android:label=\"x\">"
+        );
         // Idempotent, and a manifest without the attribute is untouched.
         assert_eq!(disable_native_lib_extraction(&out), out);
         assert_eq!(
@@ -677,6 +685,11 @@ mod tests {
         let with_existing = r#"<activity android:name="dev.example.Main" android:screenOrientation="landscape" android:exported="true">"#;
         let cleaned2 = remove_attr(with_existing, "android:screenOrientation");
         assert!(!cleaned2.contains("screenOrientation"));
+        // The whole attribute goes, value and closing quote included.
+        assert_eq!(
+            cleaned2,
+            r#"<activity android:name="dev.example.Main" android:exported="true">"#
+        );
 
         let inserted =
             insert_attr_before_close(&cleaned2, r#"android:screenOrientation="portrait""#);
