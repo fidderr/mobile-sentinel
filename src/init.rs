@@ -13,6 +13,10 @@ pub struct InitConfig {
     pub logger: bool,
     /// Install SIGABRT handler to prevent crash-loop throttling. Default: true.
     pub crash_loop_mitigation: bool,
+    /// End the process with `_exit` when the UI framework calls `exit()`,
+    /// skipping C/C++ static destructors. Default: true. See
+    /// `install_clean_process_exit`.
+    pub clean_process_exit: bool,
     /// Log tag for Android logcat. Default: "MobileSentinel".
     pub log_tag: String,
     /// Maximum log level. Default: Debug.
@@ -24,6 +28,7 @@ impl Default for InitConfig {
         Self {
             logger: true,
             crash_loop_mitigation: true,
+            clean_process_exit: true,
             log_tag: "MobileSentinel".to_string(),
             log_level: log::LevelFilter::Debug,
         }
@@ -46,6 +51,9 @@ pub fn init(config: InitConfig) {
         }
         if config.crash_loop_mitigation {
             install_sigabrt_handler();
+        }
+        if config.clean_process_exit {
+            install_clean_process_exit();
         }
         log::info!("[mobile-sentinel] init complete");
     }
@@ -74,6 +82,29 @@ fn install_sigabrt_handler() {
     log::info!("[mobile-sentinel] SIGABRT handler installed (crash-loop mitigation)");
 }
 
+/// Make a framework-initiated `exit()` end the process immediately.
+///
+/// On Android, `tao` (the windowing layer under Dioxus/Tauri) ends its event
+/// loop with `std::process::exit()` when the activity is destroyed. `exit()`
+/// runs every library's static destructors while JNI/WebView/worker threads
+/// are still alive; one of them then locks a just-destroyed mutex and libc
+/// aborts ("FORTIFY: pthread_mutex_lock called on a destroyed mutex"). The
+/// process is ending anyway, so an `atexit` handler that calls `_exit(0)` —
+/// handlers run newest-first, before destructors registered at library load —
+/// ends it cleanly instead of as a native crash.
+#[cfg(target_os = "android")]
+fn install_clean_process_exit() {
+    extern "C" fn fast_exit() {
+        unsafe { libc::_exit(0) }
+    }
+    let rc = unsafe { libc::atexit(fast_exit) };
+    if rc == 0 {
+        log::info!("[mobile-sentinel] clean process exit installed");
+    } else {
+        log::warn!("[mobile-sentinel] atexit registration failed (rc={rc})");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +119,7 @@ mod tests {
         let config = InitConfig::default();
         assert!(config.logger);
         assert!(config.crash_loop_mitigation);
+        assert!(config.clean_process_exit);
         assert_eq!(config.log_tag, "MobileSentinel");
         assert_eq!(config.log_level, log::LevelFilter::Debug);
     }
