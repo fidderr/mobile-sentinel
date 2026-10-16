@@ -49,7 +49,7 @@ pub struct InitConfig {
     pub crash_loop_mitigation: bool,  // SIGABRT → _exit(0). Default: true
     pub clean_process_exit: bool,     // framework exit() → _exit(0), no destructor race. Default: true
     pub log_tag: String,              // Default: "MobileSentinel"
-    pub log_level: log::LevelFilter,  // Default: Debug
+    pub log_level: log::LevelFilter,  // Default: Debug (debug builds) / Info (release)
 }
 ```
 

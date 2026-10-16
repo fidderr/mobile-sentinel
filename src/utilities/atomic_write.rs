@@ -1,11 +1,12 @@
 //! Crash-safe, reader-safe file replacement shared by the on-disk stores.
 //!
 //! A file is written to a uniquely named sibling temp file, flushed to disk,
-//! then renamed over the destination. Because the rename is atomic, a reader
-//! (including the `:sentinel` process) observes either the complete previous
-//! contents or the complete new contents, never a partial write. The temp name
-//! embeds the process id and a per-process counter so concurrent writers never
-//! clobber each other's temp file.
+//! then renamed over the destination. On Android/Linux `rename(2)` is atomic,
+//! so a reader (including the `:sentinel` process) observes either the complete
+//! previous contents or the complete new contents, never a partial write. (On
+//! Windows dev hosts a concurrent reader may briefly find no file.) The temp
+//! name embeds the process id and a per-process counter so concurrent writers
+//! never clobber each other's temp file.
 
 use std::fs;
 use std::io::{self, Write};
@@ -97,7 +98,15 @@ mod tests {
                 let stop = stop.clone();
                 std::thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
-                        write_atomic(&p, &payload).unwrap();
+                        match write_atomic(&p, &payload) {
+                            Ok(()) => {}
+                            // Windows refuses to rename over a file another
+                            // thread has open; POSIX (Android) never does.
+                            Err(e)
+                                if cfg!(windows) && e.kind() == io::ErrorKind::PermissionDenied => {
+                            }
+                            Err(e) => panic!("write failed: {e}"),
+                        }
                     }
                 })
             })
@@ -110,8 +119,16 @@ mod tests {
                     "partial read: {} bytes",
                     got.len()
                 ),
-                // On Windows a rename can briefly deny a concurrent open.
-                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+                // Windows (dev hosts only) replaces files non-atomically for
+                // concurrent readers: an open can briefly be denied or find no
+                // file. Android/POSIX rename(2) never does either. Partial
+                // content is still checked on every platform.
+                Err(e)
+                    if cfg!(windows)
+                        && matches!(
+                            e.kind(),
+                            io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
+                        ) => {}
                 Err(e) => panic!("unexpected read error: {e}"),
             }
         }

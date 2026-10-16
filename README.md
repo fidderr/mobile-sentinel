@@ -255,7 +255,7 @@ pub struct InitConfig {
     pub crash_loop_mitigation: bool,  // install SIGABRT → _exit(0) handler. Default: true
     pub clean_process_exit: bool,     // framework exit() → _exit(0), skips static destructors. Default: true
     pub log_tag: String,              // logcat tag. Default: "MobileSentinel"
-    pub log_level: log::LevelFilter,  // max level. Default: Debug
+    pub log_level: log::LevelFilter,  // max level. Default: Debug (debug builds) / Info (release)
 }
 ```
 

@@ -19,7 +19,7 @@ pub struct InitConfig {
     pub clean_process_exit: bool,
     /// Log tag for Android logcat. Default: "MobileSentinel".
     pub log_tag: String,
-    /// Maximum log level. Default: Debug.
+    /// Maximum log level. Default: Debug in debug builds, Info in release.
     pub log_level: log::LevelFilter,
 }
 
@@ -30,7 +30,13 @@ impl Default for InitConfig {
             crash_loop_mitigation: true,
             clean_process_exit: true,
             log_tag: "MobileSentinel".to_string(),
-            log_level: log::LevelFilter::Debug,
+            // Verbose in debug builds; release keeps logcat (and the work of
+            // formatting log lines) to what matters.
+            log_level: if cfg!(debug_assertions) {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            },
         }
     }
 }
@@ -121,6 +127,11 @@ mod tests {
         assert!(config.crash_loop_mitigation);
         assert!(config.clean_process_exit);
         assert_eq!(config.log_tag, "MobileSentinel");
-        assert_eq!(config.log_level, log::LevelFilter::Debug);
+        let expected = if cfg!(debug_assertions) {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        };
+        assert_eq!(config.log_level, expected);
     }
 }
