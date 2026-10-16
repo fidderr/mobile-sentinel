@@ -1,6 +1,13 @@
 package com.mobilesentinel
 
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
 import java.io.File
@@ -73,8 +80,7 @@ object SentinelSharePrimitives {
     fun shareFile(path: String, mimeType: String): Boolean {
         val context = SentinelPrimitives.getAppContext() ?: return false
         return try {
-            val authority = "${context.packageName}.fileprovider"
-            val uri = FileProvider.getUriForFile(context, authority, File(path))
+            val uri = uriFor(context, File(path))
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = mimeType
                 putExtra(Intent.EXTRA_STREAM, uri)
@@ -90,4 +96,83 @@ object SentinelSharePrimitives {
             false
         }
     }
+
+    /**
+     * A content:// URI for [file]: through the share capability's own
+     * provider ("<package>.sentinelshareprovider", declared when the feature
+     * is enabled), falling back to a host-declared "<package>.fileprovider".
+     */
+    private fun uriFor(context: Context, file: File): Uri {
+        return try {
+            FileProvider.getUriForFile(context, "${context.packageName}.sentinelshareprovider", file)
+        } catch (e: IllegalArgumentException) {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        }
+    }
+
+    /**
+     * Open a file in the app the user picks for its type (ACTION_VIEW), e.g.
+     * a PDF viewer.
+     * @return true if an app was launched, false if none can open it.
+     */
+    @JvmStatic
+    fun openFile(path: String, mimeType: String): Boolean {
+        val context = SentinelPrimitives.getAppContext() ?: return false
+        return try {
+            val uri = uriFor(context, File(path))
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.i(TAG, "openFile: no app for $mimeType")
+            false
+        } catch (e: Throwable) {
+            Log.w(TAG, "openFile($path): ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Copy a file into the public Downloads folder under [name].
+     * @return a human-readable location ("Download/name"), or "" on failure.
+     */
+    @JvmStatic
+    fun saveToDownloads(path: String, name: String, mimeType: String): String {
+        val context = SentinelPrimitives.getAppContext() ?: return ""
+        val src = File(path)
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val item = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return ""
+                resolver.openOutputStream(item)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                } ?: return ""
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(item, values, null, null)
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                src.copyTo(File(dir, name), overwrite = false)
+            }
+            "Download/$name"
+        } catch (e: Throwable) {
+            Log.w(TAG, "saveToDownloads($path): ${e.message}", e)
+            ""
+        }
+    }
 }
+
+/** The share capability's own FileProvider (a subclass, so it can coexist
+ *  with the camera capability's provider in one manifest). */
+class SentinelShareFileProvider : FileProvider()

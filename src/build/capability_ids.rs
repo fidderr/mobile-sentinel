@@ -51,6 +51,7 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "dismiss_guard",
     "notifications",
     "file_system",
+    "recorder",
     "accessibility",
     // Firing sub-features — each its own per-feature Kotlin/Gradle module
     // under android/caps/<id> (no shared "alarm runtime" bundle).

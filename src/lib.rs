@@ -122,6 +122,8 @@ pub use features::overlay;
 pub use features::permissions;
 #[cfg(feature = "phone")]
 pub use features::phone;
+#[cfg(feature = "recorder")]
+pub use features::recorder;
 #[cfg(feature = "scanner")]
 pub use features::scanner;
 #[cfg(feature = "screen_pin")]

@@ -1,6 +1,6 @@
 [package]
 name = "mobile-sentinel"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 rust-version = "1.76.0"
 description = "Rust-first Android SDK — write mobile app logic in Rust, Kotlin is just the thin JNI layer"
@@ -58,11 +58,11 @@ screen_pin = []
 # Foregrounding — finish the app activity.
 foregrounding = []
 # Native media/file picker (file import).
-media_picker = []
+media_picker = ["dep:rfd"]
 # Clipboard get/set.
 clipboard = []
 # System share sheet.
-share = []
+share = ["dep:opener", "dep:dirs"]
 # Encrypted key/value storage.
 secure_storage = []
 # SMS sending (SEND_SMS).
@@ -90,6 +90,9 @@ dismiss_guard = ["screen_pin"]
 notifications = []
 # Bundled-asset copy/list helpers.
 file_system = []
+# Microphone recording (voice notes). Android: MediaRecorder (RECORD_AUDIO);
+# Windows: cpal + hound (WAV).
+recorder = ["dep:cpal", "dep:hound"]
 # Accessibility-service grant flow (ultra-protection kiosk relaunch). The
 # SentinelAccessibilityService manifest component + Rust grant-flow helpers
 # ship ONLY when this feature is enabled. POLICY-SENSITIVE on Google Play.
@@ -169,6 +172,14 @@ jni = "0.21"
 ndk-context = "0.1"
 android_logger = "0.14"
 libc = "0.2"
+
+# Windows backends, each pulled in only by the feature that needs it.
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.15", optional = true }
+opener = { version = "0.8", optional = true }
+dirs = { version = "6", optional = true }
+cpal = { version = "0.16", optional = true }
+hound = { version = "3.5", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

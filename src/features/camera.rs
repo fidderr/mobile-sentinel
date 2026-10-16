@@ -49,6 +49,27 @@ pub fn capture_photo() -> Result<String, SentinelError> {
     }
 }
 
+/// Record a video with the system camera app, returning the absolute path to
+/// the saved `.mp4` in the app's internal storage.
+///
+/// Same contract as [`capture_photo`]: blocks until the user finishes or
+/// cancels; a cancel returns [`SentinelError::PlatformUnsupported`].
+pub fn capture_video() -> Result<String, SentinelError> {
+    #[cfg(target_os = "android")]
+    {
+        let path = android::capture_video();
+        if path.is_empty() {
+            Err(SentinelError::unavailable("camera::capture_video"))
+        } else {
+            Ok(path)
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Err(SentinelError::unavailable("camera::capture_video"))
+    }
+}
+
 /// `true` if photo capture is backed on this platform/build.
 pub fn is_available() -> bool {
     cfg!(target_os = "android")
@@ -64,13 +85,22 @@ mod android {
     /// Blocking photo capture from the app context. Returns the absolute path
     /// to the saved JPEG, or empty on cancel/timeout.
     pub(super) fn capture_photo() -> String {
+        call_capture("captureFromAppContext", 120)
+    }
+
+    /// Blocking video capture. Returns the `.mp4` path, or empty.
+    pub(super) fn capture_video() -> String {
+        call_capture("captureVideoFromAppContext", 600)
+    }
+
+    fn call_capture(method: &str, timeout_secs: i64) -> String {
         with_jni_class(HELPER, String::new(), |env, class| {
             let res = env
                 .call_static_method(
                     class,
-                    "captureFromAppContext",
+                    method,
                     "(J)Ljava/lang/String;",
-                    &[JValue::Long(120)],
+                    &[JValue::Long(timeout_secs)],
                 )
                 .ok()?;
             let obj = res.l().ok()?;

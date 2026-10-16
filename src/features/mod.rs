@@ -85,6 +85,9 @@ pub mod permissions;
 /// Phone dial / call state. Gated behind `phone`.
 #[cfg(feature = "phone")]
 pub mod phone;
+/// Microphone recording (voice notes). Gated behind `recorder`.
+#[cfg(feature = "recorder")]
+pub mod recorder;
 /// Barcode / QR scanning. Gated behind `scanner`.
 #[cfg(feature = "scanner")]
 pub mod scanner;

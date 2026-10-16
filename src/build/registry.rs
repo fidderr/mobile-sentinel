@@ -278,6 +278,17 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &["SentinelAudioPreviewPrimitives.kt"],
     },
     Capability {
+        id: "recorder",
+        description: "Microphone recording for voice notes (MediaRecorder, AAC .m4a).",
+        permissions: &[Permission::new("android.permission.RECORD_AUDIO")],
+        features: &[Feature {
+            name: "android.hardware.microphone",
+        }],
+        components: "",
+        policy_sensitive: false,
+        kotlin_sources: &["SentinelRecorderPrimitives.kt"],
+    },
+    Capability {
         id: "haptics",
         description: "Vibration / haptic feedback (VIBRATE).",
         permissions: &[Permission::new("android.permission.VIBRATE")],
@@ -372,10 +383,25 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "share",
-        description: "System share sheet.",
-        permissions: NO_PERMS,
+        description: "System share sheet, open-with, and save to Downloads.",
+        // Saving to the public Downloads folder needs this only before
+        // Android 10 (API 29); from then on MediaStore needs no permission.
+        permissions: &[Permission {
+            name: "android.permission.WRITE_EXTERNAL_STORAGE",
+            max_sdk: Some(28),
+        }],
         features: NO_FEATURES,
-        components: "",
+        // Its own FileProvider subclass + authority, so it can sit next to
+        // the camera capability's provider in the same manifest.
+        components: r#"        <provider
+            android:name="com.mobilesentinel.SentinelShareFileProvider"
+            android:authorities="${applicationId}.sentinelshareprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/sentinel_share_paths" />
+        </provider>"#,
         policy_sensitive: false,
         kotlin_sources: &["SentinelSharePrimitives.kt"],
     },
@@ -727,7 +753,12 @@ fn parse_feature_edges(cargo_toml: &str) -> BTreeMap<String, Vec<String>> {
 
         if depth <= 0 {
             if let Some(nm) = name.take() {
-                let deps = extract_quoted(&buf);
+                // `dep:x` (and `x/feat`) entries switch on optional crate
+                // dependencies, not features: they are not part of the graph.
+                let deps: Vec<String> = extract_quoted(&buf)
+                    .into_iter()
+                    .filter(|d| !d.starts_with("dep:") && !d.contains('/'))
+                    .collect();
                 if !deps.is_empty() {
                     map.insert(nm, deps);
                 }
@@ -1186,6 +1217,42 @@ mod tests {
                 assert!(known, "feature graph references unknown feature `{dep}`");
             }
         }
+    }
+
+    /// Everything an injection adds, as one string, for `contains` checks.
+    fn xml(inj: &ManifestInjection) -> String {
+        let mut s = inj.manifest_lines.join("\n");
+        s.push('\n');
+        s.push_str(&inj.application_components.join("\n"));
+        s
+    }
+
+    #[test]
+    fn optional_dependency_entries_are_not_feature_edges() {
+        let toml = "[features]\nmedia_picker = [\"dep:rfd\"]\nrecorder = [\"dep:cpal\", \"dep:hound\"]\nfiring = [\"wake-lock\", \"serde/std\"]\n\n[dependencies]\n";
+        let edges = parse_feature_edges(toml);
+        assert!(
+            !edges.contains_key("media_picker"),
+            "only dep: entries → no edges"
+        );
+        assert!(!edges.contains_key("recorder"));
+        assert_eq!(edges.get("firing"), Some(&vec!["wake-lock".to_string()]));
+    }
+
+    #[test]
+    fn recorder_declares_record_audio_only_when_enabled() {
+        assert!(xml(&assemble(&["recorder"])).contains("android.permission.RECORD_AUDIO"));
+        assert!(!xml(&assemble(&["camera", "audio"])).contains("RECORD_AUDIO"));
+        assert!(enabled_modules(&["recorder"]).contains(&"recorder"));
+    }
+
+    #[test]
+    fn share_provider_coexists_with_camera_provider() {
+        let both = xml(&assemble(&["share", "camera"]));
+        assert!(both.contains("com.mobilesentinel.SentinelShareFileProvider"));
+        assert!(both.contains("androidx.core.content.FileProvider"));
+        assert!(both.contains(".sentinelshareprovider"));
+        assert!(both.contains(".sentinelfileprovider"));
     }
 
     #[test]

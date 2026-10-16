@@ -37,7 +37,12 @@ class SentinelCameraActivity : Activity() {
         // Don't relaunch a kiosk over the system camera app.
         SentinelActivityTracker.suppressRelaunchFor(120_000)
         try {
-            val capture = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+            val action = if (intent.getBooleanExtra(EXTRA_VIDEO, false)) {
+                MediaStore.ACTION_VIDEO_CAPTURE
+            } else {
+                MediaStore.ACTION_IMAGE_CAPTURE
+            }
+            val capture = Intent(action).apply {
                 putExtra(MediaStore.EXTRA_OUTPUT, outputUri)
                 addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }
@@ -52,6 +57,21 @@ class SentinelCameraActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE) {
+            // Some camera apps ignore EXTRA_OUTPUT for video and hand back
+            // their own URI instead: copy it into our target file.
+            val returned = data?.data
+            val target: Uri? = intent.getParcelableExtra(EXTRA_OUTPUT_URI)
+            if (resultCode == RESULT_OK && returned != null && target != null && returned != target) {
+                try {
+                    contentResolver.openInputStream(returned)?.use { input ->
+                        contentResolver.openOutputStream(target, "w")?.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "copy of returned capture failed: ${e.message}")
+                }
+            }
             SentinelCameraHelper.deliverResult(resultCode == RESULT_OK)
             finish()
         }
@@ -61,5 +81,7 @@ class SentinelCameraActivity : Activity() {
         private const val TAG = "MobileSentinel.CameraAct"
         private const val REQUEST_CODE = 9030
         const val EXTRA_OUTPUT_URI = "com.mobilesentinel.EXTRA_OUTPUT_URI"
+        /** true = record a video (ACTION_VIDEO_CAPTURE) instead of a photo. */
+        const val EXTRA_VIDEO = "com.mobilesentinel.EXTRA_VIDEO"
     }
 }

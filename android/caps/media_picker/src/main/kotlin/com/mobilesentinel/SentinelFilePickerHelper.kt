@@ -4,8 +4,11 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -19,18 +22,31 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class SentinelFilePickerActivity : Activity() {
 
+    /** True when launched by `pickFilesInfoBlocking` (multi-MIME / multi-select). */
+    private var infoMode = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val mimeType = intent.getStringExtra(EXTRA_MIME_TYPE) ?: "application/octet-stream"
+        val mimes = intent.getStringArrayExtra(EXTRA_MIMES)
+        infoMode = mimes != null
+        val multiple = intent.getBooleanExtra(EXTRA_MULTIPLE, false)
         val pickIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = mimeType
+            if (mimes != null) {
+                type = if (mimes.size == 1) mimes[0] else "*/*"
+                if (mimes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimes)
+                if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            } else {
+                type = mimeType
+            }
         }
         try {
             startActivityForResult(pickIntent, REQUEST_CODE)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch file picker: ${e.message}")
-            SentinelFilePickerHelper.deliverResult(null)
+            if (infoMode) SentinelFilePickerHelper.deliverResults(emptyList())
+            else SentinelFilePickerHelper.deliverResult(null)
             finish()
         }
     }
@@ -38,8 +54,21 @@ class SentinelFilePickerActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE) {
-            val uri = if (resultCode == RESULT_OK) data?.data else null
-            SentinelFilePickerHelper.deliverResult(uri)
+            if (infoMode) {
+                val uris = mutableListOf<Uri>()
+                if (resultCode == RESULT_OK && data != null) {
+                    val clip = data.clipData
+                    if (clip != null) {
+                        for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris.add(it) }
+                    } else {
+                        data.data?.let { uris.add(it) }
+                    }
+                }
+                SentinelFilePickerHelper.deliverResults(uris)
+            } else {
+                val uri = if (resultCode == RESULT_OK) data?.data else null
+                SentinelFilePickerHelper.deliverResult(uri)
+            }
             finish()
         }
     }
@@ -48,6 +77,8 @@ class SentinelFilePickerActivity : Activity() {
         private const val TAG = "MobileSentinel.FilePicker"
         private const val REQUEST_CODE = 9020
         const val EXTRA_MIME_TYPE = "com.mobilesentinel.EXTRA_MIME_TYPE"
+        const val EXTRA_MIMES = "com.mobilesentinel.EXTRA_MIMES"
+        const val EXTRA_MULTIPLE = "com.mobilesentinel.EXTRA_MULTIPLE"
     }
 }
 
@@ -110,6 +141,79 @@ object SentinelFilePickerHelper {
             Log.e(TAG, "Failed to copy picked file: ${e.message}")
             ""
         }
+    }
+
+    private var infoLatch: CountDownLatch? = null
+    private val infoResult = AtomicReference<List<Uri>>(emptyList())
+
+    /**
+     * Launch the picker for any of `mimesCsv` (comma separated, e.g.
+     * "image/star,video/star"), optionally multi-select, and block until done.
+     * Each picked file is copied into the import dir. MUST be called from a
+     * background thread.
+     * @return JSON array of {path, name, mime, size}; "[]" on cancel/timeout.
+     */
+    @JvmStatic
+    fun pickFilesInfoBlocking(
+        activity: Activity,
+        mimesCsv: String,
+        multiple: Boolean,
+        timeoutSeconds: Long = 300
+    ): String {
+        infoResult.set(emptyList())
+        infoLatch = CountDownLatch(1)
+        val mimes = mimesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            .ifEmpty { listOf("*/*") }.toTypedArray()
+        val intent = Intent(activity, SentinelFilePickerActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            putExtra(SentinelFilePickerActivity.EXTRA_MIMES, mimes)
+            putExtra(SentinelFilePickerActivity.EXTRA_MULTIPLE, multiple)
+        }
+        activity.startActivity(intent)
+        Log.i(TAG, "File picker launched (mimes=$mimesCsv, multiple=$multiple)")
+
+        val completed = infoLatch?.await(timeoutSeconds, TimeUnit.SECONDS) ?: false
+        if (!completed) {
+            Log.w(TAG, "File picker timed out after ${timeoutSeconds}s")
+            return "[]"
+        }
+        val out = JSONArray()
+        for (uri in infoResult.get()) {
+            try {
+                out.put(copyWithInfo(activity, uri))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to copy picked file $uri: ${e.message}")
+            }
+        }
+        return out.toString()
+    }
+
+    /** Called by SentinelFilePickerActivity in info mode. */
+    @JvmStatic
+    fun deliverResults(uris: List<Uri>) {
+        infoResult.set(uris)
+        Log.i(TAG, "Files picked: ${uris.size}")
+        infoLatch?.countDown()
+    }
+
+    /** Copies `uri` into the import dir and describes it (original name kept). */
+    private fun copyWithInfo(activity: Activity, uri: Uri): JSONObject {
+        val resolver = activity.contentResolver
+        var name: String? = null
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) name = c.getString(idx)
+            }
+        }
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        val path = copyToInternal(activity, uri)
+        val file = File(path)
+        return JSONObject()
+            .put("path", path)
+            .put("name", name ?: file.name)
+            .put("mime", mime)
+            .put("size", file.length())
     }
 
     /**

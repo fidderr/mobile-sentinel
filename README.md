@@ -194,6 +194,12 @@ let value = mobile_sentinel::scanner::scan()?;
 
 // `media_picker` — use this instead of <input type="file"> in a WebView
 let path = mobile_sentinel::media_picker::pick_file(&["audio/*"])?;
+// ... or with original names, several types, multi-select (also on Windows)
+let files = mobile_sentinel::media_picker::pick_files(&["image/*", "video/*"], true)?;
+
+// `recorder` — voice notes (Android + Windows)
+mobile_sentinel::recorder::start(&recordings_dir)?;
+let note = mobile_sentinel::recorder::stop()?; // Recording { path, duration_ms }
 
 // `audio`
 let handle = mobile_sentinel::audio::play("/path/to/sound.mp3", /* looping */ false)?;
@@ -378,6 +384,17 @@ This is what lets the recurrence engine, snooze policy, state store, recipe
 engine, and AlarmKit be unit- and property-tested on your dev machine with no
 device attached. An iOS backend can later implement `FiringSink` and the
 capability JNI seams without consumer changes.
+
+**Windows** has real backends for the capabilities a desktop app needs, each
+pulled in only by its feature:
+
+| Capability | Windows backend |
+|---|---|
+| `media_picker::pick_files` | native file dialog (`rfd`) |
+| `recorder` | microphone via WASAPI (`cpal`), saved as WAV (`hound`) |
+| `share::open` / `share::save_to_downloads` | default program (`opener`) / Downloads folder |
+
+Everything else returns the same host fallback as above.
 
 ## Errors
 

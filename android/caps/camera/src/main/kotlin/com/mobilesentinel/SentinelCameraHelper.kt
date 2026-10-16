@@ -38,16 +38,28 @@ object SentinelCameraHelper {
      *   cancel / failure / timeout.
      */
     @JvmStatic
-    fun captureFromAppContext(timeoutSeconds: Long = 120): String {
+    fun captureFromAppContext(timeoutSeconds: Long = 120): String =
+        capture(timeoutSeconds, video = false)
+
+    /**
+     * Record a video via the system camera app (`ACTION_VIDEO_CAPTURE`) and
+     * block until done. Same contract as [captureFromAppContext]; the result
+     * is an `.mp4` path.
+     */
+    @JvmStatic
+    fun captureVideoFromAppContext(timeoutSeconds: Long = 600): String =
+        capture(timeoutSeconds, video = true)
+
+    private fun capture(timeoutSeconds: Long, video: Boolean): String {
         val ctx = SentinelPrimitives.getAppContext()
             ?: run {
-                Log.e(TAG, "captureFromAppContext: no appContext")
+                Log.e(TAG, "capture: no appContext")
                 return ""
             }
 
         // Pre-create the destination file.
         val dir = File(ctx.filesDir, CAPTURE_DIR).apply { mkdirs() }
-        val dest = File(dir, "${UUID.randomUUID()}.jpg")
+        val dest = File(dir, "${UUID.randomUUID()}.${if (video) "mp4" else "jpg"}")
         val authority = "${ctx.packageName}.sentinelfileprovider"
         val uri = try {
             FileProvider.getUriForFile(ctx, authority, dest)
@@ -67,6 +79,7 @@ object SentinelCameraHelper {
             SentinelCameraActivity::class.java
         ).apply {
             putExtra(SentinelCameraActivity.EXTRA_OUTPUT_URI, uri)
+            putExtra(SentinelCameraActivity.EXTRA_VIDEO, video)
             if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         try {

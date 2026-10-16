@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider paths for the share capability: lets share::file / share::open
+    hand files from the app's private storage to another app through a
+    content:// URI (read-only, granted per intent).
+-->
+<paths>
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+</paths>

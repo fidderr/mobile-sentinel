@@ -11,6 +11,38 @@ change.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-16
+
+Media capabilities for messenger-style apps, and the first Windows backends.
+Purely additive: no existing function, feature or manifest output changes
+(an app with the same features gets a byte-identical manifest).
+
+### Added
+
+- `media_picker::pick_files(mimes, multiple)` → `Vec<PickedFile{path, name,
+  mime, size}>`: keeps the original file name, supports several MIME types
+  and multi-select. Android (new `pickFilesInfoBlocking`) and **Windows**
+  (native dialog via `rfd`).
+- `camera::capture_video()` (Android): record with the system camera app,
+  returns an `.mp4` path. Copes with camera apps that ignore `EXTRA_OUTPUT`.
+- New `recorder` capability (voice notes): `start(dir)`, `level()`,
+  `is_recording()`, `stop() -> Recording{path, duration_ms}`, `cancel()`,
+  `has_permission()`, `request_permission()`. Android: `MediaRecorder`
+  (AAC `.m4a`, declares `RECORD_AUDIO`). **Windows**: `cpal` + `hound` (WAV).
+- `share::open(path, mime)` (Android `ACTION_VIEW`, Windows default program)
+  and `share::save_to_downloads(path, name, mime)` (Android MediaStore
+  Downloads, Windows Downloads folder).
+- The `share` capability now declares its own FileProvider
+  (`<package>.sentinelshareprovider`, subclass so it coexists with the
+  camera provider), so `share::file` works without host setup. It also
+  declares `WRITE_EXTERNAL_STORAGE` with `maxSdkVersion=28` for saving to
+  Downloads on Android 9 and older.
+
+### Fixed
+
+- The build registry's feature-graph parser treated `dep:` entries in
+  `[features]` as features.
+
 ## [0.2.1] - 2026-10-16
 
 ### Fixed
