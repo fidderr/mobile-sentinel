@@ -32,11 +32,28 @@ object SentinelExactAlarmPrimitives {
                 intent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
+            val isWatchdog = id.endsWith(SentinelAlarmReceiver.WATCHDOG_SUFFIX)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
                 Log.w(TAG, "scheduleExactAlarm: missing SCHEDULE_EXACT_ALARM permission, falling back to inexact")
                 am.set(AlarmManager.RTC_WAKEUP, targetTimeMs, pi)
-            } else {
+            } else if (isWatchdog) {
+                // Internal re-arm while ringing: exact but not user-visible
+                // (setAlarmClock would flash the status-bar alarm icon).
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, targetTimeMs, pi)
+            } else {
+                // A real, user-facing alarm: setAlarmClock is the API Android
+                // reserves for alarm clocks — exempt from Doze/app-standby
+                // deferral, most robust against OEM battery savers, and shown
+                // as the "next alarm" to the user and system.
+                val showIntent = c.packageManager.getLaunchIntentForPackage(c.packageName)?.let {
+                    android.app.PendingIntent.getActivity(
+                        c,
+                        0,
+                        it,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+                    )
+                }
+                am.setAlarmClock(AlarmManager.AlarmClockInfo(targetTimeMs, showIntent), pi)
             }
             true
         } catch (e: Throwable) {
