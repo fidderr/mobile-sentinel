@@ -244,6 +244,19 @@ impl<T: Stateful> StateStore<T> {
         Ok(out)
     }
 
+    /// Cheap change marker: the store directory's modification time.
+    ///
+    /// Every [`write`](Self::write) renames a file into the directory and
+    /// every [`delete`](Self::delete) removes one, which updates the
+    /// directory's mtime — so callers that poll for changes (e.g. a UI
+    /// waiting for an alarm to start firing) can compare markers and skip
+    /// re-reading every record when nothing changed. Costs one `stat`.
+    /// `None` while the directory doesn't exist yet. Pollers should still
+    /// re-read occasionally in case the filesystem's mtime is coarse.
+    pub fn change_marker(&self) -> Option<std::time::SystemTime> {
+        fs::metadata(&self.root).and_then(|m| m.modified()).ok()
+    }
+
     /// Number of records currently persisted.
     pub fn count(&self) -> Result<usize, StoreError> {
         Ok(self.enumerate_all()?.len())
@@ -352,6 +365,27 @@ mod tests {
         store.delete(&InstanceId::new("a")).unwrap();
         store.delete(&InstanceId::new("a")).unwrap();
         assert!(!store.exists(&InstanceId::new("a")));
+    }
+
+    #[test]
+    fn change_marker_moves_on_write_and_delete() {
+        let dir = TempDir::new().unwrap();
+        let store: StateStore<Note> = StateStore::new(dir.path().join("s"));
+        assert_eq!(store.change_marker(), None);
+
+        store.write(note("a", "1")).unwrap();
+        let m1 = store.change_marker().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        store.write(note("a", "2")).unwrap();
+        let m2 = store.change_marker().unwrap();
+        assert!(m2 > m1, "write must move the marker");
+
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        store.delete(&InstanceId::new("a")).unwrap();
+        assert!(
+            store.change_marker().unwrap() > m2,
+            "delete must move the marker"
+        );
     }
 
     #[test]
