@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, hardening]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+
+  feature-matrix:
+    name: each capability alone
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - scanner
+          - camera
+          - haptics
+          - audio
+          - overlay
+          - permissions
+          - sensors
+          - torch
+          - display
+          - battery
+          - screen_pin
+          - foregrounding
+          - media_picker
+          - clipboard
+          - share
+          - secure_storage
+          - sms
+          - phone
+          - network
+          - location
+          - maps
+          - biometric
+          - device_admin
+          - contacts
+          - calendar
+          - dismiss_guard
+          - notifications
+          - file_system
+          - accessibility
+          - state-store
+          - sound-library
+          - jobs
+          - recipes
+          - alarm-kit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --no-default-features --features ${{ matrix.feature }}
+
+  android:
+    name: android cross-check + kotlin modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --target aarch64-linux-android --all-features
