@@ -294,6 +294,11 @@ impl AlarmKit {
     /// occurrence for recurring alarms, and deactivates the sentinel job
     /// so the job guardian stops polling.
     ///
+    /// If the alarm has challenges and is currently firing, this returns
+    /// `Err(AlarmKitError::Recipe(RecipeError::ChallengesUnsolved(_)))` until
+    /// [`Self::mark_solved`] has been called. The sentinel job is left
+    /// active in that case.
+    ///
     /// The job is *deactivated* (reset to Pending), not removed: the job
     /// file must survive so a future fire — the next occurrence of a
     /// recurring alarm — can re-activate the same job. The file is only

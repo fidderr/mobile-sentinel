@@ -52,6 +52,10 @@ pub enum RecipeError {
     /// an Idle instance).
     #[error("illegal transition: {message}")]
     IllegalTransition { message: String },
+    /// A firing instance with a challenge gate was dismissed before the
+    /// gate was marked solved (`AlarmKit::mark_solved`).
+    #[error("challenges not solved for instance {0}")]
+    ChallengesUnsolved(InstanceId),
     /// Recipe-defined error.
     #[error("recipe error: {0}")]
     Other(String),

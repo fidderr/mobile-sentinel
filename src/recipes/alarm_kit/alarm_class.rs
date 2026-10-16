@@ -149,7 +149,21 @@ pub fn handle_trigger_with_store(
         }
         Trigger::Fire => fire(store, instance_id, alarm_ctx, Utc::now()),
         Trigger::Snooze => snooze(store, instance_id, alarm_ctx, Utc::now()),
-        Trigger::Dismiss => dismiss(store, instance_id, alarm_ctx, Utc::now()),
+        Trigger::Dismiss => {
+            // The challenge gate is enforced here, not only in the UI: a
+            // firing instance with challenges cannot be dismissed by the
+            // user until `Trigger::Solve` has marked them solved. (The
+            // internal snooze-cap auto-dismiss calls `dismiss` directly and
+            // is deliberately not gated.)
+            let firing = matches!(
+                store.load(instance_id).map(|r| r.state),
+                Ok(SessionState::Firing { .. })
+            );
+            if firing && !alarm_ctx.challenges.is_empty() && !alarm_ctx.challenges_solved {
+                return Err(RecipeError::ChallengesUnsolved(instance_id.clone()));
+            }
+            dismiss(store, instance_id, alarm_ctx, Utc::now())
+        }
         Trigger::Solve => mark_challenges_solved(store, instance_id, alarm_ctx),
         Trigger::Pause => {
             // Pause the firing audio without tearing down other surfaces
@@ -856,6 +870,90 @@ mod tests {
         if let RecipeContext::AlarmClass(c) = &r.context {
             assert!(c.challenges_solved);
         }
+    }
+
+    fn firing_record_with_challenge(id: &str, solved: bool) -> (AlarmClassContext, ContextRecord) {
+        let mut ctx = alarm_ctx();
+        ctx.challenges = vec![crate::recipes::context::schema::ChallengeSpec {
+            challenge_type: "math".into(),
+            difficulty: 0,
+            config: serde_json::json!({}),
+        }];
+        ctx.challenges_solved = solved;
+        let mut record = sample_record(id, ctx.clone());
+        record.state = SessionState::Firing {
+            fired_at_unix_ms: 0,
+        };
+        (ctx, record)
+    }
+
+    #[test]
+    fn dismiss_trigger_is_refused_until_challenges_solved() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        let (ctx, record) = firing_record_with_challenge("a", false);
+        store.write(record).unwrap();
+
+        let err = handle_trigger_with_store(
+            &store,
+            Trigger::Dismiss,
+            &id,
+            &RecipeContext::AlarmClass(ctx),
+        )
+        .unwrap_err();
+        assert!(matches!(err, RecipeError::ChallengesUnsolved(_)));
+        // State untouched: still firing.
+        assert!(matches!(
+            store.load(&id).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+    }
+
+    #[test]
+    fn dismiss_trigger_succeeds_once_challenges_solved() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        let (_, record) = firing_record_with_challenge("a", false);
+        store.write(record).unwrap();
+
+        // Solve, then dispatch with the freshly reloaded context (as
+        // `dispatch_trigger` does on every trigger).
+        let stale = match &store.load(&id).unwrap().context {
+            RecipeContext::AlarmClass(c) => c.clone(),
+            _ => unreachable!(),
+        };
+        mark_challenges_solved(&store, &id, &stale).unwrap();
+        let fresh = store.load(&id).unwrap().context;
+        handle_trigger_with_store(&store, Trigger::Dismiss, &id, &fresh).unwrap();
+        assert!(!matches!(
+            store.load(&id).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+    }
+
+    #[test]
+    fn dismiss_without_challenges_is_never_gated() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        let ctx = alarm_ctx();
+        let mut record = sample_record("a", ctx.clone());
+        record.state = SessionState::Firing {
+            fired_at_unix_ms: 0,
+        };
+        store.write(record).unwrap();
+        handle_trigger_with_store(
+            &store,
+            Trigger::Dismiss,
+            &id,
+            &RecipeContext::AlarmClass(ctx),
+        )
+        .unwrap();
     }
 
     #[test]
