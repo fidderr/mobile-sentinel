@@ -345,6 +345,111 @@ fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext
             );
         }
     }
+    start_watchdog(instance_id);
+}
+
+// ---------------------------------------------------------------------------
+// Firing watchdog
+//
+// While an instance is firing, MAIN keeps a separate exact alarm armed a few
+// seconds ahead and keeps pushing it forward. If every app process is killed
+// (e.g. an OEM "swipe-up cleaner" that kills MAIN *and* `:sentinel` at once),
+// the re-arming stops, the watchdog alarm fires, and AlarmManager — an OS
+// service no app-process kill can take down — wakes `:sentinel` again, whose
+// guardian relaunches MAIN for the still-active job.
+//
+// The watchdog uses its own alarm id (`<instance>#watchdog`), never the
+// instance's real fire alarm, and the receiver never *activates* a job for
+// it. A stale watchdog that fires after dismiss/snooze therefore finds no
+// active job and does nothing — it can't re-ring a dismissed alarm.
+// ---------------------------------------------------------------------------
+
+/// Suffix of the watchdog alarm id. Mirrored by `SentinelAlarmReceiver`.
+pub const WATCHDOG_SUFFIX: &str = "#watchdog";
+
+/// How far ahead the watchdog is armed.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const WATCHDOG_LEAD_MS: i64 = 6_000;
+
+/// How often MAIN pushes the watchdog forward while firing.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const WATCHDOG_REARM_MS: u64 = 2_000;
+
+/// The watchdog alarm id for an instance.
+pub fn watchdog_alarm_id(instance_id: &InstanceId) -> String {
+    format!("{}{}", instance_id.0, WATCHDOG_SUFFIX)
+}
+
+/// One watchdog step: re-arm while `instance_id` is firing, otherwise cancel.
+/// Returns `true` while the instance is still firing.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn watchdog_tick(
+    store: &ContextStore,
+    sink: &dyn crate::firing::FiringSink,
+    instance_id: &InstanceId,
+    now_ms: i64,
+) -> bool {
+    let firing = matches!(
+        store.load(instance_id).map(|r| r.state),
+        Ok(SessionState::Firing { .. })
+    );
+    if firing {
+        let req = crate::firing::ExactAlarmRequest {
+            alarm_id: watchdog_alarm_id(instance_id),
+            target_unix_ms: now_ms + WATCHDOG_LEAD_MS,
+            metadata_json: None,
+        };
+        if !sink.schedule_exact_alarm(&req) {
+            log::warn!("[AlarmClass] watchdog arm failed for {}", instance_id.0);
+        }
+    } else {
+        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
+    }
+    firing
+}
+
+/// Start the re-arm loop for `instance_id` (one thread per instance; a second
+/// call while it runs is a no-op). Android only: on host builds the sink is a
+/// mock and tests drive [`watchdog_tick`] directly.
+fn start_watchdog(instance_id: &InstanceId) {
+    #[cfg(target_os = "android")]
+    {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+        static RUNNING: once_cell::sync::Lazy<Mutex<HashSet<String>>> =
+            once_cell::sync::Lazy::new(|| Mutex::new(HashSet::new()));
+
+        let key = instance_id.0.clone();
+        if !RUNNING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key.clone())
+        {
+            return;
+        }
+        let id = instance_id.clone();
+        std::thread::spawn(move || {
+            loop {
+                let (Some(store), Some(sink)) =
+                    (alarm_class_runtime().store(), alarm_class_runtime().sink())
+                else {
+                    break;
+                };
+                if !watchdog_tick(&store, sink.as_ref(), &id, Utc::now().timestamp_millis()) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(WATCHDOG_REARM_MS));
+            }
+            RUNNING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&key);
+            log::info!("[AlarmClass] watchdog stopped for {}", id.0);
+        });
+        log::info!("[AlarmClass] watchdog started for {}", instance_id.0);
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = instance_id;
 }
 
 fn snooze(
@@ -379,6 +484,7 @@ fn snooze(
     if let Some(sink) = alarm_class_runtime().sink() {
         sink.stop_firing(&instance_id.0);
         sink.cancel_exact_alarm(&instance_id.0);
+        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
         let req = crate::firing::ExactAlarmRequest {
             alarm_id: instance_id.0.clone(),
             target_unix_ms: next_unix_ms,
@@ -412,6 +518,7 @@ fn dismiss(
     if let Some(sink) = alarm_class_runtime().sink() {
         sink.stop_firing(&instance_id.0);
         sink.cancel_exact_alarm(&instance_id.0);
+        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
     }
 
     // For recurring schedules, transition Dismissed → Scheduled with the
@@ -956,6 +1063,50 @@ mod tests {
         assert!(!matches!(
             store.load(&id).unwrap().state,
             SessionState::Firing { .. }
+        ));
+    }
+
+    #[test]
+    fn watchdog_rearms_ahead_while_firing() {
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        let mut record = sample_record("a", alarm_ctx());
+        record.state = SessionState::Firing {
+            fired_at_unix_ms: 0,
+        };
+        store.write(record).unwrap();
+        let sink = crate::firing::MockFiringSink::new();
+
+        assert!(watchdog_tick(&store, &sink, &id, 1_000));
+        let req = sink.last_schedule().unwrap();
+        // Own id — never the instance's real fire alarm.
+        assert_eq!(req.alarm_id, "a#watchdog");
+        assert_eq!(req.target_unix_ms, 1_000 + WATCHDOG_LEAD_MS);
+        assert_eq!(sink.cancel_count(), 0);
+    }
+
+    #[test]
+    fn watchdog_cancels_and_stops_once_not_firing() {
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        let mut record = sample_record("a", alarm_ctx());
+        record.state = SessionState::Dismissed {
+            dismissed_at_unix_ms: 0,
+        };
+        store.write(record).unwrap();
+        let sink = crate::firing::MockFiringSink::new();
+
+        assert!(!watchdog_tick(&store, &sink, &id, 1_000));
+        assert_eq!(sink.schedule_count(), 0);
+        assert_eq!(sink.cancel_count(), 1);
+        // A deleted instance also stops the loop.
+        assert!(!watchdog_tick(
+            &store,
+            &sink,
+            &InstanceId::new("gone"),
+            1_000
         ));
     }
 

@@ -37,6 +37,14 @@ class SentinelJobsInitializer : ContentProvider() {
                 override fun onReceive(context: Context, intent: Intent) {
                     val jobId = intent.getStringExtra(SentinelJobGuardian.EXTRA_JOB_ID) ?: return
                     Log.i(TAG, "JOB_HEADS_UP received for job=$jobId — forwarding to Rust")
+                    // MAIN can be alive with no UI at all — e.g. Android
+                    // restarted only the sticky foreground service after the
+                    // app was killed. Rust is not running in that process, so
+                    // the heads-up alone would go nowhere: bring the job's
+                    // activity up, whose startup re-engages the job.
+                    if (SentinelActivityTracker.currentResumedActivity == null) {
+                        launchJobActivity(context, jobId)
+                    }
                     try {
                         SentinelBridge.onJobHeadsUp(jobId)
                     } catch (e: UnsatisfiedLinkError) {
@@ -55,6 +63,28 @@ class SentinelJobsInitializer : ContentProvider() {
 
         Log.i(TAG, "jobs initialised; heads-up receiver registered")
         return true
+    }
+
+    /** Start the activity named in [jobId]'s payload (`activity_fqcn`), if the job is active. */
+    private fun launchJobActivity(context: Context, jobId: String) {
+        try {
+            val file = java.io.File(context.filesDir, "sentinel/jobs/$jobId.json")
+            if (!file.exists()) return
+            val json = org.json.JSONObject(file.readText())
+            if (json.optString("status") != "active") return
+            val fqcn = json.optJSONObject("payload")?.optString("activity_fqcn", "")
+            if (fqcn.isNullOrBlank()) return
+            val launch = Intent().apply {
+                component = android.content.ComponentName(context.packageName, fqcn)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            context.startActivity(launch)
+            Log.i(TAG, "no UI in MAIN — launched $fqcn for job=$jobId")
+        } catch (e: Throwable) {
+            Log.w(TAG, "launchJobActivity($jobId) failed: ${e.message}")
+        }
     }
 
     override fun query(

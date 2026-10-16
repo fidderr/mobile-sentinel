@@ -33,9 +33,16 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
 
             Log.i(TAG, "onReceive: instance=$instanceId")
 
+            // A firing watchdog (`<instance>#watchdog`, armed by MAIN while an
+            // alarm rings) only re-checks the guardian. It must NEVER activate
+            // a job: if the alarm was already dismissed/snoozed, the job is
+            // pending and the guardian correctly does nothing.
+            val isWatchdog = instanceId.endsWith(WATCHDOG_SUFFIX)
+            val jobId = instanceId.removeSuffix(WATCHDOG_SUFFIX)
+
             // Activate the job file (set status to "active" if pending).
-            if (instanceId.isNotBlank()) {
-                activateJob(context, instanceId)
+            if (!isWatchdog && jobId.isNotBlank()) {
+                activateJob(context, jobId)
             }
 
             // Start the job guardian polling loop. It will detect the
@@ -44,7 +51,7 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             // Clear heads-up tracking for this job so the guardian
             // re-sends the broadcast (needed for snooze re-fires where
             // the job was already active from the first fire).
-            SentinelJobGuardian.clearHeadsUpFor(instanceId)
+            SentinelJobGuardian.clearHeadsUpFor(jobId)
             SentinelJobGuardian.startGuarding(context.applicationContext)
         } catch (t: Throwable) {
             Log.e(TAG, "onReceive failed", t)
@@ -100,6 +107,8 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         const val TAG = "MobileSentinel.AlarmRx"
+        /** Mirrors `WATCHDOG_SUFFIX` in Rust (`recipes::alarm_kit::alarm_class`). */
+        const val WATCHDOG_SUFFIX = "#watchdog"
         const val ACTION = "com.mobilesentinel.ALARM_DISPATCH"
         const val EXTRA_INSTANCE_ID = "instance_id"
         const val EXTRA_METADATA_JSON = "metadata_json"

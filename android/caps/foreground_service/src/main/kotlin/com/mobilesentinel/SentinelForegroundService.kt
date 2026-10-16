@@ -49,6 +49,14 @@ class SentinelForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "onCreate")
+        // When Android restarts this sticky service after the app was
+        // killed, some OEMs (seen on ColorOS) call onCreate but never deliver
+        // the null-intent onStartCommand. So the fast "bring the alarm back"
+        // path runs here. On a normal start the firing UI is already resumed
+        // and this does nothing.
+        if (SentinelActivityTracker.currentResumedActivity == null) {
+            relaunchActiveJobActivity()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,12 +93,53 @@ class SentinelForegroundService : Service() {
                 val notification = buildNotification(channelId, title, body, activityFqcn, fullScreen)
                 startForeground(NOTIFICATION_ID, notification)
                 Log.i(TAG, "FGS_START — foreground title='$title' fullScreen=$fullScreen")
+                if (intent == null && SentinelActivityTracker.currentResumedActivity == null) {
+                    // `null` = Android restarted this sticky service after the
+                    // app was killed (where the OEM delivers it). Reopen the
+                    // activity of any still-active job; its startup re-engages
+                    // audio/kiosk. Usually onCreate already did this.
+                    relaunchActiveJobActivity()
+                }
                 return START_STICKY
             }
             else -> {
                 Log.w(TAG, "Unknown action: $action")
                 return START_STICKY
             }
+        }
+    }
+
+    /**
+     * Launch the `activity_fqcn` of the first active job in
+     * `files/sentinel/jobs/` (plain files shared with the `:sentinel`
+     * guardian). Reads the files directly so this module stays independent of
+     * the `jobs` module.
+     */
+    private fun relaunchActiveJobActivity() {
+        try {
+            val dir = java.io.File(filesDir, "sentinel/jobs")
+            val files = dir.listFiles { f -> f.extension == "json" } ?: return
+            for (file in files) {
+                val fqcn = try {
+                    val json = org.json.JSONObject(file.readText())
+                    if (json.optString("status") != "active") continue
+                    json.optJSONObject("payload")?.optString("activity_fqcn", "")
+                } catch (_: Throwable) {
+                    continue
+                }
+                if (fqcn.isNullOrBlank()) continue
+                startActivity(Intent().apply {
+                    component = ComponentName(packageName, fqcn)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                })
+                Log.i(TAG, "restarted after kill — relaunched $fqcn for ${file.nameWithoutExtension}")
+                return
+            }
+            Log.i(TAG, "restarted after kill — no active job, nothing to relaunch")
+        } catch (e: Throwable) {
+            Log.w(TAG, "relaunchActiveJobActivity failed: ${e.message}")
         }
     }
 
