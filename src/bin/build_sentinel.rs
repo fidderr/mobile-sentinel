@@ -168,8 +168,9 @@ fn load_config() -> Config {
         .or_else(|| find_project_path(release).and_then(|p| detect_activity_from_manifest(&p)))
         .expect("Activity not specified. Use --activity or set in sentinel.toml");
 
-    let project_path = find_project_path(release)
-        .expect("Could not find Android project. Run `dx build --platform android [--release]` first.");
+    let project_path = find_project_path(release).expect(
+        "Could not find Android project. Run `dx build --platform android [--release]` first.",
+    );
 
     let icon_path = toml.get("icon").map(PathBuf::from).filter(|p| p.exists());
 
@@ -691,9 +692,7 @@ fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
     };
 
     let mut cmd = Command::new(&gradlew);
-    cmd.arg(task)
-        .arg("--no-daemon")
-        .arg("--no-build-cache");
+    cmd.arg(task).arg("--no-daemon").arg("--no-build-cache");
     for prop in extra_props {
         cmd.arg(prop);
     }

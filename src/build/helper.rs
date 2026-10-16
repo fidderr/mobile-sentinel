@@ -87,7 +87,10 @@ fn clean_abs(path: &Path) -> PathBuf {
     match fs::canonicalize(path) {
         Ok(abs) => {
             let abs_str = abs.to_string_lossy().to_string();
-            let cleaned = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str).to_string();
+            let cleaned = abs_str
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&abs_str)
+                .to_string();
             PathBuf::from(cleaned)
         }
         Err(_) => path.to_path_buf(),
@@ -630,7 +633,8 @@ mod tests {
         let cleaned2 = remove_attr(with_existing, "android:screenOrientation");
         assert!(!cleaned2.contains("screenOrientation"));
 
-        let inserted = insert_attr_before_close(&cleaned2, r#"android:screenOrientation="portrait""#);
+        let inserted =
+            insert_attr_before_close(&cleaned2, r#"android:screenOrientation="portrait""#);
         assert!(inserted.contains(r#"android:screenOrientation="portrait""#));
         assert!(inserted.contains("android:exported"));
 
@@ -672,7 +676,11 @@ mod tests {
         // Inject portrait (pass the fake *project* root)
         set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "portrait");
         let after = fs::read_to_string(&manifest_path).unwrap();
-        assert!(after.contains(r#"android:screenOrientation="portrait""#), "after: {}", after);
+        assert!(
+            after.contains(r#"android:screenOrientation="portrait""#),
+            "after: {}",
+            after
+        );
         assert!(after.contains("configChanges")); // other attrs survive
 
         // Re-inject different value (landscape) — should overwrite, not duplicate

@@ -64,7 +64,11 @@ fn java_vm() -> Option<jni::JavaVM> {
 /// [`super::callbacks::load_app_class_global`]) to load app classes reliably
 /// from any thread.
 fn resolve_class(env: &mut JNIEnv, name: &'static str) -> Option<jni::objects::GlobalRef> {
-    if let Some(c) = HELPER_CLASSES.lock().unwrap().get(name) {
+    if let Some(c) = HELPER_CLASSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(name)
+    {
         return Some(c.clone());
     }
     let resolved = if let Ok(cls) = env.find_class(name) {
@@ -74,7 +78,10 @@ fn resolve_class(env: &mut JNIEnv, name: &'static str) -> Option<jni::objects::G
         super::callbacks::load_app_class_global(name)
     };
     if let Some(global) = resolved {
-        HELPER_CLASSES.lock().unwrap().insert(name, global.clone());
+        HELPER_CLASSES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name, global.clone());
         return Some(global);
     }
     log::error!("[jni] could not load class {name}");

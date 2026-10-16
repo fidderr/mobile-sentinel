@@ -105,7 +105,11 @@ mod tests {
 
         for _ in 0..2000 {
             match fs::read(&*p) {
-                Ok(got) => assert!(got == small || got == big, "partial read: {} bytes", got.len()),
+                Ok(got) => assert!(
+                    got == small || got == big,
+                    "partial read: {} bytes",
+                    got.len()
+                ),
                 // On Windows a rename can briefly deny a concurrent open.
                 Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
                 Err(e) => panic!("unexpected read error: {e}"),

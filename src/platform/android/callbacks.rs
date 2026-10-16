@@ -48,7 +48,10 @@ pub fn on_boot_completed<F>(callback: F)
 where
     F: Fn() + Send + Sync + 'static,
 {
-    CALLBACKS.lock().unwrap().boot_completed = Some(Box::new(callback));
+    CALLBACKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .boot_completed = Some(Box::new(callback));
 }
 
 /// Register a callback for when the job guardian sends a heads-up
@@ -59,7 +62,10 @@ pub fn on_job_heads_up<F>(callback: F)
 where
     F: Fn(String) + Send + Sync + 'static,
 {
-    CALLBACKS.lock().unwrap().job_heads_up = Some(Box::new(callback));
+    CALLBACKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .job_heads_up = Some(Box::new(callback));
 }
 
 // ---------------------------------------------------------------------------

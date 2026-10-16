@@ -34,12 +34,22 @@ impl RecipeRegistry {
 
     /// Look up a registered Recipe by type tag.
     pub fn get(&self, recipe_type: &str) -> Option<Arc<dyn Recipe>> {
-        self.inner.read().unwrap().get(recipe_type).cloned()
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(recipe_type)
+            .cloned()
     }
 
     /// Snapshot of every registered Recipe's `recipe_type`.
     pub fn registered_types(&self) -> Vec<&'static str> {
-        let mut v: Vec<_> = self.inner.read().unwrap().keys().copied().collect();
+        let mut v: Vec<_> = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .copied()
+            .collect();
         v.sort();
         v
     }

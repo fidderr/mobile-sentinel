@@ -262,10 +262,18 @@ impl<T: Stateful> StateStore<T> {
     }
 
     fn acquire_lock(&self, id: &InstanceId) -> Arc<Mutex<()>> {
-        if let Some(existing) = self.writer_locks.read().unwrap().get(id) {
+        if let Some(existing) = self
+            .writer_locks
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+        {
             return existing.clone();
         }
-        let mut table = self.writer_locks.write().unwrap();
+        let mut table = self
+            .writer_locks
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         table
             .entry(id.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))

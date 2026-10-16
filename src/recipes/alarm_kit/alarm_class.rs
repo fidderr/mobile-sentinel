@@ -635,40 +635,64 @@ fn sound_id_spec_to_sound_id(
 
 impl AlarmClassRuntime {
     pub fn store(&self) -> Option<Arc<ContextStore>> {
-        self.store.read().unwrap().clone()
+        self.store
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn set_store(&self, store: Arc<ContextStore>) {
-        *self.store.write().unwrap() = Some(store);
+        *self
+            .store
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(store);
     }
 
     /// Borrow the installed FiringSink, if any.
     pub fn sink(&self) -> Option<Arc<dyn crate::firing::FiringSink>> {
-        self.sink.read().unwrap().clone()
+        self.sink
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Install the platform FiringSink. Last call wins.
     pub fn set_sink(&self, sink: Arc<dyn crate::firing::FiringSink>) {
-        *self.sink.write().unwrap() = Some(sink);
+        *self
+            .sink
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
     }
 
     /// Borrow the installed sound resolver, if any.
     pub fn sound_resolver(&self) -> Option<Arc<dyn SoundResolver>> {
-        self.sound_lib.read().unwrap().clone()
+        self.sound_lib
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn set_sound_resolver(&self, resolver: Arc<dyn SoundResolver>) {
-        *self.sound_lib.write().unwrap() = Some(resolver);
+        *self
+            .sound_lib
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(resolver);
     }
 
     /// Read the current AlarmClass config snapshot.
     pub fn config(&self) -> AlarmClassConfig {
-        self.config.read().unwrap().clone()
+        self.config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Override the AlarmClass runtime config (channel ids, activity, etc.).
     pub fn configure(&self, config: AlarmClassConfig) {
-        *self.config.write().unwrap() = config;
+        *self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = config;
     }
 }
 
