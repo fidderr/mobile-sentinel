@@ -11,6 +11,60 @@ change.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
+Reliability release: a ringing alarm now survives OEMs that kill every app
+process at once (verified on ColorOS), plus size and battery work.
+
+### Breaking
+
+- `InitConfig` has a new field `clean_process_exit` — struct literals without
+  `..Default::default()` must add it.
+- `RecipeError::ChallengesUnsolved` — new variant; exhaustive matches must
+  handle it.
+- `AlarmKit::dismiss` on a firing alarm with challenges now returns
+  `Err(Recipe(ChallengesUnsolved))` until `mark_solved` is called (the gate was
+  previously only enforced by the UI).
+
+### Added
+
+- Firing watchdog: while an alarm rings, a separate `<instance>#watchdog`
+  exact alarm is kept 6 s ahead (re-armed every 2 s). If MAIN and `:sentinel`
+  are both killed (OEM swipe cleaners), AlarmManager wakes `:sentinel` again.
+  It never activates a job, so a stale watchdog cannot re-ring a dismissed
+  alarm.
+- The foreground service reopens the active job's activity when Android
+  restarts it after a kill (from `onCreate`; some OEMs never deliver the
+  null-intent `onStartCommand`), and a heads-up reaching a MAIN process without
+  UI now launches the activity.
+- Kiosk: also blocks legacy `KEYCODE_BACK` (OEMs that disable predictive back
+  ignore `OnBackInvokedCallback`).
+- `display::safe_area_insets()` and `display::set_light_system_bars()` for
+  edge-to-edge layouts (Android 15+ / targetSdk 35).
+- `InitConfig::clean_process_exit` (default on): a framework `exit()` ends the
+  process with `_exit(0)` instead of racing static destructors (the "pthread
+  mutex destroyed" native abort when the activity is destroyed).
+- `StateStore::change_marker()`: one `stat` to tell whether any record changed.
+
+### Changed
+
+- Real alarms are armed with `setAlarmClock()` (Doze-exempt, shown as the next
+  alarm); the watchdog uses `setExactAndAllowWhileIdle`.
+- Job and state files are written atomically (unique temp file + `sync_all` +
+  rename), including the `:sentinel` receiver's job activation.
+- `app_files_dir()` caches its result instead of doing a JNI round trip per call.
+- Default log level is `Info` in release builds (`Debug` in debug builds).
+- `build_sentinel`: sets `extractNativeLibs="false"` and removes previously
+  copied assets that were deleted from the source.
+- Non-test locks recover from poisoning instead of panicking.
+
+### Fixed
+
+- `StateStore` docs claimed cross-process write safety; it is single-writer
+  per process (as used).
+
+## [0.1.4]
+
 The first documented baseline of the SDK. Everything below describes the surface
 as it stands today; subsequent releases will track changes against it.
 
@@ -70,4 +124,6 @@ as it stands today; subsequent releases will track changes against it.
 - **Documentation** — rewritten `README.md` and a complete API reference at
   `docs/API.md`.
 
-[Unreleased]: https://github.com/fidderr/mobile-sentinel
+[Unreleased]: https://github.com/fidderr/mobile-sentinel/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fidderr/mobile-sentinel/releases/tag/v0.2.0
+[0.1.4]: https://github.com/fidderr/mobile-sentinel/releases/tag/v0.1.4
