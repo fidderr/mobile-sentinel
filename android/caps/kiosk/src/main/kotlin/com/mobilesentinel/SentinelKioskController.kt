@@ -360,6 +360,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
  // so we beat the OS to the dispatcher.
         if (!enabled) return
         if (!isTargetActivity(activity)) return
+        if (blockBack) installBackKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -487,6 +488,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
  // onActivityCreated registers the same callback with the same key,
  // so this call is idempotent (registerBackCallback checks the map
  // and returns early when already registered).
+        if (blockBack) installBackKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -539,6 +541,44 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         internalActivities.remove(activity)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             unregisterBackCallback(activity)
+        }
+    }
+
+ // ---- Back-key handling: legacy KEYCODE_BACK (all API levels) ---------------
+ //
+ // The OnBackInvokedCallback below only sees Back when the system routes it
+ // through predictive back. Some OEMs (seen on ColorOS: "predictive settings
+ // is disabled") ignore the app's opt-in and deliver Back the legacy way — a
+ // KEYCODE_BACK key event that ends in Activity.onBackPressed → finish. That
+ // finish destroyed the alarm activity mid-ring. Wrapping the window callback
+ // swallows that key event while the lock is on; the check is live, so the
+ // wrapper is inert once the kiosk is disabled.
+
+    private class BackKeyGuard(
+        private val base: android.view.Window.Callback,
+    ) : android.view.Window.Callback by base {
+        override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
+                SentinelKioskController.enabled && SentinelKioskController.blockBack
+            ) {
+                if (event.action == android.view.KeyEvent.ACTION_UP) {
+                    Log.d(TAG, "Back key consumed by kiosk lock (legacy path)")
+                }
+                return true
+            }
+            return base.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun installBackKeyGuard(activity: Activity) {
+        try {
+            val window = activity.window ?: return
+            val current = window.callback ?: return
+            if (current is BackKeyGuard) return
+            window.callback = BackKeyGuard(current)
+            Log.d(TAG, "legacy Back key guard installed")
+        } catch (e: Throwable) {
+            Log.w(TAG, "installBackKeyGuard failed: ${e.message}")
         }
     }
 
