@@ -644,28 +644,60 @@ fn copy_assets(asset_paths: &[PathBuf], project_path: &Path) {
         return;
     }
     let dest_base = project_path.join("app/src/main/assets");
-    let _ = fs::create_dir_all(&dest_base);
-    let mut total = 0;
-    for path in asset_paths {
-        if path.is_file() {
-            let _ = fs::copy(path, dest_base.join(path.file_name().unwrap()));
-            total += 1;
-        } else if path.is_dir() {
-            total += copy_dir_recursive(path, &dest_base, path);
-        }
-    }
-    eprintln!("  Copied {} asset files", total);
+    let (copied, removed) = sync_assets(asset_paths, &dest_base);
+    eprintln!("  Copied {copied} asset files, removed {removed} stale ones");
 }
 
-fn copy_dir_recursive(src: &Path, dest_base: &Path, root: &Path) -> usize {
-    let mut count = 0;
+/// List of asset files this tool copied on the previous run, kept inside the
+/// destination so a later run can remove files deleted from the source. The
+/// directory is shared with dx's own assets, so it is never wiped wholesale.
+const ASSET_LEDGER: &str = ".mobile-sentinel-assets";
+
+/// Copy `asset_paths` into `dest_base`, then delete files that the previous
+/// run copied but that no longer exist in the source (e.g. an `.mp3` replaced
+/// by an `.ogg`) — otherwise incremental builds keep shipping them.
+/// Returns `(copied, removed)`.
+fn sync_assets(asset_paths: &[PathBuf], dest_base: &Path) -> (usize, usize) {
+    let _ = fs::create_dir_all(dest_base);
+    let ledger = dest_base.join(ASSET_LEDGER);
+    let previous: Vec<String> = fs::read_to_string(&ledger)
+        .map(|s| s.lines().map(str::to_owned).collect())
+        .unwrap_or_default();
+
+    let mut copied: Vec<String> = Vec::new();
+    for path in asset_paths {
+        if path.is_file() {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let _ = fs::copy(path, dest_base.join(&name));
+            copied.push(name);
+        } else if path.is_dir() {
+            copy_dir_recursive(path, dest_base, path, &mut copied);
+        }
+    }
+
+    let mut removed = 0;
+    for rel in previous.iter().filter(|p| !copied.contains(p)) {
+        // Ledger entries are always relative paths this tool wrote; refuse
+        // anything that could escape the assets directory.
+        if rel.is_empty() || rel.contains("..") || Path::new(rel).is_absolute() {
+            continue;
+        }
+        if fs::remove_file(dest_base.join(rel)).is_ok() {
+            removed += 1;
+        }
+    }
+    let _ = fs::write(&ledger, copied.join("\n"));
+    (copied.len(), removed)
+}
+
+fn copy_dir_recursive(src: &Path, dest_base: &Path, root: &Path, copied: &mut Vec<String>) {
     let Ok(entries) = fs::read_dir(src) else {
-        return 0;
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            count += copy_dir_recursive(&path, dest_base, root);
+            copy_dir_recursive(&path, dest_base, root, copied);
         } else if path.is_file() {
             let relative = path.strip_prefix(root).unwrap_or(&path);
             let dest = dest_base.join(relative);
@@ -673,10 +705,9 @@ fn copy_dir_recursive(src: &Path, dest_base: &Path, root: &Path) -> usize {
                 let _ = fs::create_dir_all(parent);
             }
             let _ = fs::copy(&path, &dest);
-            count += 1;
+            copied.push(relative.to_string_lossy().replace('\\', "/"));
         }
     }
-    count
 }
 
 fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
@@ -706,4 +737,45 @@ fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
         std::process::exit(1);
     }
     eprintln!("  Done");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_assets_removes_files_deleted_from_source_but_keeps_foreign_ones() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+        let sounds = src.path().join("sounds");
+        fs::create_dir_all(sounds.join("default")).unwrap();
+        fs::write(sounds.join("default/power.mp3"), b"old").unwrap();
+        // A file dx put there itself — must survive.
+        fs::write(dest.path().join("style.css"), b"css").unwrap();
+
+        assert_eq!(
+            sync_assets(std::slice::from_ref(&sounds), dest.path()),
+            (1, 0)
+        );
+        assert!(dest.path().join("default/power.mp3").exists());
+
+        // Source switches format.
+        fs::remove_file(sounds.join("default/power.mp3")).unwrap();
+        fs::write(sounds.join("default/power.ogg"), b"new").unwrap();
+        assert_eq!(sync_assets(&[sounds], dest.path()), (1, 1));
+        assert!(!dest.path().join("default/power.mp3").exists());
+        assert!(dest.path().join("default/power.ogg").exists());
+        assert!(dest.path().join("style.css").exists());
+    }
+
+    #[test]
+    fn sync_assets_ignores_unsafe_ledger_entries() {
+        let dest = tempfile::TempDir::new().unwrap();
+        let outside = dest.path().parent().unwrap().join("keep-me.txt");
+        fs::write(&outside, b"x").unwrap();
+        fs::write(dest.path().join(ASSET_LEDGER), "../keep-me.txt\n").unwrap();
+        assert_eq!(sync_assets(&[], dest.path()), (0, 0));
+        assert!(outside.exists());
+        let _ = fs::remove_file(outside);
+    }
 }

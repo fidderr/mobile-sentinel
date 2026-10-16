@@ -184,6 +184,7 @@ pub fn prepare_android_project_with_capabilities_and_orientation<S: AsRef<str>>(
     add_modules_to_settings(project_path, &sentinel_path_str, &modules);
     add_module_dependencies(project_path, &modules);
     add_activity_flags(project_path, activity_fqcn);
+    keep_native_libs_in_apk(project_path);
 
     if let Some(orient) = default_screen_orientation {
         set_default_screen_orientation(project_path, activity_fqcn, orient);
@@ -349,6 +350,35 @@ fn add_activity_flags(project_path: &Path, activity_fqcn: &str) {
             activity_fqcn
         );
     }
+}
+
+/// Load native libraries straight from the APK instead of extracting them.
+///
+/// Dioxus's generated manifest sets `android:extractNativeLibs="true"`, which
+/// makes the installer copy every `.so` out of the APK — the native code then
+/// sits on disk twice. With `false`, AGP stores the libraries uncompressed and
+/// 16 KB-page-aligned (AGP ≥ 8.5.1) and the system maps them in place. Play's
+/// download stays compressed either way.
+fn keep_native_libs_in_apk(project_path: &Path) {
+    let manifest_path = project_path.join("app/src/main/AndroidManifest.xml");
+    let Ok(content) = fs::read_to_string(&manifest_path) else {
+        return;
+    };
+    let updated = disable_native_lib_extraction(&content);
+    if updated != content {
+        if let Err(e) = fs::write(&manifest_path, updated) {
+            eprintln!("[mobile-sentinel] Failed to update manifest: {}", e);
+        } else {
+            eprintln!("[mobile-sentinel] Set extractNativeLibs=false (load .so from APK)");
+        }
+    }
+}
+
+fn disable_native_lib_extraction(manifest: &str) -> String {
+    manifest.replace(
+        "android:extractNativeLibs=\"true\"",
+        "android:extractNativeLibs=\"false\"",
+    )
 }
 
 /// Remove an attribute like `android:foo="bar"` (and its trailing whitespace)
@@ -572,6 +602,21 @@ mod tests {
     </application>
 </manifest>
 "#;
+
+    #[test]
+    fn native_libs_are_not_extracted() {
+        let m = r#"<application android:hasCode="true"
+        android:extractNativeLibs="true" android:label="x">"#;
+        let out = disable_native_lib_extraction(m);
+        assert!(out.contains(r#"android:extractNativeLibs="false""#));
+        assert!(!out.contains(r#"android:extractNativeLibs="true""#));
+        // Idempotent, and a manifest without the attribute is untouched.
+        assert_eq!(disable_native_lib_extraction(&out), out);
+        assert_eq!(
+            disable_native_lib_extraction("<application>"),
+            "<application>"
+        );
+    }
 
     #[test]
     fn empty_injection_leaves_no_marker() {
