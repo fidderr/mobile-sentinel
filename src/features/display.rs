@@ -162,6 +162,82 @@ pub fn current_requested_orientation() -> Option<ScreenOrientation> {
     android_or!(android::get_current_requested_orientation(), None)
 }
 
+/// How far the system bars and display cutout overlap the app's content, in
+/// dp (= CSS px in a WebView). All zero when nothing overlaps.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SafeAreaInsets {
+    pub top: f32,
+    pub bottom: f32,
+    pub left: f32,
+    pub right: f32,
+}
+
+/// Current overlap between system bars/cutout and the app content.
+///
+/// Correct both edge-to-edge (Android 15+ with targetSdk 35 forces content
+/// under the bars) and on older layouts where the system already offsets the
+/// content (all zero). `None` when no Activity is available (and on host).
+/// Re-query after rotation — the values change.
+pub fn safe_area_insets() -> Option<SafeAreaInsets> {
+    android_or!(parse_safe_area(&android::get_safe_area_insets()), None)
+}
+
+/// Use dark system-bar icons (`true`, for light app backgrounds) or light
+/// icons (`false`, for dark backgrounds). No-op on host.
+pub fn set_light_system_bars(light: bool) {
+    android_or!(
+        {
+            let _ = android::set_light_system_bars(light);
+        },
+        {
+            let _ = light;
+        }
+    )
+}
+
+/// Parse `"top,bottom,left,right"` from the Kotlin side.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn parse_safe_area(raw: &str) -> Option<SafeAreaInsets> {
+    let mut it = raw.split(',').map(|v| v.trim().parse::<f32>().ok());
+    let insets = SafeAreaInsets {
+        top: it.next()??,
+        bottom: it.next()??,
+        left: it.next()??,
+        right: it.next()??,
+    };
+    let all = [insets.top, insets.bottom, insets.left, insets.right];
+    all.iter()
+        .all(|v| v.is_finite() && *v >= 0.0)
+        .then_some(insets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_kotlin_inset_string() {
+        assert_eq!(
+            parse_safe_area("24.0,48.5,0.0,0.0"),
+            Some(SafeAreaInsets {
+                top: 24.0,
+                bottom: 48.5,
+                left: 0.0,
+                right: 0.0
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_malformed() {
+        assert_eq!(parse_safe_area(""), None);
+        assert_eq!(parse_safe_area("1,2,3"), None);
+        assert_eq!(parse_safe_area("a,b,c,d"), None);
+        assert_eq!(parse_safe_area("-1,0,0,0"), None);
+        assert_eq!(parse_safe_area("NaN,0,0,0"), None);
+    }
+}
+
 #[cfg(target_os = "android")]
 mod android {
     use crate::platform::android::jni::with_jni_class;
@@ -221,6 +297,31 @@ mod android {
                 "setRequestedOrientation",
                 "(I)Z",
                 &[JValue::Int(orientation.to_android_constant())],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn get_safe_area_insets() -> String {
+        with_jni_class(DISPLAY, String::new(), |env, class| {
+            let obj = env
+                .call_static_method(class, "getSafeAreaInsets", "()Ljava/lang/String;", &[])
+                .ok()?
+                .l()
+                .ok()?;
+            let s: String = env.get_string(&obj.into()).ok()?.into();
+            Some(s)
+        })
+    }
+
+    pub(super) fn set_light_system_bars(light: bool) -> bool {
+        with_jni_class(DISPLAY, false, |env, class| {
+            env.call_static_method(
+                class,
+                "setLightSystemBars",
+                "(Z)Z",
+                &[JValue::Bool(light as u8)],
             )
             .ok()
             .and_then(|v| v.z().ok())
