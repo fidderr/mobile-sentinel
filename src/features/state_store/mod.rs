@@ -12,9 +12,17 @@
 //! | Property | How |
 //! |---|---|
 //! | Layout | one JSON file per instance: `<root>/<id>.json` |
-//! | Atomicity | write to `<id>.json.tmp`, then `rename` (POSIX / Win32 atomic) |
-//! | Concurrency | per-id `Mutex` serialises writers; reads are lock-free |
-//! | Revision | every write bumps `revision = previous + 1` from disk state |
+//! | Atomicity | unique temp file + `sync_all` + `rename` (`utilities::atomic_write`); a reader in any process sees the old or the new file, never a partial one |
+//! | Concurrency | per-id in-process `Mutex` serialises writers **within one process**; reads are lock-free and safe from any process |
+//! | Revision | every write bumps `revision = previous + 1` from the on-disk value |
+//!
+//! # Single-writer-process rule
+//!
+//! Only one process may write a given store. In mobile-sentinel that is the
+//! MAIN process: the `:sentinel` process never writes the context store (it
+//! only reads/rewrites job files, see `jobs`). Two processes writing the same
+//! id concurrently could both read revision N and both write N+1, so do not
+//! do that.
 //! | Resilience | unparseable files are logged + skipped, never propagated |
 
 mod revision;
@@ -27,7 +35,7 @@ pub use self::StoreError as StateStoreError;
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -36,6 +44,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::types::InstanceId;
+use crate::utilities::atomic_write::{write_atomic, TEMP_SUFFIX};
 
 /// A record that can live in a [`StateStore`]: it carries its own instance
 /// id and a monotonic revision the store manages.
@@ -161,8 +170,8 @@ impl<T: Stateful> StateStore<T> {
             .lock()
             .map_err(|_| StoreError::LockPoisoned(id.clone()))?;
 
-        // Compute the new revision based on what's currently on disk so
-        // concurrent processes can't accidentally roll the counter back.
+        // Compute the new revision from what's currently on disk (not from
+        // the caller's copy) so a stale record can't roll the counter back.
         let next_revision = match self.load(&id) {
             Ok(prev) => prev.revision().next(),
             Err(StoreError::NotFound(_)) => Revision::INITIAL,
@@ -173,20 +182,11 @@ impl<T: Stateful> StateStore<T> {
         self.ensure_root()?;
 
         let final_path = self.record_path(&id);
-        let temp_path = self.temp_path(&id);
 
         let bytes = serde_json::to_vec_pretty(&record)
             .map_err(|e| StoreError::serde("write.serialize", e))?;
 
-        {
-            let mut f =
-                fs::File::create(&temp_path).map_err(|e| StoreError::io("write.create_temp", e))?;
-            f.write_all(&bytes)
-                .map_err(|e| StoreError::io("write.write_temp", e))?;
-            let _ = f.sync_all();
-        }
-
-        fs::rename(&temp_path, &final_path).map_err(|e| StoreError::io("write.rename", e))?;
+        write_atomic(&final_path, &bytes).map_err(|e| StoreError::io("write.atomic", e))?;
 
         Ok(record)
     }
@@ -223,7 +223,7 @@ impl<T: Stateful> StateStore<T> {
                 Some(n) => n,
                 None => continue,
             };
-            if !file_name.ends_with(".json") || file_name.ends_with(".json.tmp") {
+            if !file_name.ends_with(".json") || file_name.ends_with(TEMP_SUFFIX) {
                 continue;
             }
             let bytes = match fs::read(&path) {
@@ -255,10 +255,6 @@ impl<T: Stateful> StateStore<T> {
 
     fn record_path(&self, id: &InstanceId) -> PathBuf {
         self.root.join(format!("{}.json", id.0))
-    }
-
-    fn temp_path(&self, id: &InstanceId) -> PathBuf {
-        self.root.join(format!("{}.json.tmp", id.0))
     }
 
     fn ensure_root(&self) -> Result<(), StoreError> {

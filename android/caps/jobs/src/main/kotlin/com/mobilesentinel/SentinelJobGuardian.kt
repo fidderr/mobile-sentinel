@@ -222,12 +222,15 @@ object SentinelJobGuardian {
             if (dir.isDirectory) {
                 val files = dir.listFiles { f -> f.extension == "json" } ?: emptyArray()
                 for (file in files) {
-                    val json = JSONObject(file.readText())
-                    if (json.optString("status") == "active") {
-                        val payload = json.optJSONObject("payload")
-                        val fqcn = payload?.optString("activity_fqcn", "")
-                        if (!fqcn.isNullOrBlank()) return fqcn
-                    }
+                    // One unreadable job file must not hide the others.
+                    try {
+                        val json = JSONObject(file.readText())
+                        if (json.optString("status") == "active") {
+                            val payload = json.optJSONObject("payload")
+                            val fqcn = payload?.optString("activity_fqcn", "")
+                            if (!fqcn.isNullOrBlank()) return fqcn
+                        }
+                    } catch (_: Throwable) {}
                 }
             }
         } catch (_: Throwable) {}

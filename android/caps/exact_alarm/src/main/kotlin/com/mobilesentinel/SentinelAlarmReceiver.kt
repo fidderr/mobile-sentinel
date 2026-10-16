@@ -67,13 +67,34 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             val status = json.optString("status", "")
             if (status == "pending") {
                 json.put("status", "active")
-                file.writeText(json.toString(2))
+                writeAtomically(file, json.toString(2))
                 Log.i(TAG, "activateJob: '$jobId' pending → active")
             } else {
                 Log.d(TAG, "activateJob: '$jobId' already '$status'")
             }
         } catch (e: Throwable) {
             Log.w(TAG, "activateJob failed for '$jobId': ${e.message}")
+        }
+    }
+
+    /**
+     * Replace [file] atomically (temp file + rename). MAIN's Rust polls and
+     * rewrites these files from another process, so a plain `writeText`
+     * (truncate-then-write) could be observed half-written. The temp name ends
+     * in `.tmp`, so readers filtering on the `json` extension never see it.
+     */
+    private fun writeAtomically(file: File, content: String) {
+        val tmp = File(file.parentFile, "${file.name}.${android.os.Process.myPid()}.tmp")
+        try {
+            tmp.writeText(content)
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                file.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            if (tmp.exists()) tmp.delete()
         }
     }
 

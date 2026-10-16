@@ -6,14 +6,14 @@
 //! build_sentinel
 //! build_sentinel --release
 //! build_sentinel --release --aab
-//! build_sentinel --app alarmfree --release --aab
+//! build_sentinel --app myapp --release --aab
 //! ```
 //!
 //! For Google Play: use `--release --aab` (from your final build script) to produce
 //! an AAB under the package name from the consumer's Dioxus.toml `[bundle] identifier`
 //! (or `[android] identifier`).
 //!
-//! The `build.sh` script in the AlarmFree tree is the blessed way to do final
+//! The `build.sh` script in a consumer project is the blessed way to do final
 //! (including release/AAB) builds because it exercises the published crate.
 //!
 //! # Configuration (`sentinel.toml`)

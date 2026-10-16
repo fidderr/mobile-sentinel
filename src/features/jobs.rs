@@ -219,17 +219,13 @@ fn job_path(id: &str) -> PathBuf {
 }
 
 fn write_job(job: &Job) -> Result<(), JobGuardianError> {
-    let dir = jobs_dir();
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| JobGuardianError::Io(format!("create_dir {}: {}", dir.display(), e)))?;
-    }
     let path = job_path(&job.id);
     let json =
         serde_json::to_string_pretty(job).map_err(|e| JobGuardianError::Parse(e.to_string()))?;
-    std::fs::write(&path, json)
-        .map_err(|e| JobGuardianError::Io(format!("write {}: {}", path.display(), e)))?;
-    Ok(())
+    // Atomic replace: the `:sentinel` process polls these files, so it must
+    // never see a half-written job.
+    crate::utilities::atomic_write::write_atomic(&path, json.as_bytes())
+        .map_err(|e| JobGuardianError::Io(format!("write {}: {}", path.display(), e)))
 }
 
 /// Errors from the job guardian API.
