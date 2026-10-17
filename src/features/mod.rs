@@ -25,6 +25,9 @@ pub mod accessibility;
 /// Non-firing audio preview. Gated behind `audio`.
 #[cfg(feature = "audio")]
 pub mod audio;
+/// Background service for messengers. Gated behind `background_service`.
+#[cfg(feature = "background_service")]
+pub mod background_service;
 /// Battery-optimization exemption. Gated behind `battery`.
 #[cfg(feature = "battery")]
 pub mod battery;

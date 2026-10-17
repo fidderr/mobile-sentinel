@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Runs at process start (also when Android restarts the process just
+             for the service): watches activities to hook the Back button. -->
+        <provider
+            android:name="com.mobilesentinel.SentinelBackgroundInit"
+            android:authorities="${applicationId}.sentinel.background.init"
+            android:exported="false"
+            android:initOrder="90" />
+
+        <!-- The quiet service that keeps the connection (and so the process) alive. -->
+        <service
+            android:name="com.mobilesentinel.SentinelBackgroundService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
+
+        <!-- Brings the service back after a reboot or an app update. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Invisible hop for notification taps: remembers what to open, then opens the app. -->
+        <activity
+            android:name="com.mobilesentinel.SentinelOpenActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="false" />
+    </application>
+
+</manifest>

@@ -53,6 +53,7 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "file_system",
     "recorder",
     "webview_media",
+    "background_service",
     "accessibility",
     // Firing sub-features — each its own per-feature Kotlin/Gradle module
     // under android/caps/<id> (no shared "alarm runtime" bundle).

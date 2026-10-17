@@ -96,6 +96,9 @@ recorder = ["dep:cpal", "dep:hound"]
 # Camera + microphone for getUserMedia inside the WebView (live calls).
 # Declares CAMERA / RECORD_AUDIO / MODIFY_AUDIO_SETTINGS; no Kotlin, no Rust API.
 webview_media = []
+# Quiet foreground service + boot restart + tap-to-open notifications +
+# Back-to-background, so a messenger keeps its connection with the UI closed.
+background_service = []
 # Accessibility-service grant flow (ultra-protection kiosk relaunch). The
 # SentinelAccessibilityService manifest component + Rust grant-flow helpers
 # ship ONLY when this feature is enabled. POLICY-SENSITIVE on Google Play.

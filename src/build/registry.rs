@@ -312,6 +312,30 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &[],
     },
     Capability {
+        id: "background_service",
+        description: "Quiet foreground service that keeps the app's connection alive after the UI is closed, boot restart, tap-to-open notifications, Back-to-background.",
+        // The service type (remoteMessaging) is the one Android 14+ defines
+        // for chat apps. The full-screen-intent permission lets an incoming
+        // call take over the lock screen.
+        permissions: &[
+            Permission::new("android.permission.FOREGROUND_SERVICE"),
+            Permission::new("android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"),
+            Permission::new("android.permission.POST_NOTIFICATIONS"),
+            Permission::new("android.permission.RECEIVE_BOOT_COMPLETED"),
+            Permission::new("android.permission.USE_FULL_SCREEN_INTENT"),
+        ],
+        features: NO_FEATURES,
+        components: "",
+        policy_sensitive: false,
+        kotlin_sources: &[
+            "SentinelBackground.kt",
+            "SentinelBackgroundService.kt",
+            "SentinelBootReceiver.kt",
+            "SentinelOpenActivity.kt",
+            "SentinelBackgroundInit.kt",
+        ],
+    },
+    Capability {
         id: "haptics",
         description: "Vibration / haptic feedback (VIBRATE).",
         permissions: &[Permission::new("android.permission.VIBRATE")],
@@ -1271,6 +1295,23 @@ mod tests {
         let off = xml(&assemble(&["camera", "recorder"]));
         assert!(!off.contains("android.permission.CAMERA"));
         assert!(enabled_modules(&["webview_media"]).is_empty());
+    }
+
+    #[test]
+    fn background_service_declares_its_permissions_only_when_enabled() {
+        let on = xml(&assemble(&["background_service"]));
+        for p in [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING",
+            "android.permission.POST_NOTIFICATIONS",
+            "android.permission.RECEIVE_BOOT_COMPLETED",
+        ] {
+            assert!(on.contains(p), "{p}");
+        }
+        let off = xml(&assemble(&["camera", "recorder", "webview_media"]));
+        assert!(!off.contains("RECEIVE_BOOT_COMPLETED"));
+        assert!(!off.contains("FOREGROUND_SERVICE_REMOTE_MESSAGING"));
+        assert!(enabled_modules(&["background_service"]).contains(&"background_service"));
     }
 
     #[test]

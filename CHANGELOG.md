@@ -13,6 +13,13 @@ change.
 
 ### Added
 
+- `background_service` capability: a quiet foreground service (type
+  `remoteMessaging`, lowest-importance notification) that keeps the app's
+  process and connection alive after the UI is closed, restarts after boot or
+  an update, posts message/call notifications whose tap hands a string back to
+  the app (`take_open_request`), and routes the Back button to the app so it can
+  go to the background instead of being destroyed. The host app can implement
+  `nativeStart` / `nativeOnBack` JNI hooks. Purely additive.
 - `webview_media` capability: declares CAMERA, RECORD_AUDIO and
   MODIFY_AUDIO_SETTINGS so `getUserMedia` works in the app WebView (live
   voice/video calls). Manifest only; no other app's output changes.

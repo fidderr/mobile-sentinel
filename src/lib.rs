@@ -82,6 +82,8 @@ pub use platform::callbacks;
 pub use features::accessibility;
 #[cfg(feature = "audio")]
 pub use features::audio;
+#[cfg(feature = "background_service")]
+pub use features::background_service;
 #[cfg(feature = "battery")]
 pub use features::battery;
 #[cfg(feature = "biometric")]
