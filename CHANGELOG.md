@@ -11,6 +11,12 @@ change.
 
 ## [Unreleased]
 
+### Added
+
+- `webview_media` capability: declares CAMERA, RECORD_AUDIO and
+  MODIFY_AUDIO_SETTINGS so `getUserMedia` works in the app WebView (live
+  voice/video calls). Manifest only; no other app's output changes.
+
 ## [0.2.2] - 2026-10-16
 
 Media capabilities for messenger-style apps, and the first Windows backends.

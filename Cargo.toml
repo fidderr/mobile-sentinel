@@ -93,6 +93,9 @@ file_system = []
 # Microphone recording (voice notes). Android: MediaRecorder (RECORD_AUDIO);
 # Windows: cpal + hound (WAV).
 recorder = ["dep:cpal", "dep:hound"]
+# Camera + microphone for getUserMedia inside the WebView (live calls).
+# Declares CAMERA / RECORD_AUDIO / MODIFY_AUDIO_SETTINGS; no Kotlin, no Rust API.
+webview_media = []
 # Accessibility-service grant flow (ultra-protection kiosk relaunch). The
 # SentinelAccessibilityService manifest component + Rust grant-flow helpers
 # ship ONLY when this feature is enabled. POLICY-SENSITIVE on Google Play.

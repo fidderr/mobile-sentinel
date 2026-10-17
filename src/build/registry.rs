@@ -289,6 +289,29 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &["SentinelRecorderPrimitives.kt"],
     },
     Capability {
+        id: "webview_media",
+        description: "Camera + microphone for getUserMedia inside the app's WebView (live calls).",
+        // The WebView asks for these at runtime through its chrome client; they
+        // have to be declared or every request is denied. Hardware features are
+        // advertised as not required.
+        permissions: &[
+            Permission::new("android.permission.CAMERA"),
+            Permission::new("android.permission.RECORD_AUDIO"),
+            Permission::new("android.permission.MODIFY_AUDIO_SETTINGS"),
+        ],
+        features: &[
+            Feature {
+                name: "android.hardware.camera",
+            },
+            Feature {
+                name: "android.hardware.microphone",
+            },
+        ],
+        components: "",
+        policy_sensitive: false,
+        kotlin_sources: &[],
+    },
+    Capability {
         id: "haptics",
         description: "Vibration / haptic feedback (VIBRATE).",
         permissions: &[Permission::new("android.permission.VIBRATE")],
@@ -1237,6 +1260,17 @@ mod tests {
         );
         assert!(!edges.contains_key("recorder"));
         assert_eq!(edges.get("firing"), Some(&vec!["wake-lock".to_string()]));
+    }
+
+    #[test]
+    fn webview_media_declares_camera_and_microphone_only_when_enabled() {
+        let on = xml(&assemble(&["webview_media"]));
+        assert!(on.contains("android.permission.CAMERA"));
+        assert!(on.contains("android.permission.RECORD_AUDIO"));
+        assert!(on.contains("android.permission.MODIFY_AUDIO_SETTINGS"));
+        let off = xml(&assemble(&["camera", "recorder"]));
+        assert!(!off.contains("android.permission.CAMERA"));
+        assert!(enabled_modules(&["webview_media"]).is_empty());
     }
 
     #[test]
