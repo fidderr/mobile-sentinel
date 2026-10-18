@@ -78,6 +78,31 @@ pub fn open(path: &str, mime_type: &str) -> Result<(), SentinelError> {
     }
 }
 
+/// Open a web address (http/https) in the user's browser.
+pub fn open_url(url: &str) -> Result<(), SentinelError> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(SentinelError::unavailable("share::open_url"));
+    }
+    #[cfg(target_os = "android")]
+    {
+        if android::open_url(url) {
+            return Ok(());
+        }
+        Err(SentinelError::unavailable("share::open_url"))
+    }
+    #[cfg(windows)]
+    {
+        opener::open_browser(url).map_err(|e| SentinelError::RuntimeError {
+            code: crate::error::ErrorCode::IoError,
+            message: e.to_string(),
+        })
+    }
+    #[cfg(not(any(target_os = "android", windows)))]
+    {
+        Err(SentinelError::unavailable("share::open_url"))
+    }
+}
+
 /// Copy a file into the user's Downloads folder as `name`. Returns a
 /// human-readable location of the copy (e.g. `Download/report.pdf`).
 pub fn save_to_downloads(path: &str, name: &str, mime_type: &str) -> Result<String, SentinelError> {
@@ -181,6 +206,20 @@ mod android {
                     JValue::Object(&s_path.into()),
                     JValue::Object(&s_mime.into()),
                 ],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn open_url(url: &str) -> bool {
+        with_jni_class(SHARE, false, |env, class| {
+            let s_url = jni_str(env, url)?;
+            env.call_static_method(
+                class,
+                "openUrl",
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&s_url.into())],
             )
             .ok()
             .and_then(|v| v.z().ok())

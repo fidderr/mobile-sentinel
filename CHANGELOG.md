@@ -23,6 +23,7 @@ change.
 - `webview_media` capability: declares CAMERA, RECORD_AUDIO and
   MODIFY_AUDIO_SETTINGS so `getUserMedia` works in the app WebView (live
   voice/video calls). Manifest only; no other app's output changes.
+- `share::open_url(url)` opens a web address (http/https) in the browser: Android `ACTION_VIEW`, Windows the default browser.
 - `background_service::exit_app()` closes the app for real (screen and process).
 - `link_scheme` in `sentinel.toml`: clicking `scheme://...` opens the app; the link
   arrives as `take_open_request()` = `link:<uri>` (needs `background_service`).

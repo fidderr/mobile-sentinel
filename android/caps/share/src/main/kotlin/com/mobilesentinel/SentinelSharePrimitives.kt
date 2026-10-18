@@ -135,6 +135,24 @@ object SentinelSharePrimitives {
         }
     }
 
+    /** Open a web address in the browser. @return true if an app was launched. */
+    @JvmStatic
+    fun openUrl(url: String): Boolean {
+        val context = SentinelPrimitives.getAppContext() ?: return false
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: Throwable) {
+            Log.w(TAG, "openUrl: ${e.message}", e)
+            false
+        }
+    }
+
     /**
      * Copy a file into the public Downloads folder under [name].
      * @return a human-readable location ("Download/name"), or "" on failure.

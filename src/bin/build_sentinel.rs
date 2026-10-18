@@ -87,7 +87,11 @@ fn main() {
     }
 
     if let Some(scheme) = &config.link_scheme {
-        if config.capabilities.iter().any(|c| c == "background_service") {
+        if config
+            .capabilities
+            .iter()
+            .any(|c| c == "background_service")
+        {
             inject_link_scheme(&config.project_path, scheme);
         } else {
             eprintln!("  WARNING: link_scheme needs the background_service feature; ignored");
@@ -236,10 +240,11 @@ fn load_config() -> Config {
         .collect();
 
     let default_screen_orientation = toml.get("screen_orientation").cloned();
-    let link_scheme = toml
-        .get("link_scheme")
-        .cloned()
-        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+'));
+    let link_scheme = toml.get("link_scheme").cloned().filter(|s| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+')
+    });
 
     // Capability resolution.
     //
