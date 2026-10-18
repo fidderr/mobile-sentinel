@@ -23,6 +23,13 @@ change.
 - `webview_media` capability: declares CAMERA, RECORD_AUDIO and
   MODIFY_AUDIO_SETTINGS so `getUserMedia` works in the app WebView (live
   voice/video calls). Manifest only; no other app's output changes.
+- `background_service::exit_app()` closes the app for real (screen and process).
+- `link_scheme` in `sentinel.toml`: clicking `scheme://...` opens the app; the link
+  arrives as `take_open_request()` = `link:<uri>` (needs `background_service`).
+  Open requests now also survive the process restart described below.
+- Back is now always routed to an app that implements `nativeOnBack` (not only while
+  the background service is on), so it can close a picture or go back a screen
+  instead of the system finishing the activity. Apps without the hook are unchanged.
 
 ## [0.2.2] - 2026-10-16
 

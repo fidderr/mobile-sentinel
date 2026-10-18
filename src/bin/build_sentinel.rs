@@ -24,6 +24,8 @@
 //! icon = "path/to/icon.webp"             # optional — copies to all mipmap densities
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
+//! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
+//!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
 //!
 //! Trimming is structural and unconditional: only the capability modules a
@@ -82,6 +84,14 @@ fn main() {
     }
     if !injection.policy_warnings.is_empty() {
         eprintln!("  ⚠ These capabilities are flagged by Google Play review. Ship only if you have a documented justification.");
+    }
+
+    if let Some(scheme) = &config.link_scheme {
+        if config.capabilities.iter().any(|c| c == "background_service") {
+            inject_link_scheme(&config.project_path, scheme);
+        } else {
+            eprintln!("  WARNING: link_scheme needs the background_service feature; ignored");
+        }
     }
 
     // Step 2: Copy icon + assets (if configured)
@@ -146,6 +156,47 @@ fn main() {
     println!("=== {} ready: {} ===", artifact_label, out_path.display());
 }
 
+const LINK_START: &str = "<!-- sentinel-link:start -->";
+const LINK_END: &str = "<!-- sentinel-link:end -->";
+
+/// Makes `scheme://...` links open the app: declares the link activity (its
+/// class ships with the `background_service` capability) with an intent
+/// filter for the scheme. Idempotent: an earlier block is replaced.
+fn inject_link_scheme(project_path: &Path, scheme: &str) {
+    let path = project_path.join("app/src/main/AndroidManifest.xml");
+    let Ok(mut manifest) = fs::read_to_string(&path) else {
+        return;
+    };
+    if let (Some(a), Some(b)) = (manifest.find(LINK_START), manifest.find(LINK_END)) {
+        let end = b + LINK_END.len();
+        if a < end {
+            manifest.replace_range(a..end, "");
+        }
+    }
+    let block = format!(
+        "        {LINK_START}\n\
+         \x20       <activity android:name=\"com.mobilesentinel.SentinelLinkActivity\"\n\
+         \x20           android:theme=\"@android:style/Theme.Translucent.NoTitleBar\"\n\
+         \x20           android:excludeFromRecents=\"true\" android:noHistory=\"true\" android:exported=\"true\">\n\
+         \x20           <intent-filter>\n\
+         \x20               <action android:name=\"android.intent.action.VIEW\" />\n\
+         \x20               <category android:name=\"android.intent.category.DEFAULT\" />\n\
+         \x20               <category android:name=\"android.intent.category.BROWSABLE\" />\n\
+         \x20               <data android:scheme=\"{scheme}\" />\n\
+         \x20           </intent-filter>\n\
+         \x20       </activity>\n\
+         \x20       {LINK_END}\n"
+    );
+    if let Some(idx) = manifest.find("</application>") {
+        let line_start = manifest[..idx].rfind('\n').map(|n| n + 1).unwrap_or(0);
+        manifest.insert_str(line_start, &block);
+        match fs::write(&path, manifest) {
+            Ok(()) => eprintln!("  Links: {scheme}:// opens the app"),
+            Err(e) => eprintln!("  Failed to write link scheme: {e}"),
+        }
+    }
+}
+
 struct Config {
     project_path: PathBuf,
     activity: String,
@@ -153,6 +204,7 @@ struct Config {
     asset_paths: Vec<PathBuf>,
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
+    link_scheme: Option<String>,
     release: bool,
     bundle_aab: bool,
 }
@@ -184,6 +236,10 @@ fn load_config() -> Config {
         .collect();
 
     let default_screen_orientation = toml.get("screen_orientation").cloned();
+    let link_scheme = toml
+        .get("link_scheme")
+        .cloned()
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+'));
 
     // Capability resolution.
     //
@@ -229,6 +285,7 @@ fn load_config() -> Config {
         asset_paths,
         capabilities,
         default_screen_orientation,
+        link_scheme,
         release,
         bundle_aab,
     }

@@ -14,10 +14,10 @@ import androidx.activity.OnBackPressedCallback
 /**
  * Library-init provider for the `background_service` capability. It runs when
  * the process starts, including when Android starts the process only for the
- * service, and hooks every activity's Back button: with the background
- * service on, Back asks the app what to do (go back a screen, or move to the
- * background) instead of destroying the activity, so the app is still there,
- * with its connection, when you come back to it.
+ * service, and hooks every activity's Back button: Back asks the app what to do
+ * (close a picture, go back a screen, move to the background or quit) instead
+ * of the system finishing the activity behind the app's back. An app that does
+ * not implement the `nativeOnBack` hook keeps the normal system behaviour.
  */
 class SentinelBackgroundInit : ContentProvider() {
 
@@ -43,7 +43,7 @@ class SentinelBackgroundInit : ContentProvider() {
                 val launcher = activity.packageManager
                     .getLaunchIntentForPackage(activity.packageName)?.component?.className
                 if (activity.componentName.className != launcher) return
-                if (mainCreated && SentinelBackground.isEnabled()) {
+                if (mainCreated) {
                     Log.i("MobileSentinel.Bg", "second main activity in one process: restarting the process")
                     android.os.Process.killProcess(android.os.Process.myPid())
                 }
@@ -56,7 +56,7 @@ class SentinelBackgroundInit : ContentProvider() {
                     a,
                     object : OnBackPressedCallback(true) {
                         override fun handleOnBackPressed() {
-                            if (!SentinelBackground.isEnabled() || !SentinelBackground.onBack(a)) {
+                            if (!SentinelBackground.onBack(a)) {
                                 // Not our business: let the system do what it normally does.
                                 isEnabled = false
                                 a.onBackPressedDispatcher.onBackPressed()

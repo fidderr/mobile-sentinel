@@ -263,13 +263,26 @@ object SentinelBackground {
     @JvmStatic
     fun setOpenRequest(what: String?) {
         pendingOpen = what?.takeIf { it.isNotEmpty() }
+        // Also on disk: opening the app may restart its process (see
+        // SentinelBackgroundInit), and the request must survive that.
+        val c = SentinelPrimitives.getAppContext() ?: return
+        prefs(c).edit()
+            .putString("pending_open", pendingOpen)
+            .putLong("pending_open_at", System.currentTimeMillis())
+            .apply()
     }
 
-    /** What a tapped notification asked the app to open, once. */
+    /** What a tapped notification or a clicked link asked the app to open, once. */
     @JvmStatic
     fun takeOpenRequest(): String? {
-        val v = pendingOpen
+        var v = pendingOpen
         pendingOpen = null
+        val c = SentinelPrimitives.getAppContext() ?: return v
+        val p = prefs(c)
+        if (v == null && System.currentTimeMillis() - p.getLong("pending_open_at", 0) < 120_000) {
+            v = p.getString("pending_open", null)
+        }
+        if (p.contains("pending_open")) p.edit().remove("pending_open").apply()
         return v
     }
 
@@ -278,6 +291,20 @@ object SentinelBackground {
     /** True while one of the app's activities is in front. */
     @JvmStatic
     fun isForeground(): Boolean = SentinelActivityTracker.currentResumedActivity != null
+
+    /** Closes the app for real: its screen goes, and so does the process. */
+    @JvmStatic
+    fun exitApp(): Boolean {
+        val a = SentinelActivityTracker.currentResumedActivity ?: return false
+        a.runOnUiThread {
+            a.finishAndRemoveTask()
+            // The native UI cannot be started a second time in this process.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                { android.os.Process.killProcess(android.os.Process.myPid()) }, 250,
+            )
+        }
+        return true
+    }
 
     /** Sends the app to the background (like Home), keeping its activity alive. */
     @JvmStatic

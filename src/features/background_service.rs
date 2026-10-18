@@ -108,6 +108,12 @@ pub fn move_to_back() -> bool {
     android_or!(android::move_to_back(), false)
 }
 
+/// Closes the app for real (screen and process), as Back does in an app that
+/// does not run in the background.
+pub fn exit_app() -> bool {
+    android_or!(android::exit_app(), false)
+}
+
 /// Call once from the app's `nativeStart` hook, on the thread the service
 /// called it on: resolves the helper classes there, where the app's class
 /// loader is available, so other threads can use them later.
@@ -179,6 +185,10 @@ mod android {
 
     pub(super) fn move_to_back() -> bool {
         call_bool("moveToBack")
+    }
+
+    pub(super) fn exit_app() -> bool {
+        call_bool("exitApp")
     }
 
     pub(super) fn cancel_all() {
