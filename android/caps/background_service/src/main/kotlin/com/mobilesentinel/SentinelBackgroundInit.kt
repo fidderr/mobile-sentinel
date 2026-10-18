@@ -21,9 +21,35 @@ import androidx.activity.OnBackPressedCallback
  */
 class SentinelBackgroundInit : ContentProvider() {
 
+    companion object {
+        /** The app's main activity has been created in this process already. */
+        @Volatile
+        private var mainCreated = false
+    }
+
     override fun onCreate(): Boolean {
         val app = context?.applicationContext as? Application ?: return false
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            /**
+             * The Rust UI framework (tao) can create its window only once per
+             * process: a second activity in the same process panics and takes the
+             * process down uncleanly. With the background service the process
+             * outlives the activity, so when the system makes a new main activity
+             * (it destroyed the old one, a theme/locale change, ...), restart the
+             * process on purpose, before the native code runs. The service comes
+             * back by itself and the system recreates the activity in the fresh process.
+             */
+            override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
+                val launcher = activity.packageManager
+                    .getLaunchIntentForPackage(activity.packageName)?.component?.className
+                if (activity.componentName.className != launcher) return
+                if (mainCreated && SentinelBackground.isEnabled()) {
+                    Log.i("MobileSentinel.Bg", "second main activity in one process: restarting the process")
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }
+                mainCreated = true
+            }
+
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
                 val a = activity as? ComponentActivity ?: return
                 a.onBackPressedDispatcher.addCallback(
