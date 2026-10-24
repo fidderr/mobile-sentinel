@@ -191,7 +191,7 @@ fn schedule_next(
 ) -> Result<(), RecipeError> {
     let schedule = parse_schedule(alarm_ctx)?;
     let zone = parse_zone(alarm_ctx)?;
-    let next = next_fire(&schedule, &zone, now)?;
+    let next = next_fire(&schedule, &zone, fire_search_start(alarm_ctx, now))?;
 
     let mut record = match store.load(instance_id) {
         Ok(r) => r,
@@ -245,6 +245,16 @@ fn schedule_next(
     Ok(())
 }
 
+/// Where the search for the next fire time starts: now, or the end of the
+/// occurrence the user asked to skip while that is still ahead.
+fn fire_search_start(alarm_ctx: &AlarmClassContext, now: DateTime<Utc>) -> DateTime<Utc> {
+    alarm_ctx
+        .skip_until_unix_ms
+        .and_then(DateTime::from_timestamp_millis)
+        .filter(|skip| *skip > now)
+        .unwrap_or(now)
+}
+
 fn fire(
     store: &ContextStore,
     instance_id: &InstanceId,
@@ -269,7 +279,7 @@ fn fire(
     store.write(record).map_err(RecipeError::Store)?;
 
     // Engage every "alarm is firing" platform surface.
-    engage_firing_surface(instance_id, alarm_ctx);
+    engage_firing_surface(instance_id, alarm_ctx, true);
     Ok(())
 }
 
@@ -288,7 +298,7 @@ fn resume(
         // Nothing firing — resume is a no-op (matches Pause being state-free).
         return Ok(());
     }
-    engage_firing_surface(instance_id, alarm_ctx);
+    engage_firing_surface(instance_id, alarm_ctx, false);
     Ok(())
 }
 
@@ -299,7 +309,7 @@ fn resume(
 /// Sound is resolved through the registered `SoundResolver`, falling back to
 /// the sink's system default. Best-effort: a missing sink (host builds,
 /// tests) is a silent no-op; the sink owns retries / failure logging.
-fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext) {
+fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext, fresh: bool) {
     if let Some(sink) = alarm_class_runtime().sink() {
         let runtime_cfg = alarm_class_runtime().config();
         let sound_uri = match alarm_class_runtime().sound_resolver() {
@@ -337,6 +347,12 @@ fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext
             kiosk_hide_status_bar: runtime_cfg.kiosk_hide_status_bar,
             kiosk_hide_nav_bar: runtime_cfg.kiosk_hide_nav_bar,
             firing_full_screen: runtime_cfg.firing_full_screen,
+            fade_in_ms: if fresh {
+                u32::from(alarm_ctx.fade_in_secs) * 1000
+            } else {
+                0
+            },
+            min_volume_percent: runtime_cfg.min_volume_percent,
         };
         if !sink.start_firing(&req) {
             log::warn!(
@@ -668,6 +684,11 @@ pub struct AlarmClassConfig {
     /// default-or-override knob; the default is an alarm-style buzz. An empty
     /// vec lets the firing sink fall back to its own built-in pattern.
     pub vibration_pattern: Vec<i64>,
+    /// While an alarm rings, raise the alarm stream volume to at least this
+    /// percentage (restored afterwards). 0 leaves the volume alone. App-wide
+    /// policy: it makes sure a muted phone still wakes the user.
+    #[serde(default)]
+    pub min_volume_percent: u8,
 }
 
 impl Default for AlarmClassConfig {
@@ -688,6 +709,7 @@ impl Default for AlarmClassConfig {
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
             vibration_pattern: vec![0, 400, 200, 400],
+            min_volume_percent: 0,
         }
     }
 }
@@ -831,6 +853,7 @@ impl AlarmClassConfig {
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
             vibration_pattern: Vec::new(),
+            min_volume_percent: 0,
         }
     }
 }
@@ -874,6 +897,8 @@ mod tests {
             bypass_dnd: false,
             snooze_count: 0,
             challenges_solved: false,
+            skip_until_unix_ms: None,
+            fade_in_secs: 0,
         }
     }
 
@@ -901,6 +926,45 @@ mod tests {
             }
             other => panic!("expected Scheduled, got {other:?}"),
         }
+    }
+
+    fn scheduled_fire(ctx: &AlarmClassContext) -> i64 {
+        let dir = TempDir::new().unwrap();
+        let store = ContextStore::new(dir.path());
+        let id = InstanceId::new("a");
+        store.write(sample_record("a", ctx.clone())).unwrap();
+        schedule_next(&store, &id, ctx, now()).unwrap();
+        match store.load(&id).unwrap().state {
+            SessionState::Scheduled { next_fire_unix_ms } => next_fire_unix_ms,
+            other => panic!("expected Scheduled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skipping_an_occurrence_moves_the_next_fire_to_the_one_after() {
+        let tue = Utc.with_ymd_and_hms(2026, 6, 9, 7, 0, 0).single().unwrap();
+        let wed = Utc.with_ymd_and_hms(2026, 6, 10, 7, 0, 0).single().unwrap();
+        let mut ctx = alarm_ctx();
+        assert_eq!(
+            scheduled_fire(&ctx),
+            tue.timestamp_millis(),
+            "no skip: Tuesday"
+        );
+
+        ctx.skip_until_unix_ms = Some(tue.timestamp_millis());
+        assert_eq!(
+            scheduled_fire(&ctx),
+            wed.timestamp_millis(),
+            "Tuesday skipped"
+        );
+    }
+
+    #[test]
+    fn a_skip_in_the_past_has_no_effect() {
+        let tue = Utc.with_ymd_and_hms(2026, 6, 9, 7, 0, 0).single().unwrap();
+        let mut ctx = alarm_ctx();
+        ctx.skip_until_unix_ms = Some(now().timestamp_millis() - 1);
+        assert_eq!(scheduled_fire(&ctx), tue.timestamp_millis());
     }
 
     #[test]

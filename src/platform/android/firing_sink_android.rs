@@ -84,6 +84,8 @@ impl FiringSink for AndroidFiringSink {
                 &req.audio_usage,
                 &req.audio_content_type,
                 req.looping,
+                req.fade_in_ms,
+                req.min_volume_percent,
             );
             if !audio_ok {
                 log::warn!(
@@ -299,7 +301,14 @@ mod jni {
     }
 
     #[cfg(feature = "firing-audio")]
-    pub(super) fn play_sound(uri: &str, usage: &str, content_type: &str, looping: bool) -> bool {
+    pub(super) fn play_sound(
+        uri: &str,
+        usage: &str,
+        content_type: &str,
+        looping: bool,
+        fade_in_ms: u32,
+        min_volume_percent: u8,
+    ) -> bool {
         with_jni_class(FIRING_AUDIO, false, |env, class| {
             let s_uri = jni_str(env, uri)?;
             let s_usage = jni_str(env, usage)?;
@@ -307,12 +316,14 @@ mod jni {
             env.call_static_method(
                 class,
                 "playSound",
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZJI)Z",
                 &[
                     JValue::Object(&s_uri.into()),
                     JValue::Object(&s_usage.into()),
                     JValue::Object(&s_ct.into()),
                     JValue::Bool(looping as jboolean),
+                    JValue::Long(i64::from(fade_in_ms)),
+                    JValue::Int(i32::from(min_volume_percent)),
                 ],
             )
             .ok()

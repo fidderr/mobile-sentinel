@@ -65,6 +65,11 @@ pub struct FireRequest {
     pub kiosk_hide_nav_bar: bool,
     /// Use a full-screen-intent notification.
     pub firing_full_screen: bool,
+    /// Fade the sound in over this many milliseconds (0 = full volume at once).
+    pub fade_in_ms: u32,
+    /// Raise the alarm stream volume to at least this percentage while the
+    /// sound plays, then restore it (0 = leave the volume alone).
+    pub min_volume_percent: u8,
 }
 
 /// Configuration for scheduling an OS exact alarm.
@@ -206,6 +211,8 @@ mod tests {
             kiosk_hide_status_bar: true,
             kiosk_hide_nav_bar: true,
             firing_full_screen: true,
+            fade_in_ms: 0,
+            min_volume_percent: 0,
         }
     }
 

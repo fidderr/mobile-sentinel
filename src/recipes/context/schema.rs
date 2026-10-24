@@ -130,6 +130,18 @@ pub struct AlarmClassContext {
     /// True when the consumer-supplied challenge gate hook has signalled
     /// completion within the current Firing session. Reset on dismiss.
     pub challenges_solved: bool,
+    /// Skip every occurrence at or before this instant (unix ms): the next
+    /// fire is computed from here instead of from now. Lets a consumer skip
+    /// one occurrence of a repeating alarm (a holiday) without disabling it.
+    /// In the past it has no effect. `#[serde(default)]` keeps older
+    /// persisted records loadable.
+    #[serde(default)]
+    pub skip_until_unix_ms: Option<i64>,
+    /// Seconds over which the alarm sound fades in when the alarm first
+    /// fires (0 = full volume at once). Not applied when the sound is
+    /// brought back after a challenge pause.
+    #[serde(default)]
+    pub fade_in_secs: u16,
 }
 
 /// Schedule specification — a serializable description of when fires occur.
@@ -372,6 +384,8 @@ mod tests {
             bypass_dnd: true,
             snooze_count: 0,
             challenges_solved: false,
+            skip_until_unix_ms: None,
+            fade_in_secs: 0,
         }
     }
 }

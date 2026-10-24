@@ -55,6 +55,11 @@ pub struct AlarmSpec {
     pub vibration_pattern: Option<Vec<i64>>,
     pub kiosk_mode: bool,
     pub bypass_dnd: bool,
+    /// Skip every occurrence at or before this instant (unix ms); see
+    /// [`AlarmClassContext::skip_until_unix_ms`].
+    pub skip_until_unix_ms: Option<i64>,
+    /// Fade-in time of the alarm sound in seconds (0 = off).
+    pub fade_in_secs: u16,
 }
 
 impl Default for AlarmSpec {
@@ -78,6 +83,8 @@ impl Default for AlarmSpec {
             vibration_pattern: None,
             kiosk_mode: false,
             bypass_dnd: false,
+            skip_until_unix_ms: None,
+            fade_in_secs: 0,
         }
     }
 }
@@ -97,6 +104,8 @@ impl AlarmSpec {
             bypass_dnd: self.bypass_dnd,
             snooze_count: 0,
             challenges_solved: false,
+            skip_until_unix_ms: self.skip_until_unix_ms,
+            fade_in_secs: self.fade_in_secs,
         }
     }
 
@@ -114,6 +123,8 @@ impl AlarmSpec {
             vibration_pattern: ctx.vibration_pattern.clone(),
             kiosk_mode: ctx.kiosk_mode,
             bypass_dnd: ctx.bypass_dnd,
+            skip_until_unix_ms: ctx.skip_until_unix_ms,
+            fade_in_secs: ctx.fade_in_secs,
         }
     }
 }
@@ -696,6 +707,7 @@ mod tests {
                 kiosk_hide_nav_bar: false,
                 firing_full_screen: true,
                 vibration_pattern: vec![0, 400, 200, 400],
+                min_volume_percent: 0,
             },
         });
         (kit, sink)
@@ -1102,6 +1114,26 @@ mod tests {
             kit.store().load(&id).unwrap().state,
             SessionState::Scheduled { .. }
         ));
+    }
+
+    #[test]
+    fn the_sound_fades_in_when_the_alarm_first_fires_but_not_when_it_resumes() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.fade_in_secs = 15;
+        let id = kit.create(spec).unwrap();
+
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        assert_eq!(sink.last_fire().unwrap().fade_in_ms, 15_000);
+
+        kit.resume(&id).unwrap();
+        assert_eq!(
+            sink.last_fire().unwrap().fade_in_ms,
+            0,
+            "bringing the sound back after a challenge starts at full volume"
+        );
     }
 
     #[test]

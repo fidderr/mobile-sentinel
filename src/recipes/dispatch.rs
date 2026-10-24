@@ -86,6 +86,8 @@ mod tests {
             bypass_dnd: false,
             snooze_count: 0,
             challenges_solved: false,
+            skip_until_unix_ms: None,
+            fade_in_secs: 0,
         })
     }
 
