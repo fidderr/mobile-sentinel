@@ -147,7 +147,7 @@ object SentinelJobGuardian {
                         val base = config?.optLong("ui_liveness_timeout_ms", 0) ?: 0
                         if (base > 0) {
                             val timeout = base shl livenessKills.coerceAtMost(2)
-                            if (isUiFrozen(context, mainPid, timeout)) {
+                            if (isUiFrozen(context, mainPid, job.optLong("_active_since_ms", 0L), timeout)) {
                                 killFrozenMain(mainPid, jobId, timeout)
                                 break
                             }
@@ -184,6 +184,9 @@ object SentinelJobGuardian {
                 if (SentinelBoot.isFromBeforeBoot(file)) continue
                 val json = JSONObject(file.readText())
                 if (json.optString("status") == "active") {
+                    // The job file is rewritten when the job becomes active, so
+                    // its mtime is when the guarded session began.
+                    json.put("_active_since_ms", file.lastModified())
                     active.add(json)
                 }
             } catch (_: Throwable) {
@@ -223,11 +226,13 @@ object SentinelJobGuardian {
      * (`mobile_sentinel_main_resumed`, written by the core activity tracker)
      * for longer than [timeoutMs] without the UI reporting a heartbeat
      * (`sentinel/jobs/ui_heartbeat`, see `jobs::ui_heartbeat` in Rust). The
-     * clock starts at the later of the resume and the last heartbeat. A UI
+     * clock starts at the latest of the resume, the last heartbeat and the
+     * moment the job became active (a UI idle for a while before the alarm
+     * fired has not frozen). A UI
      * that is not on screen (screen off, scanner in front, no activity yet)
      * is never judged, and neither is a marker left by another process.
      */
-    private fun isUiFrozen(context: Context, mainPid: Int, timeoutMs: Long): Boolean {
+    private fun isUiFrozen(context: Context, mainPid: Int, activeSinceMs: Long, timeoutMs: Long): Boolean {
         try {
             val marker = File(context.filesDir, MAIN_RESUMED_FILE)
             if (!marker.exists()) return false
@@ -235,7 +240,7 @@ object SentinelJobGuardian {
             if (parts.size != 2 || parts[0].toIntOrNull() != mainPid) return false
             val resumedAt = parts[1].toLongOrNull() ?: return false
             val beatAt = File(context.filesDir, "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
-            val lastSign = maxOf(resumedAt, beatAt)
+            val lastSign = maxOf(resumedAt, beatAt, activeSinceMs)
             return System.currentTimeMillis() - lastSign > timeoutMs
         } catch (e: Throwable) {
             Log.w(TAG, "isUiFrozen check failed: ${e.message}")
