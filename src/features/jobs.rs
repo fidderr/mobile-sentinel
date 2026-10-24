@@ -36,6 +36,13 @@ pub struct JobConfig {
 
     /// Whether to auto-remove the job file on completion. Default: true.
     pub auto_remove_on_complete: bool,
+
+    /// How long MAIN's UI may go without a [`ui_heartbeat`] while the app's
+    /// main activity is on screen and this job is active, before the
+    /// guardian kills MAIN so it is relaunched. `0` (default) turns the
+    /// check off. Missing in job files written by older versions.
+    #[serde(default)]
+    pub ui_liveness_timeout_ms: u64,
 }
 
 impl Default for JobConfig {
@@ -45,8 +52,29 @@ impl Default for JobConfig {
             start_main_delay_ms: 0,
             heads_up_delay_ms: 200,
             auto_remove_on_complete: true,
+            ui_liveness_timeout_ms: 0,
         }
     }
+}
+
+/// File (under the jobs directory) whose modification time is the last UI
+/// heartbeat. Mirrored by `SentinelJobGuardian`.
+pub const UI_HEARTBEAT_FILE: &str = "ui_heartbeat";
+
+/// Tell the `:sentinel` guardian the UI is alive. Call it periodically from
+/// the UI, and only when something that needs the UI to work has just
+/// worked (for a WebView app, a round trip through the page) — a heartbeat
+/// from a loop that can outlive a frozen UI defeats the check. Cheap: one
+/// small file write.
+pub fn ui_heartbeat() {
+    let dir = jobs_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    // Content is irrelevant, the guardian reads the modification time; a
+    // changing value just guarantees the mtime moves on coarse filesystems.
+    let stamp = chrono::Utc::now().timestamp_millis().to_string();
+    let _ = std::fs::write(dir.join(UI_HEARTBEAT_FILE), stamp);
 }
 
 /// A sentinel job file. One JSON file per job in `<files>/sentinel/jobs/<id>.json`.
@@ -254,6 +282,16 @@ mod tests {
         assert_eq!(cfg.start_main_delay_ms, 0);
         assert_eq!(cfg.heads_up_delay_ms, 200);
         assert!(cfg.auto_remove_on_complete);
+        assert_eq!(cfg.ui_liveness_timeout_ms, 0, "liveness check is opt-in");
+    }
+
+    #[test]
+    fn job_files_written_before_the_liveness_field_still_load() {
+        let old = r#"{"poll_interval_ms":100,"start_main_delay_ms":0,
+            "heads_up_delay_ms":200,"auto_remove_on_complete":true}"#;
+        let cfg: JobConfig = serde_json::from_str(old).unwrap();
+        assert_eq!(cfg.poll_interval_ms, 100);
+        assert_eq!(cfg.ui_liveness_timeout_ms, 0);
     }
 
     #[test]

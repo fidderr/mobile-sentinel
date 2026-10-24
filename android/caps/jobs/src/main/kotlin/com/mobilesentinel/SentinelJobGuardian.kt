@@ -27,6 +27,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 object SentinelJobGuardian {
     private const val TAG = "MobileSentinel.Guardian"
     private const val JOBS_DIR = "sentinel/jobs"
+    /** Mirrors `UI_HEARTBEAT_FILE` in Rust (`features::jobs`). */
+    private const val UI_HEARTBEAT_FILE = "ui_heartbeat"
+    /** Written by core's `SentinelActivityTracker`. */
+    private const val MAIN_RESUMED_FILE = SentinelActivityTracker.MAIN_RESUMED_FILE
     const val ACTION_JOB_HEADS_UP = "com.mobilesentinel.JOB_HEADS_UP"
     const val EXTRA_JOB_ID = "job_id"
 
@@ -42,6 +46,9 @@ object SentinelJobGuardian {
      */
     private const val MIN_LAUNCH_INTERVAL_MS = 3_000L
     @Volatile private var lastLaunchAtMs = 0L
+
+    /** MAIN kills for a frozen UI since the guardian last had nothing to guard. */
+    @Volatile private var livenessKills = 0
 
     /**
      * Start the polling loop. Called when an alarm receiver fires and
@@ -94,11 +101,13 @@ object SentinelJobGuardian {
                 val activeJobs = readActiveJobs(context)
                 if (activeJobs.isEmpty()) {
                     Log.i(TAG, "pollLoop: no active jobs — stopping")
+                    livenessKills = 0
                     guarding.set(false)
                     break
                 }
 
-                val mainAlive = isMainProcessAlive(context)
+                val mainPid = mainPid(context)
+                val mainAlive = mainPid != 0
 
                 for (job in activeJobs) {
                     val jobId = job.optString("id", "")
@@ -131,6 +140,17 @@ object SentinelJobGuardian {
                             }
                             sendHeadsUpBroadcast(context, jobId)
                             headsUpSent.add(jobId)
+                        }
+                        // Opt-in liveness check. Each kill doubles the allowed
+                        // silence (up to 4x) so a UI that needs long to start
+                        // is not killed in a loop.
+                        val base = config?.optLong("ui_liveness_timeout_ms", 0) ?: 0
+                        if (base > 0) {
+                            val timeout = base shl livenessKills.coerceAtMost(2)
+                            if (isUiFrozen(context, mainPid, timeout)) {
+                                killFrozenMain(mainPid, jobId, timeout)
+                                break
+                            }
                         }
                     }
                 }
@@ -179,20 +199,56 @@ object SentinelJobGuardian {
      * by a receiver without `android:process`); skipping our own pid there
      * made the guardian see MAIN as dead and relaunch it every poll.
      */
-    private fun isMainProcessAlive(context: Context): Boolean {
+    private fun isMainProcessAlive(context: Context): Boolean = mainPid(context) != 0
+
+    /** MAIN's pid, or 0 when it is not running. */
+    private fun mainPid(context: Context): Int {
         try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return false
-            val processes = am.runningAppProcesses ?: return false
+                ?: return 0
+            val processes = am.runningAppProcesses ?: return 0
             for (proc in processes) {
                 if (proc.processName == context.packageName) {
-                    return true
+                    return proc.pid
                 }
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "isMainProcessAlive check failed: ${e.message}")
+            Log.w(TAG, "mainPid check failed: ${e.message}")
+        }
+        return 0
+    }
+
+    /**
+     * Whether MAIN's UI looks frozen: its main activity has been on screen
+     * (`mobile_sentinel_main_resumed`, written by the core activity tracker)
+     * for longer than [timeoutMs] without the UI reporting a heartbeat
+     * (`sentinel/jobs/ui_heartbeat`, see `jobs::ui_heartbeat` in Rust). The
+     * clock starts at the later of the resume and the last heartbeat. A UI
+     * that is not on screen (screen off, scanner in front, no activity yet)
+     * is never judged, and neither is a marker left by another process.
+     */
+    private fun isUiFrozen(context: Context, mainPid: Int, timeoutMs: Long): Boolean {
+        try {
+            val marker = File(context.filesDir, MAIN_RESUMED_FILE)
+            if (!marker.exists()) return false
+            val parts = marker.readText().trim().split(' ')
+            if (parts.size != 2 || parts[0].toIntOrNull() != mainPid) return false
+            val resumedAt = parts[1].toLongOrNull() ?: return false
+            val beatAt = File(context.filesDir, "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
+            val lastSign = maxOf(resumedAt, beatAt)
+            return System.currentTimeMillis() - lastSign > timeoutMs
+        } catch (e: Throwable) {
+            Log.w(TAG, "isUiFrozen check failed: ${e.message}")
         }
         return false
+    }
+
+    /** Kill MAIN so the next poll relaunches it. */
+    private fun killFrozenMain(mainPid: Int, jobId: String, timeoutMs: Long) {
+        livenessKills++
+        Log.w(TAG, "UI frozen for more than ${timeoutMs}ms — killing MAIN (pid $mainPid), kill #$livenessKills")
+        headsUpSent.remove(jobId)
+        android.os.Process.killProcess(mainPid)
     }
 
     private fun startMainActivity(context: Context) {

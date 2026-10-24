@@ -69,11 +69,42 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         currentResumedActivity = activity
+        if (isMainActivity(activity)) writeMainResumed(activity, true)
     }
 
     override fun onActivityPaused(activity: Activity) {
         if (currentResumedActivity === activity) {
             currentResumedActivity = null
+        }
+        if (isMainActivity(activity)) writeMainResumed(activity, false)
+    }
+
+    /**
+     * Plain file, present while the app's main (launcher) activity is on
+     * screen; its content is `"<pid> <resume time ms>"`. Read by the `:sentinel`
+     * process, which has no other way to tell a UI that is frozen on screen
+     * from one that is simply not shown (screen off, scanner in front).
+     */
+    const val MAIN_RESUMED_FILE = "mobile_sentinel_main_resumed"
+
+    private fun isMainActivity(activity: Activity): Boolean {
+        val launcher = activity.packageManager
+            .getLaunchIntentForPackage(activity.packageName)?.component?.className
+        return launcher != null && activity.componentName.className == launcher
+    }
+
+    private fun writeMainResumed(activity: Activity, resumed: Boolean) {
+        try {
+            val file = java.io.File(activity.applicationContext.filesDir, MAIN_RESUMED_FILE)
+            if (resumed) {
+                // "<pid> <resume time ms>": a marker left behind by a killed
+                // process names a pid that is no longer MAIN's.
+                file.writeText("${android.os.Process.myPid()} ${System.currentTimeMillis()}")
+            } else if (file.exists()) {
+                file.delete()
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "writeMainResumed($resumed) failed: ${e.message}")
         }
     }
 
