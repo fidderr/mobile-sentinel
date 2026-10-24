@@ -498,20 +498,26 @@ impl AlarmKit {
 
         // 2. Process active jobs — for any active job with an
         //    instance_id payload, engage_or_fire (reengage if firing,
-        //    dispatch Fire otherwise).
+        //    dispatch Fire otherwise). Each instance is engaged once: every
+        //    engage restarts the audio and launches the activity again.
+        let mut engaged = std::collections::HashSet::new();
         if let Ok(jobs) = crate::jobs::get_active_jobs() {
             for job in &jobs {
                 if let Some(instance_id_str) =
                     job.payload.get("instance_id").and_then(|v| v.as_str())
                 {
-                    self.engage_or_fire(&InstanceId::new(instance_id_str.to_owned()));
+                    if engaged.insert(instance_id_str.to_owned()) {
+                        self.engage_or_fire(&InstanceId::new(instance_id_str.to_owned()));
+                    }
                 }
             }
         }
 
-        // 3. Reengage any firing session
+        // 3. Reengage a firing session that no active job covered.
         if let Ok(Some(session)) = self.current_session() {
-            let _ = self.reengage(&session.instance_id);
+            if !engaged.contains(&session.instance_id.0) {
+                let _ = self.reengage(&session.instance_id);
+            }
         }
     }
 
@@ -772,6 +778,44 @@ mod tests {
         // reengage is an alias for resume — also re-engages.
         kit.reengage(&id).unwrap();
         assert_eq!(sink.fire_count(), fires_before + 2);
+    }
+
+    #[test]
+    fn on_startup_engages_a_firing_instance_with_an_active_job_once() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+
+        let id = kit.create(weekday_spec()).unwrap();
+        let mut record = kit.store().load(&id).unwrap();
+        record.state = SessionState::Firing {
+            fired_at_unix_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        kit.store().write(record).unwrap();
+        // The process-global jobs dir is shared; the instance id is unique.
+        crate::jobs::register_job(
+            &id.0,
+            serde_json::json!({ "instance_id": id.0 }),
+            crate::jobs::JobConfig::default(),
+        )
+        .unwrap();
+        crate::jobs::activate_job(&id.0).unwrap();
+
+        let fires_before = sink.fire_count();
+        kit.on_startup(&[]);
+        let engaged = sink
+            .fires
+            .lock()
+            .unwrap()
+            .iter()
+            .skip(fires_before)
+            .filter(|f| f.instance_id == id.0)
+            .count();
+        let _ = crate::jobs::remove_job(&id.0);
+        assert_eq!(
+            engaged, 1,
+            "one firing surface per instance, not one per source"
+        );
     }
 
     #[test]

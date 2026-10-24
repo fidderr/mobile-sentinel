@@ -132,10 +132,14 @@ impl FiringSink for AndroidFiringSink {
         }
 
         // Full-screen intent — wakes the lock screen and shows the activity.
+        // Skipped when the activity is already in front: launching it again
+        // only delivers a new intent, which pauses and resumes it.
         #[cfg(feature = "full-screen-intent")]
         if req.firing_full_screen {
             if let Some(fqcn) = &req.activity_fqcn {
-                let _ = jni::show_full_screen_intent(fqcn, true);
+                if !crate::platform::android::is_activity_resumed(fqcn) {
+                    let _ = jni::show_full_screen_intent(fqcn, true);
+                }
             }
         }
 
