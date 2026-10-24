@@ -38,13 +38,11 @@ object SentinelJobGuardian {
     private var guardThread: Thread? = null
     private val headsUpSent = mutableSetOf<String>()
 
-    /**
-     * Minimum gap between two MAIN launches. A cold start takes a few
-     * seconds; launching again on every poll meanwhile delivers a new intent
-     * each time, and every delivery pauses and resumes the activity, which
-     * cancels the user's touches and eventually wedges the WebView.
-     */
-    private const val MIN_LAUNCH_INTERVAL_MS = 3_000L
+    // All policy (how long between launches, how long a UI may be silent, how
+    // far the allowance grows after a kill) comes from the job config that
+    // Rust writes (`JobConfig`); the guardian only enforces it. A launch
+    // throttle matters because every launch delivers a new intent that pauses
+    // and resumes the activity, cancelling touches.
     @Volatile private var lastLaunchAtMs = 0L
 
     /** MAIN kills for a frozen UI since the guardian last had nothing to guard. */
@@ -117,7 +115,8 @@ object SentinelJobGuardian {
                         // so we re-send after it comes back up.
                         headsUpSent.remove(jobId)
                         val now = SystemClock.elapsedRealtime()
-                        if (lastLaunchAtMs != 0L && now - lastLaunchAtMs < MIN_LAUNCH_INTERVAL_MS) {
+                        val minLaunchGap = config?.optLong("min_launch_interval_ms", 3_000L) ?: 3_000L
+                        if (lastLaunchAtMs != 0L && now - lastLaunchAtMs < minLaunchGap) {
                             // A launch is already on its way; give MAIN time to come up.
                             break
                         }
@@ -142,11 +141,12 @@ object SentinelJobGuardian {
                             headsUpSent.add(jobId)
                         }
                         // Opt-in liveness check. Each kill doubles the allowed
-                        // silence (up to 4x) so a UI that needs long to start
-                        // is not killed in a loop.
+                        // silence, up to the configured cap, so a UI that needs
+                        // long to start is not killed in a loop.
                         val base = config?.optLong("ui_liveness_timeout_ms", 0) ?: 0
                         if (base > 0) {
-                            val timeout = base shl livenessKills.coerceAtMost(2)
+                            val cap = (config?.optLong("ui_liveness_backoff_cap", 4L) ?: 4L).coerceAtLeast(1L)
+                            val timeout = base * minOf(1L shl livenessKills.coerceAtMost(30), cap)
                             if (isUiFrozen(context, mainPid, job.optLong("_active_since_ms", 0L), timeout)) {
                                 killFrozenMain(mainPid, jobId, timeout)
                                 break

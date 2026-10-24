@@ -617,6 +617,7 @@ pub const CAPABILITIES: &[Capability] = &[
         policy_sensitive: false,
         kotlin_sources: &[
             "SentinelExactAlarmPrimitives.kt",
+            "SentinelArmedAlarms.kt",
             "SentinelAlarmReceiver.kt",
             "SentinelTimeChangeReceiver.kt",
             "SentinelBootReceiver.kt",

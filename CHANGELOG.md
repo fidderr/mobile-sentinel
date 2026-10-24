@@ -13,6 +13,21 @@ change.
 
 ### Added
 
+- `AlarmKit::on_startup` now returns a `StartupReport` and ends rings a reboot
+  interrupted (past the challenge gate); a snooze still in the future is kept
+  and re-armed. An unchanged alarm is no longer reset to Idle on startup, and
+  `update()` with an unchanged spec keeps a snooze in progress.
+- `skip_until_unix_ms` (spec + context): skip one occurrence of a repeating alarm.
+- `fade_in_secs` (per alarm) and `AlarmClassConfig::min_volume_percent`: the sound
+  fades in on the first ring, and the alarm stream is raised to a minimum while
+  ringing and restored afterwards.
+- `InitConfig::panic_log`: every Rust panic goes to logcat and
+  `files/sentinel/last_panic.txt`.
+- `jobs::ui_heartbeat()` + `JobConfig::{ui_liveness_timeout_ms, ui_liveness_backoff_cap,
+  min_launch_interval_ms}`: the `:sentinel` guardian restarts a frozen UI, and
+  throttles launches of MAIN. All policy comes from the job config.
+- The Kotlin exact-alarm module records what it armed (`sentinel/armed/`) and the
+  boot service replays it after a reboot; it never reads Rust's own files.
 - `background_service` capability: a quiet foreground service (type
   `remoteMessaging`, lowest-importance notification) that keeps the app's
   process and connection alive after the UI is closed, restarts after boot or
@@ -31,6 +46,16 @@ change.
 - Back is now always routed to an app that implements `nativeOnBack` (not only while
   the background service is on), so it can close a picture or go back a screen
   instead of the system finishing the activity. Apps without the hook are unchanged.
+
+### Fixed
+
+- The alarm screen froze after a reboot or force-stop mid-alarm: the boot receiver
+  ran in MAIN and started the job guardian there, whose liveness check skipped its
+  own pid and relaunched the activity ~10x per second. The receiver now runs in
+  `:sentinel`, the guardian counts its own process as MAIN, launches are throttled,
+  and kiosk/job state older than the current boot is ignored.
+- `start_firing` no longer launches the full-screen intent over a visible UI, and
+  `on_startup` engages a firing alarm once instead of twice.
 
 ## [0.2.2] - 2026-10-16
 

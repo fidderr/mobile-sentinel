@@ -48,6 +48,7 @@ pub struct InitConfig {
     pub logger: bool,                 // logcat logger. Default: true
     pub crash_loop_mitigation: bool,  // SIGABRT → _exit(0). Default: true
     pub clean_process_exit: bool,     // framework exit() → _exit(0), no destructor race. Default: true
+    pub panic_log: bool,              // every Rust panic → logcat + files/sentinel/last_panic.txt. Default: true
     pub log_tag: String,              // Default: "MobileSentinel"
     pub log_level: log::LevelFilter,  // Default: Debug (debug builds) / Info (release)
 }
@@ -334,7 +335,16 @@ pub struct JobConfig {
     pub start_main_delay_ms: u64,      // default 0
     pub heads_up_delay_ms: u64,        // default 200
     pub auto_remove_on_complete: bool, // default true
+    pub ui_liveness_timeout_ms: u64,   // 0 = off (default). Restart MAIN if its UI sends no `jobs::ui_heartbeat()` for this long while the main activity is on screen
+    pub ui_liveness_backoff_cap: u32,  // default 4: each kill doubles the allowed silence, up to this multiple
+    pub min_launch_interval_ms: u64,   // default 3000: never launch MAIN more often than this
 }
+
+// The UI proves it is alive with `jobs::ui_heartbeat()`, called only after a real
+// round trip through the UI worked. The `:sentinel` guardian restarts MAIN when the
+// heartbeat stops (policy above comes from this config; the guardian only enforces it).
+// State written before the current boot is ignored by the guardian and the kiosk
+// lock, and `AlarmKit::on_startup` ends such rings (see `StartupReport`).
 
 pub enum JobStatus { Pending, Active, Completed }
 
@@ -629,6 +639,7 @@ pub struct AlarmClassConfig {
     pub kiosk_hide_nav_bar: bool,
     pub firing_full_screen: bool,
     pub vibration_pattern: Vec<i64>,     // app-default waveform (alternating wait/vibrate ms)
+    pub min_volume_percent: u8,          // raise the alarm stream to at least this % while ringing, restore after (0 = leave alone)
 }
 ```
 
@@ -649,6 +660,8 @@ pub struct AlarmSpec {
     pub vibration_pattern: Option<Vec<i64>>,  // None = inherit AlarmClassConfig default
     pub kiosk_mode: bool,
     pub bypass_dnd: bool,
+    pub skip_until_unix_ms: Option<i64>,      // skip every occurrence at or before this instant (one skipped occurrence)
+    pub fade_in_secs: u16,                    // sound fade-in on the first ring (0 = off); not applied on resume
 }
 impl AlarmSpec {
     pub fn from_context(ctx: &AlarmClassContext) -> Self;
@@ -669,7 +682,7 @@ kit.pause(&id) -> Result<(), AlarmKitError>                      // quiet audio 
 kit.resume(&id) -> Result<(), AlarmKitError>                     // full re-engage (alias: reengage)
 kit.reengage(&id) -> Result<(), AlarmKitError>                   // re-engage firing surface (MAIN restart)
 kit.handle_job_heads_up(job_id: &str)                            // sentinel heads-up landing pad
-kit.on_startup(&[(String, AlarmSpec)])                           // rearm + process jobs + reengage firing
+kit.on_startup(&[(String, AlarmSpec)])                           // end rings a reboot interrupted, rearm (a snooze in progress is kept), process jobs, reengage firing -> StartupReport { ended_by_reboot }
 ```
 
 ### Inspection

@@ -43,6 +43,8 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             // Activate the job file (set status to "active" if pending).
             if (!isWatchdog && jobId.isNotBlank()) {
                 activateJob(context, jobId)
+                // It fired, so the OS no longer holds it: do not replay it at boot.
+                SentinelArmedAlarms.forget(context, jobId)
             }
 
             // Start the job guardian polling loop. It will detect the

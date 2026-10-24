@@ -43,6 +43,28 @@ pub struct JobConfig {
     /// check off. Missing in job files written by older versions.
     #[serde(default)]
     pub ui_liveness_timeout_ms: u64,
+
+    /// After the guardian kills MAIN for a frozen UI, the allowed silence
+    /// doubles with every further kill, up to this many times
+    /// `ui_liveness_timeout_ms` (so a UI that is merely slow to start is not
+    /// killed in a loop). Default: 4.
+    #[serde(default = "default_ui_liveness_backoff_cap")]
+    pub ui_liveness_backoff_cap: u32,
+
+    /// Minimum gap between two launches of MAIN. A launch delivers a new
+    /// intent that pauses and resumes the activity, so launching again while
+    /// a cold start is still under way cancels the user's touches.
+    /// Default: 3000.
+    #[serde(default = "default_min_launch_interval_ms")]
+    pub min_launch_interval_ms: u64,
+}
+
+fn default_ui_liveness_backoff_cap() -> u32 {
+    4
+}
+
+fn default_min_launch_interval_ms() -> u64 {
+    3_000
 }
 
 impl Default for JobConfig {
@@ -53,6 +75,8 @@ impl Default for JobConfig {
             heads_up_delay_ms: 200,
             auto_remove_on_complete: true,
             ui_liveness_timeout_ms: 0,
+            ui_liveness_backoff_cap: default_ui_liveness_backoff_cap(),
+            min_launch_interval_ms: default_min_launch_interval_ms(),
         }
     }
 }
@@ -283,6 +307,8 @@ mod tests {
         assert_eq!(cfg.heads_up_delay_ms, 200);
         assert!(cfg.auto_remove_on_complete);
         assert_eq!(cfg.ui_liveness_timeout_ms, 0, "liveness check is opt-in");
+        assert_eq!(cfg.ui_liveness_backoff_cap, 4);
+        assert_eq!(cfg.min_launch_interval_ms, 3_000);
     }
 
     #[test]
@@ -292,6 +318,11 @@ mod tests {
         let cfg: JobConfig = serde_json::from_str(old).unwrap();
         assert_eq!(cfg.poll_interval_ms, 100);
         assert_eq!(cfg.ui_liveness_timeout_ms, 0);
+        assert_eq!(
+            cfg.min_launch_interval_ms, 3_000,
+            "a missing field takes its default, not zero"
+        );
+        assert_eq!(cfg.ui_liveness_backoff_cap, 4);
     }
 
     #[test]

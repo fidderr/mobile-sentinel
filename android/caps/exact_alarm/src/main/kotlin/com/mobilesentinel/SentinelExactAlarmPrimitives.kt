@@ -55,6 +55,7 @@ object SentinelExactAlarmPrimitives {
                 }
                 am.setAlarmClock(AlarmManager.AlarmClockInfo(targetTimeMs, showIntent), pi)
             }
+            SentinelArmedAlarms.record(c, id, targetTimeMs)
             true
         } catch (e: Throwable) {
             Log.e(TAG, "scheduleExactAlarm($id): ${e.message}", e)
@@ -80,6 +81,7 @@ object SentinelExactAlarmPrimitives {
                 am.cancel(pi)
                 pi.cancel()
             }
+            SentinelArmedAlarms.forget(c, id)
             true
         } catch (e: Throwable) {
             Log.e(TAG, "cancelExactAlarm($id): ${e.message}", e)
