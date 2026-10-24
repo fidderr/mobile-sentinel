@@ -63,7 +63,9 @@ pub use alarm_class::{
     alarm_class_runtime, handle_trigger_with_store, AlarmClass, AlarmClassRuntime,
 };
 #[cfg(feature = "alarm-kit")]
-pub use alarm_kit::{AlarmKit, AlarmKitConfig, AlarmKitError, AlarmKitSession, AlarmSpec};
+pub use alarm_kit::{
+    AlarmKit, AlarmKitConfig, AlarmKitError, AlarmKitSession, AlarmSpec, StartupReport,
+};
 
 // ---- Recipe-engine re-exports (the `recipes` feature) ----
 #[cfg(feature = "recipes")]

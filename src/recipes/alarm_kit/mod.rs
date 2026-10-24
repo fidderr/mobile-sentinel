@@ -143,6 +143,15 @@ pub struct AlarmKitSession {
     pub challenges_solved: bool,
 }
 
+/// What [`AlarmKit::on_startup`] had to clean up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartupReport {
+    /// Alarms that were ringing (or snoozed past their time) when the device
+    /// rebooted. They were dismissed; the consumer may want to tell the user
+    /// and clear its own per-session files.
+    pub ended_by_reboot: Vec<InstanceId>,
+}
+
 #[derive(Debug, Error)]
 pub enum AlarmKitError {
     #[error("alarm not found: {0}")]
@@ -471,32 +480,61 @@ impl AlarmKit {
     // -----------------------------------------------------------------
 
     /// Single call that does everything needed on app startup:
-    /// 1. Rearm all provided alarms (skip any currently firing)
-    /// 2. Process active jobs (reengage firing instances)
-    /// 3. Reengage any firing session found in ContextStore
-    pub fn on_startup(&self, alarms: &[(String, AlarmSpec)]) {
-        // 1. Rearm all alarms (skip firing ones)
-        let active_firing_id = self
-            .current_session()
-            .ok()
-            .flatten()
-            .map(|s| s.instance_id.0.clone());
+    /// 1. End sessions that did not survive a reboot (see [`StartupReport`])
+    /// 2. Rearm all provided alarms. An alarm whose spec is unchanged keeps
+    ///    its state — in particular a snooze in progress — and only has its
+    ///    exact alarm re-armed; a changed or new spec is (re)scheduled.
+    /// 3. Process active jobs (engage the firing instances)
+    /// 4. Reengage a firing session no active job covered
+    pub fn on_startup(&self, alarms: &[(String, AlarmSpec)]) -> StartupReport {
+        self.on_startup_at(
+            alarms,
+            crate::utilities::boot::boot_unix_ms(),
+            Utc::now().timestamp_millis(),
+        )
+    }
+
+    /// [`Self::on_startup`] with the boot time and the clock injected.
+    fn on_startup_at(
+        &self,
+        alarms: &[(String, AlarmSpec)],
+        boot_unix_ms: Option<i64>,
+        now_ms: i64,
+    ) -> StartupReport {
+        let mut report = StartupReport::default();
+
+        // 1. A reboot kills the process, the sound and the lock screen
+        //    takeover, and clears every exact alarm. A ringing alarm from
+        //    before the boot therefore counts as dismissed (it must not
+        //    ring again when the app is merely opened), and so does a
+        //    snooze whose time passed while the device was off. A snooze
+        //    still in the future is kept and re-armed below.
+        if let Some(boot) = boot_unix_ms {
+            if let Ok(records) = self.store.enumerate_all() {
+                for record in records {
+                    let stale = match record.state {
+                        SessionState::Firing { fired_at_unix_ms } => fired_at_unix_ms < boot,
+                        SessionState::Snoozed {
+                            next_fire_unix_ms, ..
+                        } => next_fire_unix_ms <= now_ms,
+                        _ => false,
+                    };
+                    if stale && self.end_after_reboot(&record.id) {
+                        report.ended_by_reboot.push(record.id.clone());
+                    }
+                }
+            }
+        }
+
+        // 2. Rearm the provided alarms.
         for (id_str, spec) in alarms {
             let id = InstanceId::new(id_str.clone());
-            if Some(id_str) == active_firing_id.as_ref() {
-                continue;
-            }
-            let res = if self.get(&id).is_ok() {
-                self.update(&id, spec.clone())
-            } else {
-                self.create_with_id(id, spec.clone())
-            };
-            if let Err(e) = res {
+            if let Err(e) = self.rearm(&id, spec, now_ms) {
                 log::warn!("[AlarmKit] on_startup rearm failed for {}: {:?}", id_str, e);
             }
         }
 
-        // 2. Process active jobs — for any active job with an
+        // 3. Process active jobs — for any active job with an
         //    instance_id payload, engage_or_fire (reengage if firing,
         //    dispatch Fire otherwise). Each instance is engaged once: every
         //    engage restarts the audio and launches the activity again.
@@ -513,10 +551,75 @@ impl AlarmKit {
             }
         }
 
-        // 3. Reengage a firing session that no active job covered.
+        // 4. Reengage a firing session that no active job covered.
         if let Ok(Some(session)) = self.current_session() {
             if !engaged.contains(&session.instance_id.0) {
                 let _ = self.reengage(&session.instance_id);
+            }
+        }
+        report
+    }
+
+    /// Dismiss a session left over from before a reboot, bypassing the
+    /// challenge gate (the user is not at the phone solving anything).
+    /// Returns whether the instance was dismissed.
+    fn end_after_reboot(&self, id: &InstanceId) -> bool {
+        let firing = matches!(
+            self.store.load(id).map(|r| r.state),
+            Ok(SessionState::Firing { .. })
+        );
+        if firing {
+            let _ = dispatch_trigger(&self.store, Trigger::Solve, id);
+        }
+        match self.dismiss(id) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("[AlarmKit] ending {} after reboot failed: {:?}", id.0, e);
+                false
+            }
+        }
+    }
+
+    /// Make sure `id` is stored with `spec` and armed, without disturbing a
+    /// firing session or a snooze in progress.
+    fn rearm(&self, id: &InstanceId, spec: &AlarmSpec, now_ms: i64) -> Result<(), AlarmKitError> {
+        let record = match self.store.load(id) {
+            Ok(r) => r,
+            Err(StoreError::NotFound(_)) => return self.create_with_id(id.clone(), spec.clone()),
+            Err(e) => return Err(e.into()),
+        };
+        let RecipeContext::AlarmClass(ctx) = &record.context else {
+            return self.create_with_id(id.clone(), spec.clone());
+        };
+        if matches!(record.state, SessionState::Firing { .. }) {
+            return Ok(());
+        }
+        if AlarmSpec::from_context(ctx) != *spec {
+            return self.update(id, spec.clone());
+        }
+        match record.state {
+            // The exact alarm was cleared by the reboot; the stored fire
+            // time is still the right one.
+            SessionState::Snoozed {
+                next_fire_unix_ms, ..
+            } if next_fire_unix_ms > now_ms => {
+                if let Some(sink) = alarm_class_runtime().sink() {
+                    let req = crate::firing::ExactAlarmRequest {
+                        alarm_id: id.0.clone(),
+                        target_unix_ms: next_fire_unix_ms,
+                        metadata_json: None,
+                    };
+                    if !sink.schedule_exact_alarm(&req) {
+                        log::warn!("[AlarmKit] re-arming snooze of {} was rejected", id.0);
+                    }
+                }
+                Ok(())
+            }
+            SessionState::Snoozed { .. } => Ok(()),
+            // Scheduled / Idle / Dismissed: recompute and arm the next fire.
+            _ => {
+                dispatch_trigger(&self.store, Trigger::Schedule, id)?;
+                Ok(())
             }
         }
     }
@@ -816,6 +919,156 @@ mod tests {
             engaged, 1,
             "one firing surface per instance, not one per source"
         );
+    }
+
+    fn force_state(kit: &AlarmKit, id: &InstanceId, state: SessionState) {
+        let mut record = kit.store().load(id).unwrap();
+        record.state = state;
+        kit.store().write(record).unwrap();
+    }
+
+    #[test]
+    fn on_startup_ends_a_ring_from_before_the_boot_and_keeps_a_later_one() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = 2_000_000_000_000_i64;
+        let boot = now - 60_000;
+
+        let before = kit.create(weekday_spec()).unwrap();
+        let after = kit.create(weekday_spec()).unwrap();
+        force_state(
+            &kit,
+            &before,
+            SessionState::Firing {
+                fired_at_unix_ms: boot - 5_000,
+            },
+        );
+        force_state(
+            &kit,
+            &after,
+            SessionState::Firing {
+                fired_at_unix_ms: boot + 5_000,
+            },
+        );
+
+        let report = kit.on_startup_at(&[], Some(boot), now);
+
+        assert_eq!(report.ended_by_reboot, vec![before.clone()]);
+        assert!(
+            !matches!(
+                kit.store().load(&before).unwrap().state,
+                SessionState::Firing { .. }
+            ),
+            "a ring from before the boot is over"
+        );
+        assert!(sink.stops.lock().unwrap().contains(&before.0));
+        assert!(
+            matches!(
+                kit.store().load(&after).unwrap().state,
+                SessionState::Firing { .. }
+            ),
+            "a ring that started after the boot is left alone"
+        );
+    }
+
+    #[test]
+    fn on_startup_does_not_end_anything_when_the_boot_time_is_unknown() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Firing {
+                fired_at_unix_ms: 1,
+            },
+        );
+
+        let report = kit.on_startup_at(&[], None, 2_000_000_000_000);
+
+        assert!(report.ended_by_reboot.is_empty());
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+    }
+
+    #[test]
+    fn on_startup_keeps_a_snooze_in_progress_and_rearms_it() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = 2_000_000_000_000_i64;
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        let snoozed = SessionState::Snoozed {
+            snooze_count: 1,
+            next_fire_unix_ms: now + 300_000,
+        };
+        force_state(&kit, &id, snoozed.clone());
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert!(report.ended_by_reboot.is_empty());
+        assert_eq!(kit.store().load(&id).unwrap().state, snoozed);
+        let last = sink.last_schedule().expect("snooze re-armed");
+        assert_eq!(last.alarm_id, id.0);
+        assert_eq!(last.target_unix_ms, now + 300_000);
+    }
+
+    #[test]
+    fn on_startup_ends_a_snooze_whose_time_passed_while_the_device_was_off() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let now = 2_000_000_000_000_i64;
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Snoozed {
+                snooze_count: 1,
+                next_fire_unix_ms: now - 10_000,
+            },
+        );
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(report.ended_by_reboot, vec![id.clone()]);
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
+    }
+
+    #[test]
+    fn on_startup_reschedules_an_alarm_whose_spec_changed() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let now = 2_000_000_000_000_i64;
+        let id = kit.create(weekday_spec()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Snoozed {
+                snooze_count: 1,
+                next_fire_unix_ms: now + 300_000,
+            },
+        );
+        let mut changed = weekday_spec();
+        changed.label = "Renamed".into();
+
+        kit.on_startup_at(&[(id.0.clone(), changed.clone())], Some(now - 60_000), now);
+
+        assert_eq!(kit.get(&id).unwrap(), changed);
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
     }
 
     #[test]

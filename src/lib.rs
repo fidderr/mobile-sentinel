@@ -187,7 +187,7 @@ pub use recipes::{
 #[cfg(feature = "alarm-kit")]
 pub use recipes::{
     alarm_class_runtime, AlarmClass, AlarmKit, AlarmKitConfig, AlarmKitError, AlarmKitSession,
-    AlarmSpec,
+    AlarmSpec, StartupReport,
 };
 
 // FiringSink — the small injectable firing interface the recipe engine uses.

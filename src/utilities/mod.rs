@@ -2,6 +2,7 @@
 
 pub mod app_dirs;
 pub mod asset_extractor;
+pub mod boot;
 // Only the on-disk stores use it.
 #[cfg(any(feature = "jobs", feature = "state-store"))]
 pub(crate) mod atomic_write;

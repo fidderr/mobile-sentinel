@@ -159,6 +159,9 @@ object SentinelJobGuardian {
         val active = mutableListOf<JSONObject>()
         for (file in files) {
             try {
+                // An "active" job last written before the current boot belongs
+                // to a session the reboot ended; MAIN's startup cleans it up.
+                if (SentinelBoot.isFromBeforeBoot(file)) continue
                 val json = JSONObject(file.readText())
                 if (json.optString("status") == "active") {
                     active.add(json)

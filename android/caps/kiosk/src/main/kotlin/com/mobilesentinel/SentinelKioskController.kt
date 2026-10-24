@@ -157,6 +157,14 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         return try {
             val file = java.io.File(ctx.applicationContext.filesDir, KIOSK_STATE_FILE)
             if (!file.exists()) return null
+            // Written before the current boot: that alarm died with the
+            // reboot. Engaging the lock for it would trap the user in an
+            // app that has nothing ringing.
+            if (SentinelBoot.isFromBeforeBoot(file)) {
+                Log.i(TAG, "ignoring kiosk state from before the boot")
+                file.delete()
+                return null
+            }
             val lines = file.readText().lines()
             if (lines.size < 2) return null
             val fqcn = lines[0].trim()
