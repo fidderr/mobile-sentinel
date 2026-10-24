@@ -42,11 +42,15 @@
             </intent-filter>
         </receiver>
 
-        <!-- Boot completed receiver — re-arms alarms after reboot. -->
+        <!-- Boot completed receiver — re-arms alarms after reboot. Runs in
+             :sentinel because it starts the job guardian, which must not live
+             in MAIN (some OEMs, e.g. ColorOS, hold BOOT_COMPLETED back until
+             the user opens the app, so MAIN is often already up). -->
         <receiver
             android:name="com.mobilesentinel.SentinelBootReceiver"
             android:enabled="true"
             android:exported="true"
+            android:process=":sentinel"
             android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

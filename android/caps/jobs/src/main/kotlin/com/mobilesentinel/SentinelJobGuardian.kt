@@ -4,7 +4,7 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -33,6 +33,15 @@ object SentinelJobGuardian {
     private val guarding = AtomicBoolean(false)
     private var guardThread: Thread? = null
     private val headsUpSent = mutableSetOf<String>()
+
+    /**
+     * Minimum gap between two MAIN launches. A cold start takes a few
+     * seconds; launching again on every poll meanwhile delivers a new intent
+     * each time, and every delivery pauses and resumes the activity, which
+     * cancels the user's touches and eventually wedges the WebView.
+     */
+    private const val MIN_LAUNCH_INTERVAL_MS = 3_000L
+    @Volatile private var lastLaunchAtMs = 0L
 
     /**
      * Start the polling loop. Called when an alarm receiver fires and
@@ -98,10 +107,16 @@ object SentinelJobGuardian {
                         // MAIN is dead — start it. Clear heads-up tracking
                         // so we re-send after it comes back up.
                         headsUpSent.remove(jobId)
+                        val now = SystemClock.elapsedRealtime()
+                        if (lastLaunchAtMs != 0L && now - lastLaunchAtMs < MIN_LAUNCH_INTERVAL_MS) {
+                            // A launch is already on its way; give MAIN time to come up.
+                            break
+                        }
                         val startDelay = config?.optLong("start_main_delay_ms", 0) ?: 0
                         if (startDelay > 0) {
                             Thread.sleep(startDelay)
                         }
+                        lastLaunchAtMs = SystemClock.elapsedRealtime()
                         startMainActivity(context)
                         // After starting MAIN, break and re-poll next iteration
                         // to give MAIN time to come up.
@@ -155,14 +170,18 @@ object SentinelJobGuardian {
         return active
     }
 
+    /**
+     * MAIN is alive when a process named exactly `packageName` runs. That
+     * includes this process when the guardian was started inside MAIN (e.g.
+     * by a receiver without `android:process`); skipping our own pid there
+     * made the guardian see MAIN as dead and relaunch it every poll.
+     */
     private fun isMainProcessAlive(context: Context): Boolean {
         try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                 ?: return false
-            val myPid = Process.myPid()
             val processes = am.runningAppProcesses ?: return false
             for (proc in processes) {
-                if (proc.pid == myPid) continue // skip :sentinel itself
                 if (proc.processName == context.packageName) {
                     return true
                 }
