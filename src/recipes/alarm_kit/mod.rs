@@ -248,9 +248,18 @@ impl AlarmKit {
     }
 
     /// Update an alarm's spec. Cancels any pending exact alarm and
-    /// re-arms with the new schedule.
+    /// re-arms with the new schedule. A snooze in progress is left alone
+    /// when the spec did not change — consumers save every alarm whenever
+    /// any one of them changes, and that must not cancel a snooze.
     pub fn update(&self, id: &InstanceId, spec: AlarmSpec) -> Result<(), AlarmKitError> {
         let mut record = self.store.load(id)?;
+        if let RecipeContext::AlarmClass(old) = &record.context {
+            if matches!(record.state, SessionState::Snoozed { .. })
+                && AlarmSpec::from_context(old) == spec
+            {
+                return Ok(());
+            }
+        }
         record.context = RecipeContext::AlarmClass(spec.into_context());
         // Reset state to Idle so Schedule recomputes cleanly. We don't
         // disturb a Firing session — the consumer must dismiss first.
@@ -1038,6 +1047,30 @@ mod tests {
         let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
 
         assert_eq!(report.ended_by_reboot, vec![id.clone()]);
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
+    }
+
+    #[test]
+    fn update_with_an_unchanged_spec_keeps_a_snooze_but_a_changed_one_replaces_it() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let snoozed = SessionState::Snoozed {
+            snooze_count: 2,
+            next_fire_unix_ms: 2_000_000_000_000,
+        };
+        force_state(&kit, &id, snoozed.clone());
+
+        kit.update(&id, weekday_spec()).unwrap();
+        assert_eq!(kit.store().load(&id).unwrap().state, snoozed);
+
+        let mut changed = weekday_spec();
+        changed.label = "Other".into();
+        kit.update(&id, changed).unwrap();
         assert!(matches!(
             kit.store().load(&id).unwrap().state,
             SessionState::Scheduled { .. }
