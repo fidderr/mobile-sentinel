@@ -220,6 +220,11 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         this.hideNavBar = hideNavBar
         this.enabled = true
         appContext?.let { writeKioskStateFile(it) }
+        // The target may already be on screen: the firing sink does not relaunch an
+        // activity that is visible, so no resume event will come to lock it.
+        currentResumedActivity?.let { a ->
+            if (isTargetActivity(a)) a.runOnUiThread { engageOn(a) }
+        }
         Log.i(
             TAG,
             "enabled — target=$activityFqcn home=$blockHome back=$blockBack recents=$blockRecents debounce=${relaunchDebounceMs}ms hideStatus=$hideStatusBar hideNav=$hideNavBar",
@@ -385,6 +390,17 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         maybeAutoEngageFromPrefs(activity)
         if (!enabled) return
         if (!isTargetActivity(activity)) return
+        engageOn(activity)
+    }
+
+    /**
+     * Apply the lock to the target [activity] that is on screen: exclude it from
+     * recents, immersive policy, show-when-locked, and consume Back. Runs when
+     * the target resumes, and also when the lock is switched on while the
+     * target is already showing (no resume event comes then). Idempotent.
+     */
+    private fun engageOn(activity: Activity) {
+        if (!enabled) return
 
         // Target activity resumed — finish any lingering internal activities
         // (scanner, file picker) that may still be alive in the background.
