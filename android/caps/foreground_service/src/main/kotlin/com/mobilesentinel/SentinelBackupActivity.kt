@@ -210,6 +210,12 @@ class SentinelBackupActivity : Activity() {
     override fun onBackPressed() {
     }
 
+    /** Somebody is there: the ring limit starts over, as on the app's own screen. */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) SentinelRing.noteActivity(this)
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean = when (event.keyCode) {
         KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE -> true
         else -> super.dispatchKeyEvent(event)
