@@ -18,6 +18,8 @@ import android.util.Log
 class SentinelRearmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.i(TAG, "onReceive: ${intent.action}")
+        SentinelPrimitives.init(context.applicationContext)
+        if (!SentinelBoot.filesAvailable(context)) return
         val pending = goAsync()
         Thread({
             try {

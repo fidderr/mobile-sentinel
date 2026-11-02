@@ -30,6 +30,10 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             val instanceId = intent.getStringExtra(EXTRA_INSTANCE_ID).orEmpty()
 
             Log.i(TAG, "onReceive: instance=$instanceId")
+            if (!SentinelBoot.filesAvailable(app)) {
+                Log.w(TAG, "files are locked until the first unlock, cannot ring")
+                return
+            }
 
             // The OS only keeps the device awake until this returns.
             SentinelRing.holdCpu(app, DELIVERY_WAKE_MS)

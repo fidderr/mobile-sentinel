@@ -10,6 +10,7 @@
         <provider
             android:name="com.mobilesentinel.SentinelJobsInitializer"
             android:authorities="${applicationId}.sentinel.jobs.init"
+            android:directBootAware="true"
             android:exported="false"
             android:initOrder="89" />
     </application>

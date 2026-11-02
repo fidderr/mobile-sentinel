@@ -12,10 +12,24 @@
     <application>
         <service
             android:name="com.mobilesentinel.SentinelForegroundService"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="false"
             android:process=":sentinel"
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- The alarm's screen when the app's own cannot come up. -->
+        <activity
+            android:name="com.mobilesentinel.SentinelBackupActivity"
+            android:directBootAware="true"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:process=":sentinel"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:turnScreenOn="true" />
     </application>
 </manifest>

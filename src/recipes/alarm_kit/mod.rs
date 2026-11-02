@@ -24,6 +24,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::firing::FiringSink;
+pub use crate::jobs::RingEnd;
 use crate::recipes::alarm_class::{
     alarm_class_runtime, AlarmClass, AlarmClassConfig, SoundResolver,
 };
@@ -173,9 +174,9 @@ pub struct StartupReport {
     /// One-shot alarms that have nothing left to ring. The consumer should
     /// switch them off.
     pub finished: Vec<InstanceId>,
-    /// Alarms that rang until their limit with nobody doing anything. They were
+    /// Rings the platform ended by itself while Rust was not around. They were
     /// dismissed, and the next occurrence, if any, is armed.
-    pub ended_by_limit: Vec<InstanceId>,
+    pub ring_ends: Vec<(InstanceId, RingEnd)>,
 }
 
 /// An alarm that did not ring at its time. See [`StartupReport::missed`].
@@ -223,9 +224,9 @@ const ACTIVITY_THROTTLE_MS: i64 = 30_000;
 /// Mirrors `ACTIVITY_FILE` in `SentinelRing`, relative to the app's files dir.
 const ACTIVITY_FILE: &str = "sentinel/ringing/activity";
 
-/// Alarms that ended by their limit while the app was running, until the consumer
-/// asks; see [`AlarmKit::take_ended_by_limit`].
-static ENDED_BY_LIMIT: std::sync::Mutex<Vec<InstanceId>> = std::sync::Mutex::new(Vec::new());
+/// Rings the platform ended while the app was running, until the consumer asks;
+/// see [`AlarmKit::take_ring_ends`].
+static RING_ENDS: std::sync::Mutex<Vec<(InstanceId, RingEnd)>> = std::sync::Mutex::new(Vec::new());
 
 /// Whether the OS delivering an alarm (the active marker, set at `marker_ms`)
 /// is about the alarm's current state. A wake the app superseded since (it was
@@ -527,12 +528,14 @@ impl AlarmKit {
     /// to ring (the alarm was deleted, or moved on since) is dropped: it would
     /// keep the guardian relaunching the app for no alarm.
     fn engage_or_fire(&self, id: &InstanceId) {
-        if crate::jobs::ring_limit_reached(&id.0) && self.end_session(id) {
-            ENDED_BY_LIMIT
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(id.clone());
-            return;
+        if let Some(end) = crate::jobs::ring_end(&id.0) {
+            if self.end_session(id) {
+                RING_ENDS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((id.clone(), end));
+                return;
+            }
         }
         let record = match self.store.load(id) {
             Ok(r) => r,
@@ -575,11 +578,11 @@ impl AlarmKit {
         let _ = std::fs::write(file, "");
     }
 
-    /// Alarms that ended by their limit while the app was running, since the last
-    /// call. The consumer may want to tell the user and switch off a one-time alarm.
-    pub fn take_ended_by_limit(&self) -> Vec<InstanceId> {
+    /// Rings the platform ended while the app was running, since the last call. The
+    /// consumer may want to tell the user and switch off a one-time alarm.
+    pub fn take_ring_ends(&self) -> Vec<(InstanceId, RingEnd)> {
         std::mem::take(
-            &mut ENDED_BY_LIMIT
+            &mut RING_ENDS
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
@@ -752,9 +755,9 @@ impl AlarmKit {
                     if self.end_session(&record.id) {
                         report.ended_by_reboot.push(record.id.clone());
                     }
-                } else if crate::jobs::ring_limit_reached(&record.id.0) {
+                } else if let Some(end) = crate::jobs::ring_end(&record.id.0) {
                     if self.end_session(&record.id) {
-                        report.ended_by_limit.push(record.id.clone());
+                        report.ring_ends.push((record.id.clone(), end));
                     }
                 } else if let Some(due_unix_ms) = snooze_too_late {
                     if self.end_session(&record.id) {
@@ -1033,6 +1036,9 @@ mod tests {
                 late_ring_window_ms: LATE_WINDOW,
                 fallback_sound_id: Some(SoundIdSpec::Bundled("backup".into())),
                 fallback_title: "Alarm".into(),
+                backup_holds: 20,
+                backup_hold_ms: 3_000,
+                backup_text: "Hold".into(),
             },
         });
         (kit, sink)
@@ -2290,10 +2296,10 @@ mod tests {
             kit.store().load(&id).unwrap().state,
             SessionState::Scheduled { .. }
         ));
-        assert!(!crate::jobs::ring_limit_reached(&id.0));
+        assert_eq!(crate::jobs::ring_end(&id.0), None);
         assert_eq!(crate::jobs::active_since_ms(&id.0), None);
-        assert_eq!(kit.take_ended_by_limit(), vec![id.clone()]);
-        assert!(kit.take_ended_by_limit().is_empty());
+        assert_eq!(kit.take_ring_ends(), vec![(id.clone(), RingEnd::Limit)]);
+        assert!(kit.take_ring_ends().is_empty());
         let _ = crate::jobs::remove_job(&id.0);
     }
 
@@ -2320,13 +2326,56 @@ mod tests {
             now,
         );
 
-        assert_eq!(report.ended_by_limit, vec![id.clone()]);
+        assert_eq!(report.ring_ends, vec![(id.clone(), RingEnd::Limit)]);
         assert!(report.missed.is_empty(), "it did ring");
         assert!(matches!(
             kit.store().load(&id).unwrap().state,
             SessionState::Scheduled { next_fire_unix_ms } if next_fire_unix_ms > now
         ));
-        assert!(!crate::jobs::ring_limit_reached(&id.0));
+        assert_eq!(crate::jobs::ring_end(&id.0), None);
+    }
+
+    #[test]
+    fn solving_the_backup_screen_ends_the_alarm_past_the_gate_at_the_next_start() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.challenges = vec![ChallengeSpec {
+            challenge_type: "math".into(),
+            difficulty: 0,
+            config: serde_json::json!({}),
+        }];
+        let id = kit.create(spec.clone()).unwrap();
+        active_job(&id);
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        let jobs = crate::jobs::jobs_dir();
+        std::fs::write(jobs.join(format!("{}.dismiss", id.0)), "").unwrap();
+        let now = Utc::now().timestamp_millis();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 3_600_000), now);
+
+        assert_eq!(report.ring_ends, vec![(id.clone(), RingEnd::BackupScreen)]);
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
+        assert_eq!(crate::jobs::ring_end(&id.0), None);
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn the_backup_challenge_is_part_of_the_plan() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+
+        kit.create(weekday_spec()).unwrap();
+
+        let plan = plan_of(&sink.last_schedule().unwrap());
+        assert_eq!(plan["backup_holds"], 20);
+        assert_eq!(plan["backup_hold_ms"], 3_000);
+        assert_eq!(plan["backup_text"], "Hold");
     }
 
     #[test]

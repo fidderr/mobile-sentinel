@@ -10,6 +10,7 @@
         <provider
             android:name="com.mobilesentinel.SentinelKioskInitializer"
             android:authorities="${applicationId}.sentinel.kiosk.init"
+            android:directBootAware="true"
             android:exported="false"
             android:initOrder="90" />
     </application>

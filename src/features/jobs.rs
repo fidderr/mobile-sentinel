@@ -40,8 +40,22 @@ pub const ACTIVE_SUFFIX: &str = ".active";
 /// Mirrored by `SentinelActiveJobs` in Kotlin.
 pub const LIMIT_SUFFIX: &str = ".limit";
 
+/// Suffix of the marker the backup screen leaves when its challenge was solved:
+/// `<files>/sentinel/jobs/<id>.dismiss`. Same arrangement as [`LIMIT_SUFFIX`].
+pub const DISMISS_SUFFIX: &str = ".dismiss";
+
+/// How a ring ended that the platform ended by itself, with Rust not around to
+/// decide; see [`ring_end`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RingEnd {
+    /// It reached its limit with nobody responding.
+    Limit,
+    /// The user solved the challenge on the backup screen.
+    BackupScreen,
+}
+
 /// Guardian behavior configuration for a single job.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobConfig {
     /// Polling interval in milliseconds. Default: 500.
     pub poll_interval_ms: u64,
@@ -75,6 +89,12 @@ pub struct JobConfig {
     /// Default: 3000.
     #[serde(default = "default_min_launch_interval_ms")]
     pub min_launch_interval_ms: u64,
+
+    /// After this many times the UI failed (frozen, or died before it ever came up)
+    /// the platform's backup screen takes over, if the firing plan has one. `0`
+    /// (default) means never.
+    #[serde(default)]
+    pub ui_failures_before_backup: u32,
 }
 
 fn default_ui_liveness_backoff_cap() -> u32 {
@@ -94,6 +114,7 @@ impl Default for JobConfig {
             auto_remove_on_complete: true,
             ui_liveness_timeout_ms: 0,
             ui_liveness_backoff_cap: default_ui_liveness_backoff_cap(),
+            ui_failures_before_backup: 0,
             min_launch_interval_ms: default_min_launch_interval_ms(),
         }
     }
@@ -261,9 +282,16 @@ pub fn active_since_ms(id: &str) -> Option<i64> {
     i64::try_from(since_epoch.as_millis()).ok()
 }
 
-/// Whether the ring of this job stopped because it reached its limit.
-pub fn ring_limit_reached(id: &str) -> bool {
-    limit_marker_path(id).exists()
+/// How this job's ring ended, if the platform ended it by itself and Rust has not
+/// dealt with that yet. A solved challenge wins from a limit reached before it.
+pub fn ring_end(id: &str) -> Option<RingEnd> {
+    if end_marker_path(id, DISMISS_SUFFIX).exists() {
+        Some(RingEnd::BackupScreen)
+    } else if end_marker_path(id, LIMIT_SUFFIX).exists() {
+        Some(RingEnd::Limit)
+    } else {
+        None
+    }
 }
 
 /// Deactivate a job: remove its active marker and keep the job file. Use this
@@ -293,12 +321,13 @@ fn marker_path(id: &str) -> PathBuf {
     jobs_dir().join(format!("{id}{ACTIVE_SUFFIX}"))
 }
 
-fn limit_marker_path(id: &str) -> PathBuf {
-    jobs_dir().join(format!("{id}{LIMIT_SUFFIX}"))
+fn end_marker_path(id: &str, suffix: &str) -> PathBuf {
+    jobs_dir().join(format!("{id}{suffix}"))
 }
 
 fn remove_marker(id: &str) -> Result<(), JobGuardianError> {
-    let _ = std::fs::remove_file(limit_marker_path(id));
+    let _ = std::fs::remove_file(end_marker_path(id, LIMIT_SUFFIX));
+    let _ = std::fs::remove_file(end_marker_path(id, DISMISS_SUFFIX));
     let marker = marker_path(id);
     match std::fs::remove_file(&marker) {
         Ok(()) => Ok(()),

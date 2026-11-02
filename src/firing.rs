@@ -87,6 +87,13 @@ pub struct FireRequest {
     /// How late this alarm may still ring when its time passed with the phone
     /// off. Read by the boot replay, which runs without Rust.
     pub late_ring_window_ms: i64,
+    /// How many long holds the platform's backup screen asks for, used when the
+    /// app's own screen cannot come up. 0 means no backup screen.
+    pub backup_holds: u32,
+    /// How long each of those holds takes, in milliseconds.
+    pub backup_hold_ms: u32,
+    /// The text on the backup screen's hold button.
+    pub backup_text: String,
 }
 
 /// Configuration for scheduling an OS exact alarm.
@@ -244,6 +251,9 @@ mod tests {
             min_volume_percent: 0,
             ring_limit_secs: Some(1800),
             late_ring_window_ms: 0,
+            backup_holds: 0,
+            backup_hold_ms: 0,
+            backup_text: String::new(),
         }
     }
 

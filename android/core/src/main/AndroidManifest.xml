@@ -22,6 +22,7 @@
         <provider
             android:name=".SentinelCoreInitializer"
             android:authorities="${applicationId}.sentinel.core.init"
+            android:directBootAware="true"
             android:exported="false"
             android:initOrder="100" />
     </application>

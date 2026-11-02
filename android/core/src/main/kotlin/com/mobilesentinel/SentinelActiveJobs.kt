@@ -25,6 +25,9 @@ object SentinelActiveJobs {
     /** A ring stopped at its limit. Mirrors `LIMIT_SUFFIX` in Rust; Rust removes it. */
     private const val LIMIT_SUFFIX = ".limit"
 
+    /** The backup screen's challenge was solved. Mirrors `DISMISS_SUFFIX` in Rust; Rust removes it. */
+    private const val DISMISS_SUFFIX = ".dismiss"
+
     const val ACTION_JOB_HEADS_UP = "com.mobilesentinel.JOB_HEADS_UP"
     const val EXTRA_JOB_ID = "job_id"
 
@@ -44,9 +47,10 @@ object SentinelActiveJobs {
                 Log.w(TAG, "mark: no job file for '$id'")
                 return false
             }
-            // A new fire makes a limit reached earlier irrelevant, whether or not
-            // the app was around to deal with it.
+            // A new fire makes how the previous ring ended irrelevant, whether or
+            // not the app was around to deal with it.
             File(dir, "$id$LIMIT_SUFFIX").delete()
+            File(dir, "$id$DISMISS_SUFFIX").delete()
             val marker = File(dir, "$id$SUFFIX")
             if (!marker.exists() || SentinelBoot.isFromBeforeBoot(marker)) {
                 marker.writeText(System.currentTimeMillis().toString())
@@ -71,14 +75,20 @@ object SentinelActiveJobs {
      * brought it up.
      */
     @JvmStatic
-    fun markLimitReached(context: Context, id: String) {
+    fun markLimitReached(context: Context, id: String) = leaveWord(context, id, LIMIT_SUFFIX)
+
+    /** The same for the backup screen's challenge having been solved. */
+    @JvmStatic
+    fun requestDismiss(context: Context, id: String) = leaveWord(context, id, DISMISS_SUFFIX)
+
+    private fun leaveWord(context: Context, id: String, suffix: String) {
         try {
-            File(File(context.filesDir, DIR), "$id$LIMIT_SUFFIX").writeText("")
+            File(File(context.filesDir, DIR), "$id$suffix").writeText("")
             context.sendBroadcast(
                 Intent(ACTION_JOB_HEADS_UP).setPackage(context.packageName).putExtra(EXTRA_JOB_ID, id),
             )
         } catch (e: Throwable) {
-            Log.w(TAG, "markLimitReached('$id') failed: ${e.message}")
+            Log.w(TAG, "leaving word $suffix for '$id' failed: ${e.message}")
         }
     }
 

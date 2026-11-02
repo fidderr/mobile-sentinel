@@ -37,6 +37,7 @@ object SentinelRing {
     private const val PLAN_EXT = ".plan"
     private const val VOLUME_FILE = "volume_to_restore"
     private const val FROZEN_KILL_FILE = "frozen_kill"
+    private const val UI_FAILED_FILE = "ui_failed"
     private const val ACTIVITY_THROTTLE_MS = 30_000L
 
     /** Touched when the user does something. Mirrors `ACTIVITY_FILE` in Rust. */
@@ -96,8 +97,14 @@ object SentinelRing {
     @JvmStatic
     fun stopRing(id: String): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
-        if (!planFile(c, id).exists()) return true
-        return send(c, Intent(ACTION_STOP).putExtra(EXTRA_ID, id))
+        return stop(c, id)
+    }
+
+    /** End [id]'s ring. Does nothing when it does not ring. */
+    @JvmStatic
+    fun stop(context: Context, id: String): Boolean {
+        if (!planFile(context, id).exists()) return true
+        return send(context, Intent(ACTION_STOP).putExtra(EXTRA_ID, id))
     }
 
     /** JNI entry: silence the ring while the user works on it. */
@@ -206,6 +213,29 @@ object SentinelRing {
         } catch (e: Throwable) {
             Log.w(TAG, "noteActivity failed: ${e.message}")
         }
+    }
+
+    /** The UI cannot be relied on for this ring: the backup screen takes over. */
+    @JvmStatic
+    fun markUiFailed(context: Context) {
+        try {
+            val file = File(dir(context), UI_FAILED_FILE)
+            file.parentFile?.mkdirs()
+            file.writeText("")
+        } catch (e: Throwable) {
+            Log.w(TAG, "markUiFailed failed: ${e.message}")
+        }
+    }
+
+    @JvmStatic
+    fun uiFailed(context: Context): Boolean {
+        val file = File(dir(context), UI_FAILED_FILE)
+        return file.exists() && !SentinelBoot.isFromBeforeBoot(file)
+    }
+
+    @JvmStatic
+    fun clearUiFailed(context: Context) {
+        File(dir(context), UI_FAILED_FILE).delete()
     }
 
     /** The guardian is about to kill a frozen UI; see [startRing]. */

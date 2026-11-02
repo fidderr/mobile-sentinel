@@ -378,6 +378,9 @@ fn fire_request(
         min_volume_percent: runtime_cfg.min_volume_percent,
         ring_limit_secs: alarm_ctx.ring_limit_secs,
         late_ring_window_ms: runtime_cfg.late_ring_window_ms,
+        backup_holds: runtime_cfg.backup_holds,
+        backup_hold_ms: runtime_cfg.backup_hold_ms,
+        backup_text: runtime_cfg.backup_text.clone(),
     }
 }
 
@@ -637,6 +640,17 @@ pub struct AlarmClassConfig {
     /// Notification title for an alarm without a label.
     #[serde(default)]
     pub fallback_title: String,
+    /// How many long holds the platform's backup screen asks for, used when the
+    /// app's own screen cannot come up (before the first unlock, or when the UI
+    /// keeps failing). 0 means no backup screen.
+    #[serde(default)]
+    pub backup_holds: u32,
+    /// How long each of those holds takes, in milliseconds.
+    #[serde(default)]
+    pub backup_hold_ms: u32,
+    /// The text on the backup screen's hold button.
+    #[serde(default)]
+    pub backup_text: String,
 }
 
 fn default_true() -> bool {
@@ -673,6 +687,9 @@ impl Default for AlarmClassConfig {
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
             fallback_sound_id: None,
             fallback_title: "Alarm".into(),
+            backup_holds: 0,
+            backup_hold_ms: 0,
+            backup_text: String::new(),
         }
     }
 }
@@ -821,6 +838,9 @@ impl AlarmClassConfig {
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
             fallback_sound_id: None,
             fallback_title: String::new(),
+            backup_holds: 0,
+            backup_hold_ms: 0,
+            backup_text: String::new(),
         }
     }
 }

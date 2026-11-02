@@ -21,6 +21,7 @@
              guardian. Runs in :sentinel. -->
         <receiver
             android:name="com.mobilesentinel.SentinelAlarmReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="false"
             android:process=":sentinel">
@@ -33,9 +34,11 @@
              again, or a ring started with MAIN down. In MAIN, where Rust runs. -->
         <receiver
             android:name="com.mobilesentinel.SentinelRearmReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
@@ -51,11 +54,13 @@
              the user opens the app, so MAIN is often already up). -->
         <receiver
             android:name="com.mobilesentinel.SentinelBootReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="true"
             android:process=":sentinel"
             android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
             <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>

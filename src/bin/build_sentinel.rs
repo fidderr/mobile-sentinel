@@ -24,6 +24,7 @@
 //! icon = "path/to/icon.webp"             # optional — copies to all mipmap densities
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
+//! direct_boot = true                     # optional — files are device-encrypted, so alarms ring before the first unlock
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -84,6 +85,10 @@ fn main() {
     }
     if !injection.policy_warnings.is_empty() {
         eprintln!("  ⚠ These capabilities are flagged by Google Play review. Ship only if you have a documented justification.");
+    }
+
+    if config.direct_boot {
+        inject_direct_boot(&config.project_path);
     }
 
     if let Some(scheme) = &config.link_scheme {
@@ -201,6 +206,29 @@ fn inject_link_scheme(project_path: &Path, scheme: &str) {
     }
 }
 
+/// Keeps the app's files in device-encrypted storage, so an alarm can ring from a
+/// boot until the first unlock, as a system clock does. The price is that they are
+/// protected less than credential-encrypted files, so it is opt-in. Files from a
+/// build without this stay behind: the app starts empty once.
+fn inject_direct_boot(project_path: &Path) {
+    const ATTR: &str = "android:defaultToDeviceProtectedStorage=\"true\"";
+    let path = project_path.join("app/src/main/AndroidManifest.xml");
+    let Ok(mut manifest) = fs::read_to_string(&path) else {
+        return;
+    };
+    if manifest.contains(ATTR) {
+        return;
+    }
+    let Some(idx) = manifest.find("<application") else {
+        return;
+    };
+    manifest.insert_str(idx + "<application".len(), &format!(" {ATTR}"));
+    match fs::write(&path, manifest) {
+        Ok(()) => eprintln!("  Direct boot: files are device-encrypted"),
+        Err(e) => eprintln!("  Failed to write direct boot: {e}"),
+    }
+}
+
 struct Config {
     project_path: PathBuf,
     activity: String,
@@ -209,6 +237,7 @@ struct Config {
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
     link_scheme: Option<String>,
+    direct_boot: bool,
     release: bool,
     bundle_aab: bool,
 }
@@ -291,6 +320,7 @@ fn load_config() -> Config {
         capabilities,
         default_screen_orientation,
         link_scheme,
+        direct_boot: toml.get("direct_boot").is_some_and(|v| v == "true"),
         release,
         bundle_aab,
     }

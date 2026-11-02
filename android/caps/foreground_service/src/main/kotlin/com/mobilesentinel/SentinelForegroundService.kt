@@ -50,7 +50,9 @@ class SentinelForegroundService : Service() {
     private var paused = false
     private var uiVisible = false
     private var postedFullScreen = false
+    private var postedBackup = false
     private var postedOwner: String? = null
+    private var backupLaunched = false
     private var commandSeen = false
     private var ticking = false
     private var ticks = 0
@@ -94,6 +96,8 @@ class SentinelForegroundService : Service() {
     private fun ring(id: String, visible: Boolean) {
         reload()
         uiVisible = visible || SentinelRing.mainOnScreen(this)
+        val first = owner == null && id in ringing
+        if (first) owner = id
         // First, whatever fails later: Android kills a service started in the
         // foreground that does not get there in time.
         showForeground()
@@ -104,7 +108,7 @@ class SentinelForegroundService : Service() {
         }
         val wasPaused = paused
         paused = false
-        if (owner == null) {
+        if (first) {
             startOutputs(ringing.getValue(id), fade = true)
         } else if (wasPaused) {
             ringing[owner]?.let { startOutputs(it, fade = false) }
@@ -177,6 +181,7 @@ class SentinelForegroundService : Service() {
         ticking = false
         stopOutputs()
         SentinelRing.restoreVolume(this)
+        SentinelRing.clearUiFailed(this)
         SentinelRing.cancelWatchdog(this)
         SentinelRing.releaseCpu()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -203,6 +208,7 @@ class SentinelForegroundService : Service() {
                 }
             }
             endRingsPastTheirLimit()
+            bringUpBackupScreenIfNeeded()
             if (ringing.isEmpty()) {
                 shutDown()
                 return
@@ -225,6 +231,28 @@ class SentinelForegroundService : Service() {
             if (ticks % WATCHDOG_EVERY_TICKS == 0) SentinelRing.armWatchdog(this@SentinelForegroundService)
             if (ticks % CPU_RENEW_EVERY_TICKS == 0) SentinelRing.holdCpu(this@SentinelForegroundService, CPU_HOLD_MS)
             handler.postDelayed(this, TICK_MS)
+        }
+    }
+
+    /** Whether the app's own screen cannot be counted on for this ring. */
+    private fun needsBackup(plan: JSONObject): Boolean =
+        plan.optInt("backup_holds", 0) > 0 &&
+            (!SentinelBoot.isUserUnlocked(this) || SentinelRing.uiFailed(this))
+
+    private fun bringUpBackupScreenIfNeeded() {
+        val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: return
+        if (!needsBackup(plan)) return
+        showForeground()
+        if (backupLaunched) return
+        backupLaunched = true
+        // Allowed with the overlay permission; the full-screen notification is the
+        // way in otherwise.
+        try {
+            startActivity(
+                Intent(this, SentinelBackupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "starting the backup screen failed: ${e.message}")
         }
     }
 
@@ -296,13 +324,19 @@ class SentinelForegroundService : Service() {
     /** Show the foreground notification, posting again only if it changed. */
     private fun showForeground() {
         val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: JSONObject()
-        val fullScreen = plan.optBoolean("firing_full_screen", true) && !uiVisible
-        if (postedOwner == owner && postedOwner != null && postedFullScreen == fullScreen) return
+        val backup = needsBackup(plan)
+        val fullScreen = plan.optBoolean("firing_full_screen", true) && (!uiVisible || backup)
+        if (postedOwner == owner && postedOwner != null &&
+            postedFullScreen == fullScreen && postedBackup == backup
+        ) {
+            return
+        }
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen))
+            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen, backup))
             postedOwner = owner
             postedFullScreen = fullScreen
-            Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen")
+            postedBackup = backup
+            Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen backup=$backup")
         } catch (e: Throwable) {
             // Not allowed from here. The sound plays on for now and the watchdog,
             // which is allowed to, retries.
@@ -324,7 +358,7 @@ class SentinelForegroundService : Service() {
         nm.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(plan: JSONObject, fullScreen: Boolean): Notification {
+    private fun buildNotification(plan: JSONObject, fullScreen: Boolean, backup: Boolean): Notification {
         val channelId = plan.optString("channel_id", "").ifEmpty { FALLBACK_CHANNEL }
         ensureChannel(plan, channelId)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -337,11 +371,15 @@ class SentinelForegroundService : Service() {
             .setContentText(plan.optString("body", ""))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setOngoing(true)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(!fullScreen)
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
 
-        val activity = plan.optString("activity_fqcn", "")
+        val activity = if (backup) {
+            SentinelBackupActivity::class.java.name
+        } else {
+            plan.optString("activity_fqcn", "")
+        }
         if (activity.isNotEmpty()) {
             val tap = Intent().apply {
                 component = ComponentName(packageName, activity)

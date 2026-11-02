@@ -33,9 +33,10 @@ class SentinelBootReceiver : BroadcastReceiver() {
             return
         }
 
-        Log.i(TAG, "Boot completed — re-arming alarms")
+        Log.i(TAG, "${intent.action} — re-arming alarms")
         val app = context.applicationContext
         SentinelPrimitives.init(app)
+        if (!SentinelBoot.filesAvailable(app)) return
 
         // A reboot mid-ring left the volume up, with nothing left to put it back.
         SentinelRing.restoreVolumeIfIdle(app)

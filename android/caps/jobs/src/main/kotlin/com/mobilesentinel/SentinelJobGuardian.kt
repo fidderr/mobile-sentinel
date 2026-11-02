@@ -43,8 +43,14 @@ object SentinelJobGuardian {
     // and resumes the activity, cancelling touches.
     @Volatile private var lastLaunchAtMs = 0L
 
+    /** Wall-clock time of the last launch, to tell whether the UI ever came up after it. */
+    @Volatile private var lastLaunchWallMs = 0L
+
     /** MAIN kills for a frozen UI since the guardian last had nothing to guard. */
     @Volatile private var livenessKills = 0
+
+    /** Times the UI failed (frozen, or died before it ever came up) since then. */
+    @Volatile private var uiFailures = 0
 
     /**
      * Start the polling loop. Called when an alarm receiver fires and
@@ -98,6 +104,8 @@ object SentinelJobGuardian {
                 if (activeJobs.isEmpty()) {
                     Log.i(TAG, "pollLoop: no active jobs — stopping")
                     livenessKills = 0
+                    uiFailures = 0
+                    lastLaunchWallMs = 0L
                     guarding.set(false)
                     break
                 }
@@ -118,11 +126,16 @@ object SentinelJobGuardian {
                             // A launch is already on its way; give MAIN time to come up.
                             break
                         }
+                        // Launched, and MAIN is gone again without a sign of life.
+                        if (lastLaunchWallMs != 0L && lastBeatMs(context) < lastLaunchWallMs) {
+                            noteUiFailure(context, config)
+                        }
                         val startDelay = config?.optLong("start_main_delay_ms", 0) ?: 0
                         if (startDelay > 0) {
                             Thread.sleep(startDelay)
                         }
                         lastLaunchAtMs = SystemClock.elapsedRealtime()
+                        lastLaunchWallMs = System.currentTimeMillis()
                         startMainActivity(context)
                         // After starting MAIN, break and re-poll next iteration
                         // to give MAIN time to come up.
@@ -147,6 +160,7 @@ object SentinelJobGuardian {
                             val timeout = base * minOf(1L shl livenessKills.coerceAtMost(30), cap)
                             if (isUiFrozen(context, mainPid, job.sinceMs, timeout)) {
                                 SentinelRing.noteFrozenKill(context)
+                                noteUiFailure(context, config)
                                 killFrozenMain(mainPid, jobId, timeout)
                                 break
                             }
@@ -198,6 +212,19 @@ object SentinelJobGuardian {
         return false
     }
 
+    private fun lastBeatMs(context: Context): Long =
+        File(context.filesDir, "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
+
+    /** After as many failures as the job config allows, the backup screen takes over. */
+    private fun noteUiFailure(context: Context, config: org.json.JSONObject?) {
+        uiFailures++
+        val allowed = config?.optLong("ui_failures_before_backup", 0) ?: 0
+        if (allowed > 0 && uiFailures >= allowed && !SentinelRing.uiFailed(context)) {
+            Log.w(TAG, "UI failed $uiFailures times, handing over to the backup screen")
+            SentinelRing.markUiFailed(context)
+        }
+    }
+
     /** Kill MAIN so the next poll relaunches it. */
     private fun killFrozenMain(mainPid: Int, jobId: String, timeoutMs: Long) {
         livenessKills++
@@ -207,6 +234,8 @@ object SentinelJobGuardian {
     }
 
     private fun startMainActivity(context: Context) {
+        // Before the first unlock it cannot start: the backup screen is up instead.
+        if (!SentinelBoot.isUserUnlocked(context)) return
         val fqcn = readActivityFqcn(context)
         if (fqcn == null) {
             Log.w(TAG, "startMainActivity: no activity FQCN available")

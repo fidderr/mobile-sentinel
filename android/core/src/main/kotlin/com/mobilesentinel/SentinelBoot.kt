@@ -1,6 +1,8 @@
 package com.mobilesentinel
 
+import android.content.Context
 import android.os.SystemClock
+import android.os.UserManager
 import java.io.File
 
 /**
@@ -22,4 +24,17 @@ object SentinelBoot {
     /** True when [file] was last written before the current boot. */
     @JvmStatic
     fun isFromBeforeBoot(file: File): Boolean = file.lastModified() < bootTimeMs()
+
+    /** False from a boot until the first unlock: credential-encrypted storage is closed then. */
+    @JvmStatic
+    fun isUserUnlocked(context: Context): Boolean =
+        context.getSystemService(UserManager::class.java)?.isUserUnlocked ?: true
+
+    /**
+     * Whether this app's files can be read. Before the first unlock that takes an app
+     * built with `direct_boot = true`, whose files are device-encrypted.
+     */
+    @JvmStatic
+    fun filesAvailable(context: Context): Boolean =
+        isUserUnlocked(context) || context.isDeviceProtectedStorage
 }
