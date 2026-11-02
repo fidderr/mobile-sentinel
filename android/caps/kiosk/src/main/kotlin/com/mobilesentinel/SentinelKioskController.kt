@@ -353,6 +353,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             return
         }
         if (targetActivityFqcn.isBlank()) return
+        // It would keep covering the backup screen, the one way out.
+        if (SentinelRing.uiFailed(ctx)) return
         // Somebody tried to leave, so somebody is there.
         SentinelRing.noteActivity(ctx)
         val intent = Intent().apply {

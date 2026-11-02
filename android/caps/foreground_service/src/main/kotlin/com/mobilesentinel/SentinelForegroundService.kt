@@ -33,6 +33,8 @@ class SentinelForegroundService : Service() {
         private const val TICK_MS = 1_000L
         private const val WATCHDOG_EVERY_TICKS = 2
         private const val CPU_RENEW_EVERY_TICKS = 60
+        /** The sound is on by then. */
+        private const val WEBVIEW_CHECK_TICK = 2
         private const val CPU_HOLD_MS = 2 * 60 * 1000L
         /** Long enough for the system to hand over a command it is holding. */
         private const val RESTART_GRACE_MS = 300L
@@ -201,6 +203,7 @@ class SentinelForegroundService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             ticks++
+            if (ticks == WEBVIEW_CHECK_TICK) SentinelWebViewCheck.refresh(this@SentinelForegroundService)
             // The marker is gone when Rust ended the alarm: never ring on without
             // it, even if the stop command got lost.
             for (id in ringing.keys.toList()) {
