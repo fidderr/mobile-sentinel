@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -96,7 +95,7 @@ object SentinelJobGuardian {
         Log.i(TAG, "pollLoop: started")
         try {
             while (guarding.get()) {
-                val activeJobs = readActiveJobs(context)
+                val activeJobs = SentinelActiveJobs.list(context)
                 if (activeJobs.isEmpty()) {
                     Log.i(TAG, "pollLoop: no active jobs — stopping")
                     livenessKills = 0
@@ -108,8 +107,8 @@ object SentinelJobGuardian {
                 val mainAlive = mainPid != 0
 
                 for (job in activeJobs) {
-                    val jobId = job.optString("id", "")
-                    val config = job.optJSONObject("config")
+                    val jobId = job.id
+                    val config = job.json.optJSONObject("config")
                     if (!mainAlive) {
                         // MAIN is dead — start it. Clear heads-up tracking
                         // so we re-send after it comes back up.
@@ -147,7 +146,7 @@ object SentinelJobGuardian {
                         if (base > 0) {
                             val cap = (config?.optLong("ui_liveness_backoff_cap", 4L) ?: 4L).coerceAtLeast(1L)
                             val timeout = base * minOf(1L shl livenessKills.coerceAtMost(30), cap)
-                            if (isUiFrozen(context, mainPid, job.optLong("_active_since_ms", 0L), timeout)) {
+                            if (isUiFrozen(context, mainPid, job.sinceMs, timeout)) {
                                 killFrozenMain(mainPid, jobId, timeout)
                                 break
                             }
@@ -158,7 +157,7 @@ object SentinelJobGuardian {
                 // Sleep for the poll interval of the first active job
                 // (all jobs in a single guardian share the shortest interval).
                 val interval = activeJobs
-                    .mapNotNull { it.optJSONObject("config")?.optLong("poll_interval_ms", 500) }
+                    .mapNotNull { it.json.optJSONObject("config")?.optLong("poll_interval_ms", 500) }
                     .minOrNull() ?: 500L
                 Thread.sleep(interval)
             }
@@ -170,30 +169,6 @@ object SentinelJobGuardian {
             guarding.set(false)
             Log.i(TAG, "pollLoop: exited")
         }
-    }
-
-    private fun readActiveJobs(context: Context): List<JSONObject> {
-        val dir = File(context.filesDir, JOBS_DIR)
-        if (!dir.isDirectory) return emptyList()
-        val files = dir.listFiles { f -> f.extension == "json" } ?: return emptyList()
-        val active = mutableListOf<JSONObject>()
-        for (file in files) {
-            try {
-                // An "active" job last written before the current boot belongs
-                // to a session the reboot ended; MAIN's startup cleans it up.
-                if (SentinelBoot.isFromBeforeBoot(file)) continue
-                val json = JSONObject(file.readText())
-                if (json.optString("status") == "active") {
-                    // The job file is rewritten when the job becomes active, so
-                    // its mtime is when the guarded session began.
-                    json.put("_active_since_ms", file.lastModified())
-                    active.add(json)
-                }
-            } catch (_: Throwable) {
-                // Skip malformed files
-            }
-        }
-        return active
     }
 
     /**
@@ -299,24 +274,6 @@ object SentinelJobGuardian {
      * depend on kiosk state or any other module's files. Jobs is a standalone
      * feature: a consumer can enable `jobs` without `kiosk`.
      */
-    private fun readActivityFqcn(context: Context): String? {
-        try {
-            val dir = File(context.filesDir, JOBS_DIR)
-            if (dir.isDirectory) {
-                val files = dir.listFiles { f -> f.extension == "json" } ?: emptyArray()
-                for (file in files) {
-                    // One unreadable job file must not hide the others.
-                    try {
-                        val json = JSONObject(file.readText())
-                        if (json.optString("status") == "active") {
-                            val payload = json.optJSONObject("payload")
-                            val fqcn = payload?.optString("activity_fqcn", "")
-                            if (!fqcn.isNullOrBlank()) return fqcn
-                        }
-                    } catch (_: Throwable) {}
-                }
-            }
-        } catch (_: Throwable) {}
-        return null
-    }
+    private fun readActivityFqcn(context: Context): String? =
+        SentinelActiveJobs.list(context).firstNotNullOfOrNull(SentinelActiveJobs::activityOf)
 }

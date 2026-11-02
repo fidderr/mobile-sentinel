@@ -14,13 +14,25 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// Job status — sentinel only cares about "active" vs "completed".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Active` is never stored in the job file: a job is active while its active
+/// marker exists (see [`ACTIVE_SUFFIX`]). The marker is created by whoever
+/// noticed the job must run (the `:sentinel` alarm receiver) and removed by
+/// Rust, while Rust alone writes the job file, so neither can overwrite the
+/// other's change: saving a job at the moment it fires cannot lose the fire.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobStatus {
+    #[default]
     Pending,
     Active,
     Completed,
 }
+
+/// Suffix of a job's active marker, next to its job file:
+/// `<files>/sentinel/jobs/<id>.active`. Its modification time is when the job
+/// became active. Mirrored by `SentinelActiveJobs` in Kotlin.
+pub const ACTIVE_SUFFIX: &str = ".active";
 
 /// Guardian behavior configuration for a single job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,7 +119,9 @@ pub struct Job {
     /// Unique job identifier (consumer chooses).
     pub id: String,
 
-    /// Job status — sentinel only acts on "active" jobs.
+    /// Job status — sentinel only acts on "active" jobs. Derived from the
+    /// active marker when a job is read.
+    #[serde(default)]
     pub status: JobStatus,
 
     /// Opaque JSON payload — sentinel never reads this, consumer uses it in MAIN.
@@ -148,6 +162,7 @@ pub fn register_job(
 /// Mark a job as completed. If `auto_remove_on_complete` is true in the
 /// job's config, the file is deleted instead of updated.
 pub fn complete_job(id: &str) -> Result<(), JobGuardianError> {
+    remove_marker(id)?;
     let path = job_path(id);
     let contents = std::fs::read_to_string(&path)
         .map_err(|e| JobGuardianError::Io(format!("read {}: {}", path.display(), e)))?;
@@ -164,7 +179,7 @@ pub fn complete_job(id: &str) -> Result<(), JobGuardianError> {
     Ok(())
 }
 
-/// Get all active jobs (status == "active").
+/// Get all active jobs (those with an active marker and a readable job file).
 pub fn get_active_jobs() -> Result<Vec<Job>, JobGuardianError> {
     let dir = jobs_dir();
     if !dir.exists() {
@@ -174,18 +189,14 @@ pub fn get_active_jobs() -> Result<Vec<Job>, JobGuardianError> {
     let entries = std::fs::read_dir(&dir)
         .map_err(|e| JobGuardianError::Io(format!("read_dir {}: {}", dir.display(), e)))?;
     for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_suffix(ACTIVE_SUFFIX)) else {
             continue;
-        }
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<Job>(&contents) {
-                Ok(job) if job.status == JobStatus::Active => {
-                    jobs.push(job);
-                }
-                _ => {}
-            },
-            Err(_) => continue,
+        };
+        if let Ok(Some(job)) = get_job(id) {
+            if job.status == JobStatus::Active {
+                jobs.push(job);
+            }
         }
     }
     Ok(jobs)
@@ -199,13 +210,21 @@ pub fn get_job(id: &str) -> Result<Option<Job>, JobGuardianError> {
     }
     let contents = std::fs::read_to_string(&path)
         .map_err(|e| JobGuardianError::Io(format!("read {}: {}", path.display(), e)))?;
-    let job: Job =
+    let mut job: Job =
         serde_json::from_str(&contents).map_err(|e| JobGuardianError::Parse(e.to_string()))?;
+    if job.status == JobStatus::Active {
+        // Written by a version that stored the status in the job file.
+        job.status = JobStatus::Pending;
+    }
+    if job.status == JobStatus::Pending && marker_path(id).exists() {
+        job.status = JobStatus::Active;
+    }
     Ok(Some(job))
 }
 
 /// Remove a job file entirely.
 pub fn remove_job(id: &str) -> Result<(), JobGuardianError> {
+    remove_marker(id)?;
     let path = job_path(id);
     if path.exists() {
         std::fs::remove_file(&path)
@@ -214,60 +233,66 @@ pub fn remove_job(id: &str) -> Result<(), JobGuardianError> {
     Ok(())
 }
 
-/// Activate a pending job (set status to "active"). No-op if already active.
+/// Activate a job by creating its active marker. No-op if already active, so
+/// the marker keeps the time the job first became active.
 pub fn activate_job(id: &str) -> Result<(), JobGuardianError> {
-    let path = job_path(id);
-    if !path.exists() {
+    if !job_path(id).exists() {
         return Err(JobGuardianError::NotFound(id.to_owned()));
     }
-    let contents = std::fs::read_to_string(&path)
-        .map_err(|e| JobGuardianError::Io(format!("read {}: {}", path.display(), e)))?;
-    let mut job: Job =
-        serde_json::from_str(&contents).map_err(|e| JobGuardianError::Parse(e.to_string()))?;
-    if job.status == JobStatus::Pending {
-        job.status = JobStatus::Active;
-        write_job(&job)?;
+    let marker = marker_path(id);
+    if marker.exists() {
+        return Ok(());
     }
-    Ok(())
+    let stamp = chrono::Utc::now().timestamp_millis().to_string();
+    std::fs::write(&marker, stamp)
+        .map_err(|e| JobGuardianError::Io(format!("write {}: {}", marker.display(), e)))
 }
 
-/// Deactivate a job — set its status back to "pending" without removing
-/// the file. Use this when the job no longer needs MAIN alive *right now*
-/// but will be re-activated by a future trigger (e.g. an alarm that was
-/// snoozed: the firing session is over, but the snooze re-fire will flip
-/// the same job pending → active again).
+/// When the job became active (unix ms), if it is.
+pub fn active_since_ms(id: &str) -> Option<i64> {
+    let modified = std::fs::metadata(marker_path(id)).ok()?.modified().ok()?;
+    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(since_epoch.as_millis()).ok()
+}
+
+/// Deactivate a job: remove its active marker and keep the job file. Use this
+/// when the job no longer needs MAIN alive *right now* but will be re-activated
+/// by a future trigger (e.g. an alarm that was snoozed: the firing session is
+/// over, but the snooze re-fire activates the same job again).
 ///
 /// The distinction from [`complete_job`]:
 /// - `complete_job` means "this job is done" → removes the file (or marks
 ///   Completed). The guardian will never act on it again.
-/// - `deactivate_job` means "pause until the next trigger" → keeps the
-///   file as Pending so [`activate_job`] can revive it.
+/// - `deactivate_job` means "pause until the next trigger" → keeps the file so
+///   a later activation can revive it.
 ///
-/// Once the file is Pending, the guardian's poll loop sees no active jobs
-/// and stops resurrecting MAIN. No-op if the job is already Pending;
-/// errors only on I/O / parse failure (a missing file is treated as
-/// already-gone and returns `Ok`).
+/// Once no marker is left, the guardian's poll loop sees no active jobs and
+/// stops resurrecting MAIN. No-op when the job is not active.
 pub fn deactivate_job(id: &str) -> Result<(), JobGuardianError> {
-    let path = job_path(id);
-    if !path.exists() {
-        // Nothing to deactivate — treat as already inactive.
-        return Ok(());
-    }
-    let contents = std::fs::read_to_string(&path)
-        .map_err(|e| JobGuardianError::Io(format!("read {}: {}", path.display(), e)))?;
-    let mut job: Job =
-        serde_json::from_str(&contents).map_err(|e| JobGuardianError::Parse(e.to_string()))?;
-    if job.status != JobStatus::Pending {
-        job.status = JobStatus::Pending;
-        write_job(&job)?;
-    }
-    Ok(())
+    remove_marker(id)
 }
 
 // --- Internal helpers ---
 
 fn job_path(id: &str) -> PathBuf {
     jobs_dir().join(format!("{}.json", id))
+}
+
+fn marker_path(id: &str) -> PathBuf {
+    jobs_dir().join(format!("{id}{ACTIVE_SUFFIX}"))
+}
+
+fn remove_marker(id: &str) -> Result<(), JobGuardianError> {
+    let marker = marker_path(id);
+    match std::fs::remove_file(&marker) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(JobGuardianError::Io(format!(
+            "remove {}: {}",
+            marker.display(),
+            e
+        ))),
+    }
 }
 
 fn write_job(job: &Job) -> Result<(), JobGuardianError> {
@@ -394,5 +419,50 @@ mod tests {
 
         // Cleanup.
         let _ = remove_job(&id);
+    }
+
+    /// The receiver marks a job active while the app may be saving it: writing
+    /// the job file must not lose that.
+    #[test]
+    fn registering_a_job_again_keeps_it_active() {
+        let id = format!("test-reregister-{}", std::process::id());
+        let _ = remove_job(&id);
+        let payload = serde_json::json!({"instance_id": id});
+        register_job(&id, payload.clone(), JobConfig::default()).unwrap();
+        activate_job(&id).unwrap();
+
+        register_job(&id, payload, JobConfig::default()).unwrap();
+
+        assert_eq!(get_job(&id).unwrap().unwrap().status, JobStatus::Active);
+        assert!(get_active_jobs().unwrap().iter().any(|j| j.id == id));
+        assert!(active_since_ms(&id).is_some());
+        remove_job(&id).unwrap();
+        assert_eq!(active_since_ms(&id), None);
+    }
+
+    #[test]
+    fn a_job_marked_active_by_kotlin_is_seen_as_active() {
+        let id = format!("test-kotlin-marker-{}", std::process::id());
+        let _ = remove_job(&id);
+        register_job(&id, serde_json::json!({}), JobConfig::default()).unwrap();
+        // All the receiver does: create the file.
+        std::fs::write(jobs_dir().join(format!("{id}{ACTIVE_SUFFIX}")), "1").unwrap();
+
+        assert_eq!(get_job(&id).unwrap().unwrap().status, JobStatus::Active);
+        deactivate_job(&id).unwrap();
+        assert_eq!(get_job(&id).unwrap().unwrap().status, JobStatus::Pending);
+        remove_job(&id).unwrap();
+    }
+
+    #[test]
+    fn job_files_that_stored_active_are_pending_without_a_marker() {
+        let id = format!("test-old-active-{}", std::process::id());
+        let _ = remove_job(&id);
+        let mut job = register_job(&id, serde_json::json!({}), JobConfig::default()).unwrap();
+        job.status = JobStatus::Active;
+        write_job(&job).unwrap();
+
+        assert_eq!(get_job(&id).unwrap().unwrap().status, JobStatus::Pending);
+        remove_job(&id).unwrap();
     }
 }

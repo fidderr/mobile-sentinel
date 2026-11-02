@@ -4,8 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import org.json.JSONObject
-import java.io.File
 
 /**
  * Universal-SDK alarm receiver — the slim Kotlin shim in `:sentinel`.
@@ -13,9 +11,8 @@ import java.io.File
  * Runs in the `:sentinel` child process (declared via
  * `android:process=":sentinel"` in the manifest). Its ONLY job:
  *
- * 1. Read the job file for this instance (instance_id maps to a job id).
- * 2. Set `status` to "active" if it was "pending".
- * 3. Call `SentinelJobGuardian.startGuarding()`.
+ * 1. Mark the job for this instance active (instance_id maps to a job id).
+ * 2. Call `SentinelJobGuardian.startGuarding()`.
  *
  * That's it — no starting activities, no writing trigger files, no deciding
  * what kind of wake this is. ALL logic (audio, kiosk, FGS, state machine)
@@ -40,9 +37,8 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             val isWatchdog = instanceId.endsWith(WATCHDOG_SUFFIX)
             val jobId = instanceId.removeSuffix(WATCHDOG_SUFFIX)
 
-            // Activate the job file (set status to "active" if pending).
             if (!isWatchdog && jobId.isNotBlank()) {
-                activateJob(context, jobId)
+                SentinelActiveJobs.mark(context.applicationContext, jobId)
                 // It fired, so the OS no longer holds it: do not replay it at boot.
                 SentinelArmedAlarms.forget(context, jobId)
             }
@@ -59,51 +55,6 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             Log.e(TAG, "onReceive failed", t)
         } finally {
             pending.finish()
-        }
-    }
-
-    /**
-     * Read the job file and set status to "active" if it was "pending".
-     */
-    private fun activateJob(context: Context, jobId: String) {
-        try {
-            val file = File(context.applicationContext.filesDir, "sentinel/jobs/$jobId.json")
-            if (!file.exists()) {
-                Log.w(TAG, "activateJob: no job file for '$jobId'")
-                return
-            }
-            val json = JSONObject(file.readText())
-            val status = json.optString("status", "")
-            if (status == "pending") {
-                json.put("status", "active")
-                writeAtomically(file, json.toString(2))
-                Log.i(TAG, "activateJob: '$jobId' pending → active")
-            } else {
-                Log.d(TAG, "activateJob: '$jobId' already '$status'")
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "activateJob failed for '$jobId': ${e.message}")
-        }
-    }
-
-    /**
-     * Replace [file] atomically (temp file + rename). MAIN's Rust polls and
-     * rewrites these files from another process, so a plain `writeText`
-     * (truncate-then-write) could be observed half-written. The temp name ends
-     * in `.tmp`, so readers filtering on the `json` extension never see it.
-     */
-    private fun writeAtomically(file: File, content: String) {
-        val tmp = File(file.parentFile, "${file.name}.${android.os.Process.myPid()}.tmp")
-        try {
-            tmp.writeText(content)
-            java.nio.file.Files.move(
-                tmp.toPath(),
-                file.toPath(),
-                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-            )
-        } finally {
-            if (tmp.exists()) tmp.delete()
         }
     }
 

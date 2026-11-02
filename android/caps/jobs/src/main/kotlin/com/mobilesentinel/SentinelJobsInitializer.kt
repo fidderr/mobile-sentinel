@@ -68,12 +68,8 @@ class SentinelJobsInitializer : ContentProvider() {
     /** Start the activity named in [jobId]'s payload (`activity_fqcn`), if the job is active. */
     private fun launchJobActivity(context: Context, jobId: String) {
         try {
-            val file = java.io.File(context.filesDir, "sentinel/jobs/$jobId.json")
-            if (!file.exists()) return
-            val json = org.json.JSONObject(file.readText())
-            if (json.optString("status") != "active") return
-            val fqcn = json.optJSONObject("payload")?.optString("activity_fqcn", "")
-            if (fqcn.isNullOrBlank()) return
+            val job = SentinelActiveJobs.list(context).firstOrNull { it.id == jobId } ?: return
+            val fqcn = SentinelActiveJobs.activityOf(job) ?: return
             val launch = Intent().apply {
                 component = android.content.ComponentName(context.packageName, fqcn)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or

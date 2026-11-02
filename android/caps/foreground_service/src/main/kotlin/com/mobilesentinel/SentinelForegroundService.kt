@@ -110,31 +110,20 @@ class SentinelForegroundService : Service() {
     }
 
     /**
-     * Launch the `activity_fqcn` of the first active job in
-     * `files/sentinel/jobs/` (plain files shared with the `:sentinel`
-     * guardian). Reads the files directly so this module stays independent of
-     * the `jobs` module.
+     * Launch the `activity_fqcn` of the first active job. Goes through core so
+     * this module stays independent of the `jobs` module.
      */
     private fun relaunchActiveJobActivity() {
         try {
-            val dir = java.io.File(filesDir, "sentinel/jobs")
-            val files = dir.listFiles { f -> f.extension == "json" } ?: return
-            for (file in files) {
-                val fqcn = try {
-                    val json = org.json.JSONObject(file.readText())
-                    if (json.optString("status") != "active") continue
-                    json.optJSONObject("payload")?.optString("activity_fqcn", "")
-                } catch (_: Throwable) {
-                    continue
-                }
-                if (fqcn.isNullOrBlank()) continue
+            for (job in SentinelActiveJobs.list(this)) {
+                val fqcn = SentinelActiveJobs.activityOf(job) ?: continue
                 startActivity(Intent().apply {
                     component = ComponentName(packageName, fqcn)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
                         Intent.FLAG_ACTIVITY_SINGLE_TOP
                 })
-                Log.i(TAG, "restarted after kill — relaunched $fqcn for ${file.nameWithoutExtension}")
+                Log.i(TAG, "restarted after kill — relaunched $fqcn for ${job.id}")
                 return
             }
             Log.i(TAG, "restarted after kill — no active job, nothing to relaunch")
