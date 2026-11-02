@@ -67,6 +67,8 @@ class SentinelJobsInitializer : ContentProvider() {
 
     /** Start the activity named in [jobId]'s payload (`activity_fqcn`), if the job is active. */
     private fun launchJobActivity(context: Context, jobId: String) {
+        // It would only cover the backup screen, the one way out.
+        if (SentinelRing.uiFailed(context)) return
         try {
             val job = SentinelActiveJobs.list(context).firstOrNull { it.id == jobId } ?: return
             val fqcn = SentinelActiveJobs.activityOf(job) ?: return

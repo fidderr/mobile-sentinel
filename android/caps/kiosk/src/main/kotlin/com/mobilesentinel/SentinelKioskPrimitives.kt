@@ -21,6 +21,9 @@ object SentinelKioskPrimitives {
         hideStatusBar: Boolean,
         hideNavBar: Boolean,
     ): Boolean {
+        // Relaunching it would keep covering the backup screen, the one way out.
+        val context = SentinelPrimitives.getAppContext()
+        if (context != null && SentinelRing.uiFailed(context)) return false
         return try {
             SentinelKioskController.enable(
                 activityFqcn,

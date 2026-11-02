@@ -17,6 +17,8 @@ object SentinelFullScreenIntentPrimitives {
     @JvmStatic
     fun showFullScreenIntent(activityFqcn: String, dismissKeyguard: Boolean): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
+        // It would only cover the backup screen, the one way out.
+        if (SentinelRing.uiFailed(c)) return false
         return try {
             val cls = Class.forName(activityFqcn)
             val intent = Intent(c, cls).apply {
