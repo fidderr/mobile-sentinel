@@ -311,6 +311,8 @@ fn add_activity_flags(project_path: &Path, activity_fqcn: &str) {
         Ok(c) => c,
         Err(_) => return,
     };
+    let content = handle_all_config_changes(&content, activity_fqcn);
+    let _ = fs::write(&manifest_path, &content);
 
     let activity_attrs_present =
         content.contains("showWhenLocked") && content.contains("launchMode");
@@ -350,6 +352,40 @@ fn add_activity_flags(project_path: &Path, activity_fqcn: &str) {
             activity_fqcn
         );
     }
+}
+
+/// Every configuration change the activity handles itself.
+///
+/// The UI framework ends the process when its activity is destroyed, and a
+/// configuration change not listed here recreates the activity. So without this
+/// a dark-mode switch, a font-size change or folding the phone restarts the app,
+/// also in the middle of a ringing alarm. A WebView adapts to all of them.
+const ALL_CONFIG_CHANGES: &str = "mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|\
+screenLayout|fontScale|uiMode|orientation|density|screenSize|smallestScreenSize|layoutDirection|\
+colorMode|fontWeightAdjustment";
+
+/// Set `android:configChanges` on the `activity_fqcn` activity tag to
+/// [`ALL_CONFIG_CHANGES`]. Other activities are left alone.
+fn handle_all_config_changes(manifest: &str, activity_fqcn: &str) -> String {
+    let name = format!("android:name=\"{activity_fqcn}\"");
+    let Some(name_pos) = manifest.find(&name) else {
+        return manifest.to_string();
+    };
+    let Some(open) = manifest[..name_pos].rfind("<activity") else {
+        return manifest.to_string();
+    };
+    let Some(close_rel) = manifest[name_pos..].find('>') else {
+        return manifest.to_string();
+    };
+    let close = name_pos + close_rel;
+    let tag = remove_attr(&manifest[open..close], "android:configChanges");
+    format!(
+        "{}{} android:configChanges=\"{}\"{}",
+        &manifest[..open],
+        tag.trim_end(),
+        ALL_CONFIG_CHANGES,
+        &manifest[close..]
+    )
 }
 
 /// Load native libraries straight from the APK instead of extracting them.
@@ -606,6 +642,34 @@ mod tests {
     </application>
 </manifest>
 "#;
+
+    #[test]
+    fn the_main_activity_handles_every_config_change_itself() {
+        let m = r#"<application>
+        <activity android:configChanges="orientation|screenSize" android:exported="true"
+            android:name="dev.x.Main"
+            android:launchMode="singleInstance">
+        </activity>
+        <activity android:name="dev.x.Other" android:configChanges="orientation" />
+</application>"#;
+        let out = handle_all_config_changes(m, "dev.x.Main");
+        let main = &out[..out.find("dev.x.Other").unwrap()];
+        assert_eq!(main.matches("android:configChanges").count(), 1);
+        assert!(main.contains("uiMode"));
+        assert!(main.contains("smallestScreenSize"));
+        assert!(!main.contains("\"orientation|screenSize\""));
+        assert!(main.contains("android:launchMode=\"singleInstance\""));
+        assert!(
+            out.contains(r#"android:name="dev.x.Other" android:configChanges="orientation""#),
+            "other activities are untouched"
+        );
+        assert_eq!(
+            handle_all_config_changes(&out, "dev.x.Main"),
+            out,
+            "idempotent"
+        );
+        assert_eq!(handle_all_config_changes(m, "dev.x.Missing"), m);
+    }
 
     #[test]
     fn native_libs_are_not_extracted() {
