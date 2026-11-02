@@ -47,15 +47,16 @@ object SentinelPrimitives {
      * IANA time-zone id (e.g. "Europe/Amsterdam"). A generic device query
      * (no alarm/firing semantics) used by the recipe layer to resolve
      * schedules in the user's local zone. Lives in core so consumers can read
-     * it without enabling any firing surface.
+     * it without enabling any firing surface. Empty when it cannot be read,
+     * never a made-up zone: that would move alarms by hours.
      */
     @JvmStatic
     fun getTimeZoneId(): String {
         return try {
-            java.util.TimeZone.getDefault().id ?: "UTC"
+            java.util.TimeZone.getDefault().id.orEmpty()
         } catch (e: Throwable) {
             Log.w(TAG, "getTimeZoneId: ${e.message}")
-            "UTC"
+            ""
         }
     }
 

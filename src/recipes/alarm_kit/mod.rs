@@ -154,13 +154,107 @@ pub struct AlarmKitSession {
     pub challenges_solved: bool,
 }
 
-/// What [`AlarmKit::on_startup`] had to clean up.
+/// What [`AlarmKit::on_startup`] found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartupReport {
-    /// Alarms that were ringing (or snoozed past their time) when the device
-    /// rebooted. They were dismissed; the consumer may want to tell the user
-    /// and clear its own per-session files.
+    /// Alarms that were ringing when the device rebooted. They were dismissed;
+    /// the consumer may want to tell the user and clear its own per-session
+    /// files.
     pub ended_by_reboot: Vec<InstanceId>,
+    /// Alarms whose time passed too long ago to still ring: the phone was off,
+    /// or the system never delivered them. The next occurrence, if any, is armed.
+    pub missed: Vec<MissedAlarm>,
+    /// One-shot alarms that have nothing left to ring. The consumer should
+    /// switch them off.
+    pub finished: Vec<InstanceId>,
+}
+
+/// An alarm that did not ring at its time. See [`StartupReport::missed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissedAlarm {
+    pub id: InstanceId,
+    /// When it should have rung (unix ms).
+    pub due_unix_ms: i64,
+}
+
+/// What became of an alarm when it was re-armed at startup.
+enum Rearmed {
+    Armed,
+    /// Its time has come: ring it now.
+    Due,
+    /// Too late to ring. `finished`: it has no later occurrence either.
+    Missed {
+        due_unix_ms: i64,
+        finished: bool,
+    },
+    /// A one-shot alarm with nothing left to ring.
+    Finished,
+}
+
+/// Slack when comparing a job's active marker with the time its alarm was due.
+const MARKER_SLOP_MS: i64 = 60_000;
+
+/// Whether the OS delivering an alarm (the active marker, set at `marker_ms`)
+/// is about the alarm's current state. A wake the app superseded since (it was
+/// moved to a later time, dismissed, deleted) must not make it ring.
+fn marker_is_current(state: &SessionState, marker_ms: Option<i64>) -> bool {
+    match state {
+        SessionState::Firing { .. } => true,
+        SessionState::Scheduled { next_fire_unix_ms }
+        | SessionState::Snoozed {
+            next_fire_unix_ms, ..
+        } => marker_ms.is_some_and(|m| *next_fire_unix_ms <= m + MARKER_SLOP_MS),
+        SessionState::Idle | SessionState::Dismissed { .. } => false,
+    }
+}
+
+/// When the alarm was due, if that time has passed while it was still waiting.
+fn overdue_since(state: &SessionState, now_ms: i64) -> Option<i64> {
+    match state {
+        SessionState::Scheduled { next_fire_unix_ms }
+        | SessionState::Snoozed {
+            next_fire_unix_ms, ..
+        } if *next_fire_unix_ms <= now_ms => Some(*next_fire_unix_ms),
+        _ => None,
+    }
+}
+
+fn has_no_next_fire(e: &AlarmKitError) -> bool {
+    matches!(
+        e,
+        AlarmKitError::Recipe(RecipeError::Recurrence(
+            crate::recipes::recurrence::RecurrenceError::NoFireTime
+        ))
+    )
+}
+
+/// Whether two specs differ in nothing but the time zone.
+fn same_but_for_zone(a: &AlarmSpec, b: &AlarmSpec) -> bool {
+    let mut b = b.clone();
+    b.time_zone.clone_from(&a.time_zone);
+    *a == b
+}
+
+/// The zone to schedule in. A zone the device reports but the time zone database
+/// doesn't know (a custom "GMT+01:00") becomes its fixed offset. When the device
+/// can't be asked at all, the last known zone is used, because a wrong zone moves
+/// alarms by hours.
+fn choose_zone(device: Option<&str>, last_known: Option<&str>, offset_secs: i32) -> String {
+    let known = |z: &&str| z.parse::<chrono_tz::Tz>().is_ok();
+    if let Some(zone) = device.filter(known) {
+        return zone.to_owned();
+    }
+    if device.is_none() {
+        if let Some(zone) = last_known.filter(known) {
+            return zone.to_owned();
+        }
+    }
+    // Etc/GMT zones have the sign reversed: Etc/GMT-1 is one hour ahead of UTC.
+    match offset_secs / 3600 {
+        0 => "UTC".to_owned(),
+        hours if hours > 0 => format!("Etc/GMT-{hours}"),
+        hours => format!("Etc/GMT+{}", -hours),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -258,36 +352,51 @@ impl AlarmKit {
         Ok(())
     }
 
-    /// Update an alarm's spec. Cancels any pending exact alarm and
-    /// re-arms with the new schedule. A snooze in progress is left alone
-    /// when the spec did not change — consumers save every alarm whenever
-    /// any one of them changes, and that must not cancel a snooze.
+    /// Update an alarm's spec and re-arm it with the new schedule. An alarm that
+    /// did not change and is already armed stays exactly as it is, and a snooze
+    /// in progress also survives a time zone change, because it is a moment in
+    /// time, not a time of day.
     pub fn update(&self, id: &InstanceId, spec: AlarmSpec) -> Result<(), AlarmKitError> {
+        let transition = crate::recipes::dispatch::lock_transitions();
         let mut record = self.store.load(id)?;
+        let mut keep_counts = (0, false);
         if let RecipeContext::AlarmClass(old) = &record.context {
+            keep_counts = (old.snooze_count, old.challenges_solved);
+            let old_spec = AlarmSpec::from_context(old);
+            let armed = match record.state {
+                SessionState::Scheduled { next_fire_unix_ms } => {
+                    next_fire_unix_ms > Utc::now().timestamp_millis()
+                }
+                SessionState::Snoozed { .. } | SessionState::Firing { .. } => true,
+                _ => false,
+            };
+            if old_spec == spec && armed {
+                return Ok(());
+            }
             if matches!(record.state, SessionState::Snoozed { .. })
-                && AlarmSpec::from_context(old) == spec
+                && same_but_for_zone(&old_spec, &spec)
             {
+                let mut context = spec.into_context();
+                context.snooze_count = keep_counts.0;
+                record.context = RecipeContext::AlarmClass(context);
+                self.store.write(record)?;
                 return Ok(());
             }
         }
-        record.context = RecipeContext::AlarmClass(spec.into_context());
-        // Reset state to Idle so Schedule recomputes cleanly. We don't
-        // disturb a Firing session — the consumer must dismiss first.
-        let was_firing = matches!(record.state, SessionState::Firing { .. });
-        if !was_firing {
-            record.state = SessionState::Idle;
-        }
-        self.store.write(record)?;
-        if was_firing {
-            // The session is currently fire-active; do NOT dispatch
-            // Edit — that would call schedule_next which (even with the
-            // firing-guard) would persist a fresh Scheduled state if
-            // the firing-guard ever drifts out of sync. Skip the
-            // dispatch entirely; the next dismiss/snooze handler will
-            // re-arm naturally.
+        let mut context = spec.into_context();
+        // A firing session is not disturbed: the consumer must dismiss first, and
+        // the next dismiss or snooze re-arms naturally.
+        if matches!(record.state, SessionState::Firing { .. }) {
+            (context.snooze_count, context.challenges_solved) = keep_counts;
+            record.context = RecipeContext::AlarmClass(context);
+            self.store.write(record)?;
             return Ok(());
         }
+        record.context = RecipeContext::AlarmClass(context);
+        // Reset state to Idle so Edit recomputes cleanly.
+        record.state = SessionState::Idle;
+        self.store.write(record)?;
+        drop(transition);
         dispatch_trigger(&self.store, Trigger::Edit, id)?;
         Ok(())
     }
@@ -295,51 +404,42 @@ impl AlarmKit {
     /// Delete an alarm. Cancels its pending exact alarm and removes the
     /// stored Context. Idempotent.
     pub fn delete(&self, id: &InstanceId) -> Result<(), AlarmKitError> {
+        let ringing = matches!(
+            self.store.load(id).map(|r| r.state),
+            Ok(SessionState::Firing { .. })
+        );
         if let Some(sink) = alarm_class_runtime().sink() {
-            sink.stop_firing(&id.0);
+            // Only this alarm's ring: another alarm may be ringing right now.
+            if ringing {
+                sink.stop_firing(&id.0);
+                sink.cancel_exact_alarm(&alarm_class::watchdog_alarm_id(id));
+            }
             sink.cancel_exact_alarm(&id.0);
         }
+        let _ = crate::jobs::deactivate_job(&id.0);
         self.store.delete(id)?;
         Ok(())
     }
 
     /// Snooze the currently-firing alarm. Idempotent.
     ///
-    /// Transitions to Snoozed and re-arms the next exact alarm at the
-    /// snooze interval. Also deactivates the sentinel job (sets it back to
-    /// Pending) so the job guardian stops resurrecting MAIN while the
-    /// device is between the snooze and the re-fire. The snooze re-fire's
-    /// alarm broadcast flips the same job Pending → Active again, bringing
-    /// MAIN back up exactly when the alarm should ring.
+    /// Transitions to Snoozed and arms the next wake at the snooze interval. The
+    /// sentinel job stops being active, so the guardian stops resurrecting MAIN
+    /// between the snooze and the re-fire; the re-fire's alarm broadcast
+    /// activates the same job again, bringing MAIN back when it should ring.
     pub fn snooze(&self, id: &InstanceId) -> Result<(), AlarmKitError> {
         dispatch_trigger(&self.store, Trigger::Snooze, id)?;
-        // Deactivate (NOT complete) the job — the firing session is over
-        // for now, but the snooze re-fire will re-activate this same job.
-        let _ = crate::jobs::deactivate_job(&id.0);
         Ok(())
     }
 
-    /// Dismiss an alarm. Transitions to Dismissed, re-arms the next
-    /// occurrence for recurring alarms, and deactivates the sentinel job
-    /// so the job guardian stops polling.
+    /// Dismiss an alarm. Transitions to Dismissed, arms the next occurrence for
+    /// recurring alarms, and the sentinel job stops being active.
     ///
     /// If the alarm has challenges and is currently firing, this returns
     /// `Err(AlarmKitError::Recipe(RecipeError::ChallengesUnsolved(_)))` until
-    /// [`Self::mark_solved`] has been called. The sentinel job is left
-    /// active in that case.
-    ///
-    /// The job is *deactivated* (reset to Pending), not removed: the job
-    /// file must survive so a future fire — the next occurrence of a
-    /// recurring alarm — can re-activate the same job. The file is only
-    /// removed when the alarm itself is deleted (`delete`). A one-shot
-    /// alarm simply never re-fires, leaving a harmless Pending job behind
-    /// until deletion.
+    /// [`Self::mark_solved`] has been called. The job stays active in that case.
     pub fn dismiss(&self, id: &InstanceId) -> Result<(), AlarmKitError> {
         dispatch_trigger(&self.store, Trigger::Dismiss, id)?;
-        // Deactivate the sentinel job — the firing session is done and
-        // MAIN no longer needs to stay alive, but the job file must
-        // persist so a recurring alarm's next fire can re-activate it.
-        let _ = crate::jobs::deactivate_job(&id.0);
         Ok(())
     }
 
@@ -390,18 +490,27 @@ impl AlarmKit {
         self.engage_or_fire(&InstanceId::new(instance_id_str.to_owned()));
     }
 
-    /// Shared helper: if the instance is already in `Firing` state,
-    /// just re-engage firing surfaces (audio, FGS, kiosk). Otherwise
-    /// dispatch `Trigger::Fire` to transition state and engage. Used
-    /// by both `handle_job_heads_up` and `on_startup`.
+    /// Shared helper for an instance whose job is active: re-engage firing
+    /// surfaces if it already rings, otherwise fire it. A marker that has nothing
+    /// to ring (the alarm was deleted, or moved on since) is dropped: it would
+    /// keep the guardian relaunching the app for no alarm.
     fn engage_or_fire(&self, id: &InstanceId) {
         let record = match self.store.load(id) {
             Ok(r) => r,
+            Err(StoreError::NotFound(_)) => {
+                let _ = crate::jobs::deactivate_job(&id.0);
+                return;
+            }
             Err(e) => {
                 log::warn!("[AlarmKit] engage_or_fire: load '{}' failed: {:?}", id.0, e);
                 return;
             }
         };
+        if !marker_is_current(&record.state, crate::jobs::active_since_ms(&id.0)) {
+            log::info!("[AlarmKit] dropping stale active marker of {}", id.0);
+            let _ = crate::jobs::deactivate_job(&id.0);
+            return;
+        }
         if matches!(record.state, SessionState::Firing { .. }) {
             let _ = self.reengage(id);
         } else {
@@ -500,10 +609,12 @@ impl AlarmKit {
     // -----------------------------------------------------------------
 
     /// Single call that does everything needed on app startup:
-    /// 1. End sessions that did not survive a reboot (see [`StartupReport`])
-    /// 2. Rearm all provided alarms. An alarm whose spec is unchanged keeps
-    ///    its state — in particular a snooze in progress — and only has its
-    ///    exact alarm re-armed; a changed or new spec is (re)scheduled.
+    /// 1. End what cannot go on: a ring from before the current boot, and a
+    ///    snooze that ended longer ago than the late-ring window.
+    /// 2. Rearm all provided alarms. An alarm whose spec is unchanged keeps its
+    ///    state, in particular a snooze in progress. One whose time has come
+    ///    (the OS delivered it, or it is less than the late-ring window late)
+    ///    rings; one later than that is reported as missed.
     /// 3. Process active jobs (engage the firing instances)
     /// 4. Reengage a firing session no active job covered
     pub fn on_startup(&self, alarms: &[(String, AlarmSpec)]) -> StartupReport {
@@ -522,41 +633,62 @@ impl AlarmKit {
         now_ms: i64,
     ) -> StartupReport {
         let mut report = StartupReport::default();
+        let late_window = alarm_class_runtime().config().late_ring_window_ms;
 
-        // 1. A reboot kills the process, the sound and the lock screen
-        //    takeover, and clears every exact alarm. A ringing alarm from
-        //    before the boot therefore counts as dismissed (it must not
-        //    ring again when the app is merely opened), and so does a
-        //    snooze whose time passed while the device was off. A snooze
-        //    still in the future is kept and re-armed below.
-        if let Some(boot) = boot_unix_ms {
-            if let Ok(records) = self.store.enumerate_all() {
-                for record in records {
-                    let stale = match record.state {
-                        SessionState::Firing { fired_at_unix_ms } => fired_at_unix_ms < boot,
-                        SessionState::Snoozed {
-                            next_fire_unix_ms, ..
-                        } => next_fire_unix_ms <= now_ms,
-                        _ => false,
-                    };
-                    if stale && self.end_after_reboot(&record.id) {
+        // 1. A reboot kills the process, the sound and the lock screen takeover.
+        //    A ring from before the boot therefore counts as dismissed (it must
+        //    not ring again when the app is merely opened).
+        if let Ok(records) = self.store.enumerate_all() {
+            for record in records {
+                let ring_from_before_boot = matches!(
+                    record.state,
+                    SessionState::Firing { fired_at_unix_ms }
+                        if boot_unix_ms.is_some_and(|boot| fired_at_unix_ms < boot)
+                );
+                let snooze_too_late = match record.state {
+                    SessionState::Snoozed {
+                        next_fire_unix_ms, ..
+                    } if now_ms - next_fire_unix_ms > late_window => Some(next_fire_unix_ms),
+                    _ => None,
+                };
+                if ring_from_before_boot {
+                    if self.end_session(&record.id) {
                         report.ended_by_reboot.push(record.id.clone());
+                    }
+                } else if let Some(due_unix_ms) = snooze_too_late {
+                    if self.end_session(&record.id) {
+                        report.missed.push(MissedAlarm {
+                            id: record.id.clone(),
+                            due_unix_ms,
+                        });
                     }
                 }
             }
         }
 
         // 2. Rearm the provided alarms.
+        let mut due = Vec::new();
         for (id_str, spec) in alarms {
             let id = InstanceId::new(id_str.clone());
-            if let Err(e) = self.rearm(&id, spec, now_ms) {
-                log::warn!("[AlarmKit] on_startup rearm failed for {}: {:?}", id_str, e);
+            match self.rearm(&id, spec, boot_unix_ms, now_ms, late_window) {
+                Ok(Rearmed::Armed) => {}
+                Ok(Rearmed::Due) => due.push(id),
+                Ok(Rearmed::Missed {
+                    due_unix_ms,
+                    finished,
+                }) => {
+                    if finished {
+                        report.finished.push(id.clone());
+                    }
+                    report.missed.push(MissedAlarm { id, due_unix_ms });
+                }
+                Ok(Rearmed::Finished) => report.finished.push(id),
+                Err(e) => log::warn!("[AlarmKit] on_startup rearm failed for {id_str}: {e:?}"),
             }
         }
 
-        // 3. Process active jobs — for any active job with an
-        //    instance_id payload, engage_or_fire (reengage if firing,
-        //    dispatch Fire otherwise). Each instance is engaged once: every
+        // 3. Process active jobs — for any active job with an instance_id
+        //    payload, engage_or_fire. Each instance is engaged once: every
         //    engage restarts the audio and launches the activity again.
         let mut engaged = std::collections::HashSet::new();
         if let Ok(jobs) = crate::jobs::get_active_jobs() {
@@ -571,7 +703,14 @@ impl AlarmKit {
             }
         }
 
-        // 4. Reengage a firing session that no active job covered.
+        // Late alarms no job covered: the OS never told us, but it is time.
+        for id in due {
+            if engaged.insert(id.0.clone()) {
+                let _ = dispatch_trigger(&self.store, Trigger::Fire, &id);
+            }
+        }
+
+        // 4. Reengage a firing session that nothing above covered.
         if let Ok(Some(session)) = self.current_session() {
             if !engaged.contains(&session.instance_id.0) {
                 let _ = self.reengage(&session.instance_id);
@@ -580,10 +719,10 @@ impl AlarmKit {
         report
     }
 
-    /// Dismiss a session left over from before a reboot, bypassing the
-    /// challenge gate (the user is not at the phone solving anything).
-    /// Returns whether the instance was dismissed.
-    fn end_after_reboot(&self, id: &InstanceId) -> bool {
+    /// Dismiss a session that cannot go on, bypassing the challenge gate (the
+    /// user is not at the phone solving anything). Returns whether the instance
+    /// was dismissed.
+    fn end_session(&self, id: &InstanceId) -> bool {
         let firing = matches!(
             self.store.load(id).map(|r| r.state),
             Ok(SessionState::Firing { .. })
@@ -594,7 +733,7 @@ impl AlarmKit {
         match self.dismiss(id) {
             Ok(()) => true,
             Err(e) => {
-                log::warn!("[AlarmKit] ending {} after reboot failed: {:?}", id.0, e);
+                log::warn!("[AlarmKit] ending {} failed: {:?}", id.0, e);
                 false
             }
         }
@@ -602,27 +741,75 @@ impl AlarmKit {
 
     /// Make sure `id` is stored with `spec` and armed, without disturbing a
     /// firing session or a snooze in progress.
-    fn rearm(&self, id: &InstanceId, spec: &AlarmSpec, now_ms: i64) -> Result<(), AlarmKitError> {
+    fn rearm(
+        &self,
+        id: &InstanceId,
+        spec: &AlarmSpec,
+        boot_unix_ms: Option<i64>,
+        now_ms: i64,
+        late_window: i64,
+    ) -> Result<Rearmed, AlarmKitError> {
+        // Arm it, or report that a one-shot alarm has nothing left to ring.
+        let finish = |result: Result<(), AlarmKitError>| match result {
+            Ok(()) => Ok(Rearmed::Armed),
+            Err(e) if has_no_next_fire(&e) => Ok(Rearmed::Finished),
+            Err(e) => Err(e),
+        };
+
         let record = match self.store.load(id) {
             Ok(r) => r,
-            Err(StoreError::NotFound(_)) => return self.create_with_id(id.clone(), spec.clone()),
+            Err(StoreError::NotFound(_)) => {
+                return finish(self.create_with_id(id.clone(), spec.clone()))
+            }
             Err(e) => return Err(e.into()),
         };
         let RecipeContext::AlarmClass(ctx) = &record.context else {
-            return self.create_with_id(id.clone(), spec.clone());
+            return finish(self.create_with_id(id.clone(), spec.clone()));
         };
         if matches!(record.state, SessionState::Firing { .. }) {
-            return Ok(());
+            return Ok(Rearmed::Armed);
         }
-        if AlarmSpec::from_context(ctx) != *spec {
-            return self.update(id, spec.clone());
+        let current = AlarmSpec::from_context(ctx);
+
+        if let Some(due_unix_ms) = overdue_since(&record.state, now_ms) {
+            // The OS delivered it during this boot: this start is that ring.
+            let delivered = crate::jobs::active_since_ms(&id.0).is_some_and(|marker| {
+                boot_unix_ms.map_or(true, |boot| marker >= boot)
+                    && due_unix_ms <= marker + MARKER_SLOP_MS
+            });
+            if delivered || now_ms - due_unix_ms <= late_window {
+                if current != *spec {
+                    let mut context = spec.clone().into_context();
+                    context.snooze_count = ctx.snooze_count;
+                    let mut record = record.clone();
+                    record.context = RecipeContext::AlarmClass(context);
+                    self.store.write(record)?;
+                }
+                return Ok(Rearmed::Due);
+            }
+            let _ = crate::jobs::deactivate_job(&id.0);
+            return match self.update(id, spec.clone()) {
+                Ok(()) => Ok(Rearmed::Missed {
+                    due_unix_ms,
+                    finished: false,
+                }),
+                Err(e) if has_no_next_fire(&e) => Ok(Rearmed::Missed {
+                    due_unix_ms,
+                    finished: true,
+                }),
+                Err(e) => Err(e),
+            };
+        }
+
+        if current != *spec {
+            return finish(self.update(id, spec.clone()));
         }
         match record.state {
             // The exact alarm was cleared by the reboot; the stored fire
             // time is still the right one.
             SessionState::Snoozed {
                 next_fire_unix_ms, ..
-            } if next_fire_unix_ms > now_ms => {
+            } => {
                 if let Some(sink) = alarm_class_runtime().sink() {
                     let req = crate::firing::ExactAlarmRequest {
                         alarm_id: id.0.clone(),
@@ -633,28 +820,33 @@ impl AlarmKit {
                         log::warn!("[AlarmKit] re-arming snooze of {} was rejected", id.0);
                     }
                 }
-                Ok(())
+                Ok(Rearmed::Armed)
             }
-            SessionState::Snoozed { .. } => Ok(()),
             // Scheduled / Idle / Dismissed: recompute and arm the next fire.
-            _ => {
-                dispatch_trigger(&self.store, Trigger::Schedule, id)?;
-                Ok(())
-            }
+            _ => finish(dispatch_trigger(&self.store, Trigger::Schedule, id).map_err(Into::into)),
         }
     }
 
-    /// Static helper that detects the device timezone. On Android calls
-    /// JNI, falls back to the `TZ` env var or `"UTC"`.
+    /// Static helper that detects the device timezone. Always a zone the
+    /// scheduler understands; see [`choose_zone`] for what happens otherwise.
     pub fn detect_timezone() -> String {
         #[cfg(target_os = "android")]
-        {
-            let tz = crate::platform::android::firing_sink_android::get_time_zone_id();
-            if !tz.is_empty() && tz != "UTC" {
-                return tz;
+        let device = Some(crate::platform::android::firing_sink_android::get_time_zone_id())
+            .filter(|z| !z.is_empty());
+        #[cfg(not(target_os = "android"))]
+        let device = Some(std::env::var("TZ").unwrap_or_else(|_| "UTC".to_owned()));
+
+        let memo = crate::utilities::app_files_dir().join("sentinel/last_time_zone");
+        let last_known = std::fs::read_to_string(&memo).ok();
+        let offset_secs = chrono::Local::now().offset().local_minus_utc();
+        let zone = choose_zone(device.as_deref(), last_known.as_deref(), offset_secs);
+        if last_known.as_deref() != Some(zone.as_str()) && device.is_some() {
+            if let Some(dir) = memo.parent() {
+                let _ = std::fs::create_dir_all(dir);
             }
+            let _ = std::fs::write(&memo, &zone);
         }
-        std::env::var("TZ").unwrap_or_else(|_| "UTC".to_owned())
+        zone
     }
 
     /// Compute next fire time for a given alarm instance from ContextStore.
@@ -684,6 +876,8 @@ mod tests {
         }
     }
 
+    const LATE_WINDOW: i64 = 15 * 60_000;
+
     fn install_kit(dir: &std::path::Path) -> (AlarmKit, Arc<MockFiringSink>) {
         let store = Arc::new(ContextStore::new(dir));
         let sink: Arc<MockFiringSink> = Arc::new(MockFiringSink::new());
@@ -708,6 +902,7 @@ mod tests {
                 firing_full_screen: true,
                 vibration_pattern: vec![0, 400, 200, 400],
                 min_volume_percent: 0,
+                late_ring_window_ms: LATE_WINDOW,
             },
         });
         (kit, sink)
@@ -1039,12 +1234,13 @@ mod tests {
         assert_eq!(last.target_unix_ms, now + 300_000);
     }
 
+    /// The Snooze button ends the process, so this is how every snooze ends.
     #[test]
-    fn on_startup_ends_a_snooze_whose_time_passed_while_the_device_was_off() {
+    fn a_snooze_that_runs_out_with_the_process_dead_rings() {
         let _g = lock_and_clear();
         let dir = TempDir::new().unwrap();
-        let (kit, _sink) = install_kit(dir.path());
-        let now = 2_000_000_000_000_i64;
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
         let spec = weekday_spec();
         let id = kit.create(spec.clone()).unwrap();
         force_state(
@@ -1052,17 +1248,455 @@ mod tests {
             &id,
             SessionState::Snoozed {
                 snooze_count: 1,
-                next_fire_unix_ms: now - 10_000,
+                next_fire_unix_ms: now - 2_000,
+            },
+        );
+        active_job(&id);
+        let fires = sink.fire_count();
+
+        // Up for a day, no reboot anywhere near.
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 86_400_000), now);
+
+        assert_eq!(sink.fire_count(), fires + 1, "it rings");
+        assert_eq!(report, StartupReport::default());
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_snooze_that_ended_during_a_restart_rings_if_it_is_not_too_late() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Snoozed {
+                snooze_count: 1,
+                next_fire_unix_ms: now - 5 * 60_000,
+            },
+        );
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires + 1);
+        assert!(report.missed.is_empty());
+    }
+
+    #[test]
+    fn a_snooze_that_ended_too_long_ago_is_reported_as_missed() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let due = now - LATE_WINDOW - 60_000;
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Snoozed {
+                snooze_count: 1,
+                next_fire_unix_ms: due,
+            },
+        );
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires, "too late to ring");
+        assert_eq!(
+            report.missed,
+            vec![MissedAlarm {
+                id: id.clone(),
+                due_unix_ms: due
+            }]
+        );
+        assert!(report.ended_by_reboot.is_empty());
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
+    }
+
+    fn active_job(id: &InstanceId) {
+        crate::jobs::register_job(
+            &id.0,
+            serde_json::json!({ "instance_id": id.0 }),
+            crate::jobs::JobConfig::default(),
+        )
+        .unwrap();
+        crate::jobs::activate_job(&id.0).unwrap();
+    }
+
+    fn one_time_spec(date: chrono::NaiveDate) -> AlarmSpec {
+        AlarmSpec {
+            label: "Once".into(),
+            schedule: ScheduleSpec::OneTime {
+                date: date.format("%Y-%m-%d").to_string(),
+                hour: 7,
+                minute: 0,
+            },
+            time_zone: "UTC".into(),
+            ..AlarmSpec::default()
+        }
+    }
+
+    /// A process dead at ring time is the normal case.
+    #[test]
+    fn a_one_time_alarm_the_os_delivered_rings_and_is_not_finished() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = one_time_spec(Utc::now().date_naive() - chrono::Days::new(1));
+        let id = InstanceId::new(Uuid::new_v4().to_string());
+        let _ = kit.create_with_id(id.clone(), spec.clone());
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: now - 1_000,
+            },
+        );
+        active_job(&id);
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 86_400_000), now);
+
+        assert_eq!(sink.fire_count(), fires + 1, "it rings");
+        assert!(report.finished.is_empty(), "it is not over yet");
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_snoozed_one_time_alarm_keeps_its_snooze_at_startup() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = one_time_spec(Utc::now().date_naive() - chrono::Days::new(1));
+        let id = InstanceId::new(Uuid::new_v4().to_string());
+        let _ = kit.create_with_id(id.clone(), spec.clone());
+        let snoozed = SessionState::Snoozed {
+            snooze_count: 1,
+            next_fire_unix_ms: now + 300_000,
+        };
+        force_state(&kit, &id, snoozed.clone());
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(kit.store().load(&id).unwrap().state, snoozed);
+        assert_eq!(sink.fire_count(), fires);
+        assert_eq!(report, StartupReport::default());
+    }
+
+    #[test]
+    fn a_one_time_alarm_long_past_is_missed_and_finished() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let due = now - 3 * 3_600_000;
+        let spec = one_time_spec(Utc::now().date_naive() - chrono::Days::new(1));
+        let id = InstanceId::new(Uuid::new_v4().to_string());
+        let _ = kit.create_with_id(id.clone(), spec.clone());
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: due,
+            },
+        );
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires);
+        assert_eq!(report.finished, vec![id.clone()]);
+        assert_eq!(
+            report.missed,
+            vec![MissedAlarm {
+                id,
+                due_unix_ms: due
+            }]
+        );
+    }
+
+    #[test]
+    fn a_dismissed_one_time_alarm_is_finished_at_startup() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = one_time_spec(Utc::now().date_naive() - chrono::Days::new(1));
+        let id = InstanceId::new(Uuid::new_v4().to_string());
+        let _ = kit.create_with_id(id.clone(), spec.clone());
+        force_state(
+            &kit,
+            &id,
+            SessionState::Dismissed {
+                dismissed_at_unix_ms: now - 60_000,
             },
         );
 
         let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
 
-        assert_eq!(report.ended_by_reboot, vec![id.clone()]);
-        assert!(matches!(
-            kit.store().load(&id).unwrap().state,
-            SessionState::Scheduled { .. }
-        ));
+        assert_eq!(report.finished, vec![id]);
+        assert!(report.missed.is_empty());
+    }
+
+    #[test]
+    fn a_repeating_alarm_the_os_never_delivered_rings_late_within_the_window() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: now - 10 * 60_000,
+            },
+        );
+        let fires = sink.fire_count();
+
+        kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires + 1);
+    }
+
+    #[test]
+    fn a_repeating_alarm_long_past_is_missed_and_armed_for_next_time() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let due = now - 3 * 3_600_000;
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: due,
+            },
+        );
+        let fires = sink.fire_count();
+
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires);
+        assert!(report.finished.is_empty());
+        assert_eq!(report.missed.len(), 1);
+        match kit.store().load(&id).unwrap().state {
+            SessionState::Scheduled { next_fire_unix_ms } => assert!(next_fire_unix_ms > now),
+            other => panic!("expected Scheduled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_marker_from_before_the_boot_is_no_delivery() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: now - 3 * 3_600_000,
+            },
+        );
+        active_job(&id);
+        let fires = sink.fire_count();
+
+        // The boot is later than the marker that was just written.
+        let report = kit.on_startup_at(&[(id.0.clone(), spec)], Some(now + 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires);
+        assert_eq!(report.missed.len(), 1);
+        assert_eq!(crate::jobs::active_since_ms(&id.0), None);
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_marker_for_a_wake_the_alarm_moved_on_from_does_not_ring() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let now = Utc::now().timestamp_millis();
+        let spec = weekday_spec();
+        let id = kit.create(spec.clone()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: now + 3_600_000,
+            },
+        );
+        active_job(&id);
+        let fires = sink.fire_count();
+
+        kit.on_startup_at(&[(id.0.clone(), spec)], Some(now - 60_000), now);
+
+        assert_eq!(sink.fire_count(), fires);
+        assert_eq!(crate::jobs::active_since_ms(&id.0), None, "marker dropped");
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_marker_for_a_deleted_alarm_is_dropped() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = InstanceId::new(Uuid::new_v4().to_string());
+        active_job(&id);
+        let fires = sink.fire_count();
+
+        kit.on_startup_at(&[], None, Utc::now().timestamp_millis());
+
+        assert_eq!(sink.fire_count(), fires);
+        assert_eq!(crate::jobs::active_since_ms(&id.0), None);
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_time_zone_change_keeps_a_snooze() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let snoozed = SessionState::Snoozed {
+            snooze_count: 2,
+            next_fire_unix_ms: 2_000_000_000_000,
+        };
+        force_state(&kit, &id, snoozed.clone());
+
+        let mut moved = weekday_spec();
+        moved.time_zone = "Asia/Tokyo".into();
+        kit.update(&id, moved).unwrap();
+
+        let record = kit.store().load(&id).unwrap();
+        assert_eq!(record.state, snoozed);
+        match record.context {
+            RecipeContext::AlarmClass(ctx) => assert_eq!(ctx.time_zone, "Asia/Tokyo"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn saving_an_unchanged_alarm_touches_nothing() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let (arms, cancels) = (sink.schedule_count(), sink.cancel_count());
+
+        kit.update(&id, weekday_spec()).unwrap();
+
+        assert_eq!(sink.schedule_count(), arms);
+        assert_eq!(sink.cancel_count(), cancels);
+    }
+
+    /// A kill between a cancel and an arm would lose the alarm.
+    #[test]
+    fn re_arming_never_cancels_first() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Firing {
+                fired_at_unix_ms: 1,
+            },
+        );
+        kit.snooze(&id).unwrap();
+        let mut changed = weekday_spec();
+        changed.label = "Other".into();
+        kit.update(&id, changed).unwrap();
+
+        assert!(
+            !sink.cancels.lock().unwrap().contains(&id.0),
+            "the wake is replaced, not cancelled"
+        );
+    }
+
+    #[test]
+    fn deleting_an_alarm_that_is_not_ringing_leaves_the_ring_alone() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+
+        kit.delete(&id).unwrap();
+
+        assert!(sink.stops.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn firing_keeps_the_next_occurrence_armed() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let arms = sink.schedule_count();
+
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+
+        assert_eq!(sink.schedule_count(), arms + 1);
+        assert!(
+            sink.last_schedule().unwrap().target_unix_ms > Utc::now().timestamp_millis(),
+            "armed for the future"
+        );
+    }
+
+    #[test]
+    fn a_zone_the_device_reports_is_used_when_it_is_known() {
+        assert_eq!(
+            choose_zone(Some("Europe/Amsterdam"), Some("Asia/Tokyo"), 3600),
+            "Europe/Amsterdam"
+        );
+    }
+
+    #[test]
+    fn a_device_that_cannot_be_asked_keeps_the_last_known_zone() {
+        assert_eq!(
+            choose_zone(None, Some("Europe/Amsterdam"), 3600),
+            "Europe/Amsterdam"
+        );
+        assert_eq!(choose_zone(None, Some("Not/AZone"), 3600), "Etc/GMT-1");
+        assert_eq!(choose_zone(None, None, 7200), "Etc/GMT-2");
+    }
+
+    #[test]
+    fn a_zone_the_database_does_not_know_becomes_its_fixed_offset() {
+        assert_eq!(
+            choose_zone(Some("GMT+01:00"), Some("Asia/Tokyo"), 3600),
+            "Etc/GMT-1"
+        );
+        assert_eq!(choose_zone(Some("Custom"), None, -5 * 3600), "Etc/GMT+5");
+        assert_eq!(choose_zone(Some("Custom"), None, 0), "UTC");
+        assert!("Etc/GMT-1".parse::<chrono_tz::Tz>().is_ok());
+        assert!("Etc/GMT+5".parse::<chrono_tz::Tz>().is_ok());
     }
 
     #[test]

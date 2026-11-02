@@ -177,22 +177,15 @@ pub fn handle_trigger_with_store(
     }
 }
 
-/// Compute the next fire time and persist `Scheduled { next_fire_unix_ms }`.
-/// If the record is currently `Firing` we never overwrite the state — a
-/// concurrent re-arm (e.g. MAIN cold-starting via FSI while `:sentinel`
-/// is mid-fire) must not blow away the active session. The sink-level
-/// re-arm of the next exact alarm still happens so a future schedule
-/// has a wake registered.
+/// Compute the next fire time, persist `Scheduled { next_fire_unix_ms }` and
+/// arm it. A firing or snoozed session is left alone: a concurrent re-arm must
+/// not blow it away, and its wake is already registered.
 fn schedule_next(
     store: &ContextStore,
     instance_id: &InstanceId,
     alarm_ctx: &AlarmClassContext,
     now: DateTime<Utc>,
 ) -> Result<(), RecipeError> {
-    let schedule = parse_schedule(alarm_ctx)?;
-    let zone = parse_zone(alarm_ctx)?;
-    let next = next_fire(&schedule, &zone, fire_search_start(alarm_ctx, now))?;
-
     let mut record = match store.load(instance_id) {
         Ok(r) => r,
         Err(StoreError::NotFound(_)) => {
@@ -200,49 +193,44 @@ fn schedule_next(
         }
         Err(e) => return Err(RecipeError::Store(e)),
     };
-    let was_firing = matches!(record.state, SessionState::Firing { .. });
-    let was_snoozed = matches!(record.state, SessionState::Snoozed { .. });
-    if !was_firing {
-        // Reset the snooze count on (re)schedule so a fresh Firing
-        // session starts from zero. Do NOT touch a Snoozed record's
-        // counter — the user is mid-snooze cycle and the count must
-        // survive the re-arm.
-        if !was_snoozed {
-            record.context = reset_snooze(alarm_ctx);
-        }
-        record.state = SessionState::Scheduled {
-            next_fire_unix_ms: next.timestamp_millis(),
-        };
-        store.write(record).map_err(RecipeError::Store)?;
+    if matches!(
+        record.state,
+        SessionState::Firing { .. } | SessionState::Snoozed { .. }
+    ) {
+        return Ok(());
     }
+    let schedule = parse_schedule(alarm_ctx)?;
+    let zone = parse_zone(alarm_ctx)?;
+    let next = next_fire(&schedule, &zone, fire_search_start(alarm_ctx, now))?;
 
-    // Arm an exact alarm so the OS wakes :sentinel at next_fire even if
-    // the app process is fully gone. Best-effort: a missing sink (host
-    // builds, tests) leaves the record persisted without arming.
-    // For Firing records we still arm the next fire so the recurring
-    // alarm has a wake registered for tomorrow / next-occurrence.
+    // A fresh Firing session starts its snooze count from zero.
+    record.context = reset_snooze(alarm_ctx);
+    record.state = SessionState::Scheduled {
+        next_fire_unix_ms: next.timestamp_millis(),
+    };
+    store.write(record).map_err(RecipeError::Store)?;
+    arm_exact_alarm(instance_id, next.timestamp_millis());
+    Ok(())
+}
+
+/// Arm the OS wake for `instance_id`. It replaces any earlier wake for the same
+/// id, so nothing is cancelled first: a process killed between a cancel and an
+/// arm would lose the alarm. Best-effort: a missing sink (host builds, tests)
+/// leaves the record persisted without arming.
+fn arm_exact_alarm(instance_id: &InstanceId, target_unix_ms: i64) {
     if let Some(sink) = alarm_class_runtime().sink() {
-        if !was_firing && !was_snoozed {
-            sink.cancel_exact_alarm(&instance_id.0);
-            let req = crate::firing::ExactAlarmRequest {
-                alarm_id: instance_id.0.clone(),
-                target_unix_ms: next.timestamp_millis(),
-                metadata_json: None,
-            };
-            if !sink.schedule_exact_alarm(&req) {
-                log::warn!(
-                    "[AlarmClass] schedule_exact_alarm rejected for {}",
-                    instance_id.0
-                );
-            }
-        } else {
-            log::info!(
-                "[AlarmClass] schedule_next: skipping re-arm because instance {} is in active state",
+        let req = crate::firing::ExactAlarmRequest {
+            alarm_id: instance_id.0.clone(),
+            target_unix_ms,
+            metadata_json: None,
+        };
+        if !sink.schedule_exact_alarm(&req) {
+            log::warn!(
+                "[AlarmClass] schedule_exact_alarm rejected for {}",
                 instance_id.0
             );
         }
     }
-    Ok(())
 }
 
 /// Where the search for the next fire time starts: now, or the end of the
@@ -278,8 +266,22 @@ fn fire(
     }
     store.write(record).map_err(RecipeError::Store)?;
 
+    // A fire that did not come from the receiver (a late ring at startup) needs
+    // the guardian as well.
+    let _ = crate::jobs::activate_job(&instance_id.0);
+
     // Engage every "alarm is firing" platform surface.
     engage_firing_surface(instance_id, alarm_ctx, true);
+
+    // The OS forgot this wake when it delivered it. Keep the next occurrence
+    // armed already, so a recurring alarm survives whatever ends this session
+    // (a reboot mid-ring, the phone dying), whether or not the app opens again.
+    if let (Ok(schedule), Ok(zone)) = (parse_schedule(alarm_ctx), parse_zone(alarm_ctx)) {
+        let after = now + chrono::Duration::seconds(1);
+        if let Ok(next) = next_fire(&schedule, &zone, fire_search_start(alarm_ctx, after)) {
+            arm_exact_alarm(instance_id, next.timestamp_millis());
+        }
+    }
     Ok(())
 }
 
@@ -298,6 +300,7 @@ fn resume(
         // Nothing firing — resume is a no-op (matches Pause being state-free).
         return Ok(());
     }
+    let _ = crate::jobs::activate_job(&instance_id.0);
     engage_firing_surface(instance_id, alarm_ctx, false);
     Ok(())
 }
@@ -485,6 +488,10 @@ fn snooze(
         }
     };
     let next_unix_ms = now.timestamp_millis() + (interval as i64) * 60_000;
+    // Before the state is written: if the process dies between the two, the
+    // record still says Firing and startup brings the ring back. The other way
+    // round, a leftover marker would make a snoozed alarm ring early.
+    let _ = crate::jobs::deactivate_job(&instance_id.0);
     if let RecipeContext::AlarmClass(ctx) = &mut record.context {
         ctx.snooze_count = current_count + 1;
         ctx.challenges_solved = false;
@@ -499,15 +506,9 @@ fn snooze(
     // the snooze re-fires even if the app gets killed in the meantime.
     if let Some(sink) = alarm_class_runtime().sink() {
         sink.stop_firing(&instance_id.0);
-        sink.cancel_exact_alarm(&instance_id.0);
         sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
-        let req = crate::firing::ExactAlarmRequest {
-            alarm_id: instance_id.0.clone(),
-            target_unix_ms: next_unix_ms,
-            metadata_json: None,
-        };
-        let _ = sink.schedule_exact_alarm(&req);
     }
+    arm_exact_alarm(instance_id, next_unix_ms);
     Ok(())
 }
 
@@ -521,6 +522,10 @@ fn dismiss(
     now: DateTime<Utc>,
 ) -> Result<(), RecipeError> {
     let mut record = store.load(instance_id).map_err(RecipeError::Store)?;
+    // Before the state is written, for the same reason as in `snooze`. The job
+    // file stays so a future fire can activate it again; it is only removed when
+    // the alarm itself is deleted.
+    let _ = crate::jobs::deactivate_job(&instance_id.0);
     record.state = SessionState::Dismissed {
         dismissed_at_unix_ms: now.timestamp_millis(),
     };
@@ -533,34 +538,28 @@ fn dismiss(
     // Tear down everything fire engaged.
     if let Some(sink) = alarm_class_runtime().sink() {
         sink.stop_firing(&instance_id.0);
-        sink.cancel_exact_alarm(&instance_id.0);
         sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
     }
 
     // For recurring schedules, transition Dismissed → Scheduled with the
-    // next fire time. One-shot schedules go to Idle (handled below).
+    // next fire time. One-shot schedules stay Dismissed.
     let schedule = parse_schedule(alarm_ctx)?;
     let zone = parse_zone(alarm_ctx)?;
-    let advance_now = now + chrono::Duration::seconds(1);
-    match next_fire(&schedule, &zone, advance_now) {
+    let after = now + chrono::Duration::seconds(1);
+    match next_fire(&schedule, &zone, fire_search_start(alarm_ctx, after)) {
         Ok(next) => {
             let mut next_record = store.load(instance_id).map_err(RecipeError::Store)?;
             next_record.state = SessionState::Scheduled {
                 next_fire_unix_ms: next.timestamp_millis(),
             };
             store.write(next_record).map_err(RecipeError::Store)?;
-            // Re-arm the next exact alarm.
-            if let Some(sink) = alarm_class_runtime().sink() {
-                let req = crate::firing::ExactAlarmRequest {
-                    alarm_id: instance_id.0.clone(),
-                    target_unix_ms: next.timestamp_millis(),
-                    metadata_json: None,
-                };
-                let _ = sink.schedule_exact_alarm(&req);
-            }
+            arm_exact_alarm(instance_id, next.timestamp_millis());
         }
         Err(_) => {
-            // No next fire — leave in Dismissed; one-shot completed.
+            // No next fire: one-shot completed, nothing may stay armed.
+            if let Some(sink) = alarm_class_runtime().sink() {
+                sink.cancel_exact_alarm(&instance_id.0);
+            }
         }
     }
     Ok(())
@@ -689,6 +688,18 @@ pub struct AlarmClassConfig {
     /// policy: it makes sure a muted phone still wakes the user.
     #[serde(default)]
     pub min_volume_percent: u8,
+    /// How late an alarm may still ring when its time passed unnoticed (the
+    /// phone was restarting, the system held it back). Later than this it is
+    /// reported as missed instead.
+    #[serde(default = "default_late_ring_window_ms")]
+    pub late_ring_window_ms: i64,
+}
+
+/// Fifteen minutes.
+const DEFAULT_LATE_RING_WINDOW_MS: i64 = 15 * 60 * 1000;
+
+fn default_late_ring_window_ms() -> i64 {
+    DEFAULT_LATE_RING_WINDOW_MS
 }
 
 impl Default for AlarmClassConfig {
@@ -710,6 +721,7 @@ impl Default for AlarmClassConfig {
             firing_full_screen: true,
             vibration_pattern: vec![0, 400, 200, 400],
             min_volume_percent: 0,
+            late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
         }
     }
 }
@@ -854,6 +866,7 @@ impl AlarmClassConfig {
             firing_full_screen: true,
             vibration_pattern: Vec::new(),
             min_volume_percent: 0,
+            late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
         }
     }
 }

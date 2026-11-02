@@ -47,8 +47,34 @@ change.
   the background service is on), so it can close a picture or go back a screen
   instead of the system finishing the activity. Apps without the hook are unchanged.
 
+### Changed
+
+- A job is active while its marker file `sentinel/jobs/<id>.active` exists, instead
+  of a status in the job file. Kotlin only creates the marker and Rust alone writes
+  the job file, so saving a job while it fires can no longer lose the fire.
+- `StartupReport` also lists `missed` alarms and `finished` one-shot alarms.
+  `AlarmClassConfig::late_ring_window_ms` (default 15 minutes) sets how late an
+  alarm may still ring when its time passed unnoticed.
+- Firing keeps the next occurrence armed, so a recurring alarm survives a reboot
+  mid-ring without the app being opened.
+
 ### Fixed
 
+- A snooze that ran out with the process dead counted as "ended by a reboot" and
+  did not ring. Finishing the UI ends the process, so this hit every snooze.
+- Re-arming cancelled the exact alarm first; a kill in between lost the alarm. The
+  new wake now simply replaces the old one.
+- `update` with an unchanged spec no longer re-arms, and a snooze survives a time
+  zone change.
+- `delete` tore down the whole firing surface even when another alarm was ringing.
+- A failed time zone lookup silently scheduled in UTC, moving alarms by hours. It
+  now keeps the last known zone, and a zone the database doesn't know (a custom
+  `GMT+01:00`) becomes its fixed offset instead of leaving the alarm unarmed.
+- An active job with nothing left to ring is dropped. It kept the guardian
+  relaunching the app.
+- Triggers are serialised: `dispatch_trigger`'s documented lock did not exist.
+- The main activity handles all configuration changes itself. A dark-mode switch,
+  font-size change or fold recreated the activity, which ends the process.
 - The alarm screen froze after a reboot or force-stop mid-alarm: the boot receiver
   ran in MAIN and started the job guardian there, whose liveness check skipped its
   own pid and relaunched the activity ~10x per second. The receiver now runs in

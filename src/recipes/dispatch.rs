@@ -1,9 +1,9 @@
 //! The single entry point for all Trigger dispatches.
 //!
-//! Enforces the LoadContext-on-every-trigger invariant: every dispatch
-//! acquires the per-id ContextStore mutex and reloads the Context before
-//! routing to the Recipe handler. Recipes never receive settings from any
-//! source other than the freshly-loaded Context.
+//! Enforces the LoadContext-on-every-trigger invariant: every dispatch takes
+//! the transition lock and reloads the Context before routing to the Recipe
+//! handler. Recipes never receive settings from any source other than the
+//! freshly-loaded Context.
 //!
 //! See `requirements.md §Requirement 5.5, 7.5` and `design.md §1.3`.
 
@@ -12,6 +12,18 @@ use crate::recipes::recipe::RecipeError;
 use crate::recipes::registry::recipe_registry;
 use crate::recipes::trigger::Trigger;
 use crate::types::InstanceId;
+
+static TRANSITIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serialises state transitions in this process. Triggers arrive on different
+/// threads (the UI's, and the Android main thread for heads-up broadcasts), and
+/// a handler's load-then-write must not interleave with another's. One lock for
+/// all instances: transitions are rare and short.
+pub(crate) fn lock_transitions() -> std::sync::MutexGuard<'static, ()> {
+    TRANSITIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// Dispatch `trigger` for `instance_id` against the given store.
 ///
@@ -29,9 +41,9 @@ pub fn dispatch_trigger(
     trigger: Trigger,
     instance_id: &InstanceId,
 ) -> Result<(), RecipeError> {
-    // Step 1: load Context. The ContextStore handles its own per-id
-    // mutex internally on writes; reads observe the most recently
-    // committed record. A missing record is a distinct, expected
+    let _transition = lock_transitions();
+
+    // Step 1: load Context. A missing record is a distinct, expected
     // condition (not a generic store I/O failure).
     let record = match store.load(instance_id) {
         Ok(r) => r,
