@@ -830,23 +830,27 @@ impl AlarmKit {
     /// Static helper that detects the device timezone. Always a zone the
     /// scheduler understands; see [`choose_zone`] for what happens otherwise.
     pub fn detect_timezone() -> String {
-        #[cfg(target_os = "android")]
-        let device = Some(crate::platform::android::firing_sink_android::get_time_zone_id())
-            .filter(|z| !z.is_empty());
-        #[cfg(not(target_os = "android"))]
-        let device = Some(std::env::var("TZ").unwrap_or_else(|_| "UTC".to_owned()));
-
-        let memo = crate::utilities::app_files_dir().join("sentinel/last_time_zone");
-        let last_known = std::fs::read_to_string(&memo).ok();
         let offset_secs = chrono::Local::now().offset().local_minus_utc();
-        let zone = choose_zone(device.as_deref(), last_known.as_deref(), offset_secs);
-        if last_known.as_deref() != Some(zone.as_str()) && device.is_some() {
-            if let Some(dir) = memo.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(&memo, &zone);
+        #[cfg(not(target_os = "android"))]
+        {
+            let device = std::env::var("TZ").unwrap_or_else(|_| "UTC".to_owned());
+            choose_zone(Some(&device), None, offset_secs)
         }
-        zone
+        #[cfg(target_os = "android")]
+        {
+            let device = Some(crate::platform::android::firing_sink_android::get_time_zone_id())
+                .filter(|z| !z.is_empty());
+            let memo = crate::utilities::app_files_dir().join("sentinel/last_time_zone");
+            let last_known = std::fs::read_to_string(&memo).ok();
+            let zone = choose_zone(device.as_deref(), last_known.as_deref(), offset_secs);
+            if last_known.as_deref() != Some(zone.as_str()) && device.is_some() {
+                if let Some(dir) = memo.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(&memo, &zone);
+            }
+            zone
+        }
     }
 
     /// Compute next fire time for a given alarm instance from ContextStore.
