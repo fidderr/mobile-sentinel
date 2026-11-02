@@ -2,10 +2,12 @@ package com.mobilesentinel
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -13,66 +15,119 @@ import android.util.Log
 import java.io.File
 
 /**
- * Firing-audio primitives — the alarm playback surface (play/stop a looping
- * sound while an alarm fires).
+ * Firing-audio primitives — plays an alarm's looping sound, driven by the ring
+ * service in `:sentinel`.
  *
- * Rust calls INTO these via JNI (the firing sink, gated by the `firing-audio`
- * Cargo feature). Rust resolves WHICH uri to play (via the Sound Library) and
- * decides when to start/stop; this object just drives a single `MediaPlayer`,
- * optionally fading it in and keeping the alarm stream audible.
- * Every method is defensive: logs and returns a safe fallback on failure.
+ * Takes a list of sounds, best first, and falls through to the next when one
+ * fails: on an error, and also when playback does not actually advance, because
+ * a broken file can look like it plays without making a sound. The service says
+ * what to do when nothing could be played. All calls on the main thread.
  */
 object SentinelFiringAudioPrimitives {
     private const val TAG = "MobileSentinel.FiringAudio"
     private const val FADE_STEP_MS = 100L
+    /** Seconds without progress before a sound counts as not playing. */
+    private const val STUCK_AFTER_CHECKS = 3
 
-    /** Primary firing-audio player; replaced on each [playSound] call. */
-    @Volatile
-    private var primaryPlayer: MediaPlayer? = null
+    private var player: MediaPlayer? = null
+    private val handler = Handler(Looper.getMainLooper())
 
-    private val fadeHandler = Handler(Looper.getMainLooper())
+    private var chain: List<String> = emptyList()
+    private var next = 0
+    private var usage = "alarm"
+    private var contentType = "sonification"
+    private var looping = true
+    private var fadeInMs = 0L
+    private var onExhausted: (() -> Unit)? = null
 
-    /** The alarm-stream volume to put back when the sound stops; -1 when we changed nothing. */
-    @Volatile
-    private var volumeToRestore = -1
+    private var lastPosition = -1
+    private var stuckChecks = 0
 
-    @JvmStatic
-    fun playSound(
-        uri: String,
+    private var focusRequest: AudioFocusRequest? = null
+
+    fun play(
+        sounds: List<String>,
         usage: String,
         contentType: String,
         looping: Boolean,
         fadeInMs: Long,
-        minVolumePercent: Int,
-    ): Boolean {
-        val c = SentinelPrimitives.getAppContext() ?: return false
-        return try {
-            stopSound() // ensure single player
-            val resolved = resolveAudioUri(uri) ?: return false
-            Log.i(TAG, "playSound uri='$uri' resolved='$resolved' usage=$usage looping=$looping fadeIn=${fadeInMs}ms minVolume=$minVolumePercent%")
-            ensureMinVolume(c, minVolumePercent)
-            val attrs = AudioAttributes.Builder()
-                .setUsage(parseAudioUsage(usage))
-                .setContentType(parseAudioContentType(contentType))
-                .build()
-            val mp = MediaPlayer().apply {
-                setAudioAttributes(attrs)
-                setDataSource(c, resolved)
-                isLooping = looping
-                setOnErrorListener { _, what, extra ->
-                    Log.w(TAG, "MediaPlayer error what=$what extra=$extra")
-                    false
-                }
-                prepare()
-                if (fadeInMs > 0) setVolume(0f, 0f)
-                start()
+        onExhausted: () -> Unit,
+    ) {
+        stop()
+        chain = sounds
+        next = 0
+        this.usage = usage
+        this.contentType = contentType
+        this.looping = looping
+        this.fadeInMs = fadeInMs
+        this.onExhausted = onExhausted
+        requestFocus()
+        playNext()
+    }
+
+    private fun playNext() {
+        releasePlayer()
+        val c = SentinelPrimitives.getAppContext()
+        while (c != null && next < chain.size) {
+            val uri = chain[next++]
+            try {
+                player = open(c, uri)
+                Log.i(TAG, "playing '$uri' looping=$looping fadeIn=${fadeInMs}ms")
+                return
+            } catch (e: Throwable) {
+                Log.w(TAG, "'$uri' could not be played: ${e.message}")
             }
-            primaryPlayer = mp
-            if (fadeInMs > 0) startFade(mp, fadeInMs)
-            true
+        }
+        Log.e(TAG, "none of the ${chain.size} sound(s) could be played")
+        onExhausted?.invoke()
+        onExhausted = null
+    }
+
+    private fun open(c: Context, uri: String): MediaPlayer {
+        val mp = MediaPlayer()
+        try {
+            mp.setAudioAttributes(attributes())
+            mp.setDataSource(c, resolveAudioUri(uri))
+            mp.isLooping = looping
+            mp.setOnErrorListener { failed, what, extra ->
+                Log.w(TAG, "MediaPlayer error what=$what extra=$extra")
+                if (failed === player) playNext()
+                true
+            }
+            mp.prepare()
+            if (fadeInMs > 0) mp.setVolume(0f, 0f)
+            mp.start()
         } catch (e: Throwable) {
-            Log.e(TAG, "playSound: ${e.message}", e)
-            false
+            mp.release()
+            throw e
+        }
+        lastPosition = -1
+        stuckChecks = 0
+        if (fadeInMs > 0) startFade(mp, fadeInMs)
+        return mp
+    }
+
+    /** Called once a second: move on from a sound that is not actually playing. */
+    fun checkPlayback() {
+        val mp = player ?: return
+        val position = try {
+            if (mp.isPlaying) mp.currentPosition else -1
+        } catch (_: Throwable) {
+            -1
+        }
+        stuckChecks = if (position == -1 || position == lastPosition) stuckChecks + 1 else 0
+        lastPosition = position
+        if (stuckChecks < STUCK_AFTER_CHECKS) return
+        stuckChecks = 0
+        if (next < chain.size) {
+            Log.w(TAG, "sound is not advancing, trying the next one")
+            playNext()
+        } else {
+            // Nothing left to try. It may still be audible, so it plays on, but
+            // the alarm must also be felt.
+            Log.w(TAG, "last sound is not advancing")
+            onExhausted?.invoke()
+            onExhausted = null
         }
     }
 
@@ -81,91 +136,88 @@ object SentinelFiringAudioPrimitives {
         val startedAt = SystemClock.uptimeMillis()
         val step = object : Runnable {
             override fun run() {
-                if (primaryPlayer !== mp) return // stopped or replaced
+                if (player !== mp) return // stopped or replaced
                 val level = ((SystemClock.uptimeMillis() - startedAt).toFloat() / fadeInMs).coerceIn(0f, 1f)
                 try {
                     mp.setVolume(level, level)
                 } catch (_: Throwable) {
                     return
                 }
-                if (level < 1f) fadeHandler.postDelayed(this, FADE_STEP_MS)
+                if (level < 1f) handler.postDelayed(this, FADE_STEP_MS)
             }
         }
-        fadeHandler.post(step)
+        handler.post(step)
     }
 
-    /**
-     * Raise the alarm stream to at least [percent] of its range, remembering
-     * the old level for [stopSound]. Does nothing for 0, or when the stream
-     * is already loud enough. Some devices refuse the change while Do Not
-     * Disturb is on; that is logged and the alarm plays at the user's volume.
-     */
-    private fun ensureMinVolume(c: Context, percent: Int) {
-        if (percent <= 0) return
+    /** Stop playing. Idempotent. */
+    fun stop() {
+        handler.removeCallbacksAndMessages(null)
+        releasePlayer()
+        chain = emptyList()
+        onExhausted = null
+        abandonFocus()
+    }
+
+    private fun releasePlayer() {
+        val mp = player ?: return
+        player = null
+        try {
+            if (mp.isPlaying) mp.stop()
+        } catch (_: Throwable) {
+        }
+        try {
+            mp.release()
+        } catch (_: Throwable) {
+        }
+    }
+
+    // Other audio should duck or stop for the alarm, but the alarm does not act
+    // on losing focus: it is not allowed to go quiet because something else plays.
+    private fun requestFocus() {
+        val c = SentinelPrimitives.getAppContext() ?: return
         try {
             val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            val target = Math.ceil(max * percent.coerceAtMost(100) / 100.0).toInt().coerceIn(1, max)
-            val current = am.getStreamVolume(AudioManager.STREAM_ALARM)
-            if (current < target) {
-                if (volumeToRestore < 0) volumeToRestore = current
-                am.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
-                Log.i(TAG, "alarm volume raised $current -> $target (of $max)")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(attributes())
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                focusRequest = request
+                am.requestAudioFocus(request)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "ensureMinVolume: ${e.message}")
+            Log.w(TAG, "requestFocus: ${e.message}")
         }
     }
 
-    private fun restoreVolume() {
-        val saved = volumeToRestore
-        if (saved < 0) return
-        volumeToRestore = -1
+    private fun abandonFocus() {
+        val c = SentinelPrimitives.getAppContext() ?: return
         try {
-            val c = SentinelPrimitives.getAppContext() ?: return
             val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.setStreamVolume(AudioManager.STREAM_ALARM, saved, 0)
-            Log.i(TAG, "alarm volume restored to $saved")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                focusRequest?.let { am.abandonAudioFocusRequest(it) }
+                focusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
         } catch (e: Throwable) {
-            Log.w(TAG, "restoreVolume: ${e.message}")
+            Log.w(TAG, "abandonFocus: ${e.message}")
         }
     }
 
-    @JvmStatic
-    fun stopSound(): Boolean {
-        return try {
-            fadeHandler.removeCallbacksAndMessages(null)
-            primaryPlayer?.let { mp ->
-                try {
-                    if (mp.isPlaying) mp.stop()
-                } catch (_: Throwable) {
-                }
-                try {
-                    mp.release()
-                } catch (_: Throwable) {
-                }
-            }
-            primaryPlayer = null
-            restoreVolume()
-            true
-        } catch (e: Throwable) {
-            Log.e(TAG, "stopSound: ${e.message}", e)
-            false
-        }
-    }
+    private fun attributes(): AudioAttributes = AudioAttributes.Builder()
+        .setUsage(parseAudioUsage(usage))
+        .setContentType(parseAudioContentType(contentType))
+        .build()
 
-    private fun resolveAudioUri(uri: String): Uri? {
-        return try {
-            when {
-                uri == "system://default-alarm" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                uri.startsWith("file://") || uri.startsWith("content://") -> Uri.parse(uri)
-                uri.startsWith("/") -> Uri.fromFile(File(uri))
-                else -> Uri.parse(uri)
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "resolveAudioUri($uri): ${e.message}")
-            null
-        }
+    private fun resolveAudioUri(uri: String): Uri = when {
+        uri == "system://default-alarm" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        uri.startsWith("/") -> Uri.fromFile(File(uri))
+        else -> Uri.parse(uri)
     }
 
     private fun parseAudioUsage(usage: String): Int = when (usage.lowercase()) {

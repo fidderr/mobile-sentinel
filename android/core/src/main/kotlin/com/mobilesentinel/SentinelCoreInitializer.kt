@@ -40,6 +40,9 @@ class SentinelCoreInitializer : ContentProvider() {
         // Track the resumed Activity for capabilities that need one.
         SentinelActivityTracker.attach(app)
 
+        // A ring that ended without its service (force-stop) left the volume up.
+        SentinelRing.restoreVolumeIfIdle(app)
+
         Log.i(TAG, "mobile-sentinel core initialised (primitives + activity tracker)")
         return true
     }

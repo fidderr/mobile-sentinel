@@ -28,6 +28,9 @@ class SentinelBootReceiver : BroadcastReceiver() {
         Log.i(TAG, "Boot completed — starting boot service to re-arm alarms")
         SentinelPrimitives.init(context.applicationContext)
 
+        // A reboot mid-ring left the volume up, with nothing left to put it back.
+        SentinelRing.restoreVolumeIfIdle(context.applicationContext)
+
         // Start the boot service in MAIN process. This ensures the MAIN
         // process starts (loading Rust), the consumer's startup runs (re-arms
         // all alarms), then the service stops itself. No UI shown.

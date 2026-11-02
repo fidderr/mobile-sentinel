@@ -17,6 +17,7 @@ categories = ["os", "api-bindings"]
 exclude = [
     "android/builds/",
     "android/.gradle/",
+    "android/ci-check/",
     "sentinel/",
     "target/",
 ]
@@ -121,14 +122,14 @@ jobs = []
 # full-screen-intent/kiosk; a pure scheduler needs exact-alarm only).
 # `firing` is the convenience bundle of all six. The FiringSink trait itself
 # stays stable; each sub-feature gates its platform surface + permissions.
-# Keep the alarm CPU awake while firing (WAKE_LOCK).
-wake-lock = []
+# Lets the ring keep the CPU awake while firing (WAKE_LOCK).
+wake-lock = ["foreground-service"]
 # Alarm audio playback during firing (no extra permission).
-firing-audio = []
+firing-audio = ["foreground-service"]
 # Alarm vibration during firing — a looping waveform alongside (or instead of)
 # the audio. Uses the VIBRATE permission (shared with the `haptics` capability).
-firing-vibration = []
-# Alarm foreground service so the process survives a swipe-kill while firing
+firing-vibration = ["foreground-service"]
+# The ring service in :sentinel, which plays an alarm's sound and vibration
 # (FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS).
 foreground-service = []
 # OS exact-alarm scheduling (SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM).

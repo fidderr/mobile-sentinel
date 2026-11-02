@@ -17,7 +17,12 @@ use once_cell::sync::OnceCell;
 
 /// Everything the recipe engine needs to fire an alarm. Built by the recipe
 /// from a freshly-loaded Context.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serialized, this is also the ring plan: it travels with the OS alarm
+/// ([`ExactAlarmRequest::metadata_json`]) so the alarm can ring before any Rust
+/// runs. Field names are read by the ring service in Kotlin
+/// (`SentinelForegroundService`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FireRequest {
     pub instance_id: String,
     /// Notification channel id for the firing FGS notification.
@@ -34,6 +39,9 @@ pub struct FireRequest {
     pub bypass_dnd: bool,
     /// Resolved playable sound URI. Empty string / `"silent://"` = silent.
     pub sound_uri: String,
+    /// What to try, in order, when `sound_uri` cannot be played. An alarm must
+    /// not go quiet because of one broken file.
+    pub fallback_sound_uris: Vec<String>,
     /// AudioAttributes usage tag (e.g. `"alarm"`).
     pub audio_usage: String,
     /// AudioAttributes content type (e.g. `"sonification"`).
@@ -55,6 +63,8 @@ pub struct FireRequest {
     pub kiosk_block_back: bool,
     /// Kiosk: relaunch the activity when the user opens Recents / swipes away.
     pub kiosk_block_recents: bool,
+    /// Kiosk: swallow the volume keys.
+    pub kiosk_block_volume: bool,
     /// Activity FQCN used for full-screen-intent target + kiosk relaunch.
     pub activity_fqcn: Option<String>,
     /// Debounce for kiosk relaunch.
@@ -77,21 +87,26 @@ pub struct FireRequest {
 pub struct ExactAlarmRequest {
     pub alarm_id: String,
     pub target_unix_ms: i64,
-    /// Opaque metadata handed back to Rust on dispatch.
+    /// The ring plan (a serialized [`FireRequest`]) the platform executes when
+    /// this alarm goes off. `None` means the alarm only wakes the app.
     pub metadata_json: Option<String>,
 }
 
 /// The minimal, mockable firing interface used by the recipe engine.
 ///
 /// Implementors compose whatever firing sub-capabilities they support
-/// (foreground service, audio, kiosk, full-screen intent, wake lock, exact
-/// alarm). The engine only needs these six operations.
+/// (foreground service, audio, kiosk, full-screen intent, exact alarm). The
+/// engine only needs these operations.
 pub trait FiringSink: Send + Sync {
-    /// Engage the whole firing surface. Returns `true` if the critical
-    /// surface (foreground service) engaged.
+    /// Engage the whole firing surface. Safe to repeat for a ring in progress:
+    /// the sound does not restart. Returns `true` if the critical surface (the
+    /// ring service) engaged.
     fn start_firing(&self, req: &FireRequest) -> bool;
-    /// Tear down everything `start_firing` engaged. Idempotent.
+    /// End the ring of this instance. Idempotent. Another alarm may be ringing,
+    /// so this leaves the lock on the screen alone; see [`Self::release_takeover`].
     fn stop_firing(&self, instance_id: &str);
+    /// Nothing rings any more: give the screen back. Idempotent.
+    fn release_takeover(&self);
     /// Pause firing audio without tearing down other surfaces (e.g. while a
     /// challenge screen is shown). Bring the alarm back with
     /// [`Self::start_firing`] — there is no separate "resume audio" path.
@@ -133,6 +148,7 @@ pub fn firing_sink() -> Option<Arc<dyn FiringSink>> {
 pub struct MockFiringSink {
     pub fires: std::sync::Mutex<Vec<FireRequest>>,
     pub stops: std::sync::Mutex<Vec<String>>,
+    pub releases: std::sync::atomic::AtomicU32,
     pub schedules: std::sync::Mutex<Vec<ExactAlarmRequest>>,
     pub cancels: std::sync::Mutex<Vec<String>>,
     pub pauses: std::sync::atomic::AtomicU32,
@@ -167,6 +183,10 @@ impl FiringSink for MockFiringSink {
     fn stop_firing(&self, instance_id: &str) {
         self.stops.lock().unwrap().push(instance_id.to_owned());
     }
+    fn release_takeover(&self) {
+        self.releases
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     fn pause_audio(&self) {
         self.pauses
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -197,6 +217,7 @@ mod tests {
             importance: 5,
             bypass_dnd: true,
             sound_uri: "file:///a.mp3".into(),
+            fallback_sound_uris: vec![],
             audio_usage: "alarm".into(),
             audio_content_type: "sonification".into(),
             looping: true,
@@ -206,6 +227,7 @@ mod tests {
             kiosk_block_home: true,
             kiosk_block_back: true,
             kiosk_block_recents: true,
+            kiosk_block_volume: true,
             activity_fqcn: None,
             kiosk_debounce_ms: 50,
             kiosk_hide_status_bar: true,

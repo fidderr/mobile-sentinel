@@ -408,12 +408,11 @@ impl AlarmKit {
             self.store.load(id).map(|r| r.state),
             Ok(SessionState::Firing { .. })
         );
+        // Only this alarm's ring: another alarm may be ringing right now.
+        if ringing {
+            alarm_class::tear_down_ring(&self.store, id);
+        }
         if let Some(sink) = alarm_class_runtime().sink() {
-            // Only this alarm's ring: another alarm may be ringing right now.
-            if ringing {
-                sink.stop_firing(&id.0);
-                sink.cancel_exact_alarm(&alarm_class::watchdog_alarm_id(id));
-            }
             sink.cancel_exact_alarm(&id.0);
         }
         let _ = crate::jobs::deactivate_job(&id.0);
@@ -571,22 +570,31 @@ impl AlarmKit {
         })
     }
 
-    /// Snapshot of the currently-firing alarm if one exists.
+    /// Snapshot of the alarm the user should deal with now: the one that has
+    /// been firing longest, so the answer does not change while it rings.
     pub fn current_session(&self) -> Result<Option<AlarmKitSession>, AlarmKitError> {
-        for record in self.store.enumerate_all()? {
+        let mut records = self.store.enumerate_all()?;
+        records.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        let mut current: Option<AlarmKitSession> = None;
+        for record in records {
             if let SessionState::Firing { fired_at_unix_ms } = record.state {
                 if let RecipeContext::AlarmClass(ctx) = &record.context {
-                    return Ok(Some(AlarmKitSession {
-                        instance_id: record.id.clone(),
-                        fired_at_unix_ms,
-                        spec: AlarmSpec::from_context(ctx),
-                        snooze_count: ctx.snooze_count,
-                        challenges_solved: ctx.challenges_solved,
-                    }));
+                    if current
+                        .as_ref()
+                        .map_or(true, |c| fired_at_unix_ms < c.fired_at_unix_ms)
+                    {
+                        current = Some(AlarmKitSession {
+                            instance_id: record.id.clone(),
+                            fired_at_unix_ms,
+                            spec: AlarmSpec::from_context(ctx),
+                            snooze_count: ctx.snooze_count,
+                            challenges_solved: ctx.challenges_solved,
+                        });
+                    }
                 }
             }
         }
-        Ok(None)
+        Ok(current)
     }
 
     /// Permissions every consumer needs to declare in its manifest. Read
@@ -810,20 +818,35 @@ impl AlarmKit {
             SessionState::Snoozed {
                 next_fire_unix_ms, ..
             } => {
-                if let Some(sink) = alarm_class_runtime().sink() {
-                    let req = crate::firing::ExactAlarmRequest {
-                        alarm_id: id.0.clone(),
-                        target_unix_ms: next_fire_unix_ms,
-                        metadata_json: None,
-                    };
-                    if !sink.schedule_exact_alarm(&req) {
-                        log::warn!("[AlarmKit] re-arming snooze of {} was rejected", id.0);
-                    }
-                }
+                alarm_class::arm_exact_alarm(id, ctx, next_fire_unix_ms);
                 Ok(Rearmed::Armed)
             }
             // Scheduled / Idle / Dismissed: recompute and arm the next fire.
             _ => finish(dispatch_trigger(&self.store, Trigger::Schedule, id).map_err(Into::into)),
+        }
+    }
+
+    /// Arm every waiting alarm again without moving it. An alarm carries a plan
+    /// of how to ring, made when it was armed: call this after changing a runtime
+    /// config it depends on (minimum volume, texts).
+    pub fn refresh_ring_plans(&self) {
+        let now_ms = Utc::now().timestamp_millis();
+        let Ok(records) = self.store.enumerate_all() else {
+            return;
+        };
+        for record in records {
+            let RecipeContext::AlarmClass(ctx) = &record.context else {
+                continue;
+            };
+            if let SessionState::Scheduled { next_fire_unix_ms }
+            | SessionState::Snoozed {
+                next_fire_unix_ms, ..
+            } = record.state
+            {
+                if next_fire_unix_ms > now_ms {
+                    alarm_class::arm_exact_alarm(&record.id, ctx, next_fire_unix_ms);
+                }
+            }
         }
     }
 
@@ -901,12 +924,15 @@ mod tests {
                 kiosk_block_home: true,
                 kiosk_block_back: true,
                 kiosk_block_recents: true,
+                kiosk_block_volume: true,
                 kiosk_hide_status_bar: false,
                 kiosk_hide_nav_bar: false,
                 firing_full_screen: true,
                 vibration_pattern: vec![0, 400, 200, 400],
                 min_volume_percent: 0,
                 late_ring_window_ms: LATE_WINDOW,
+                fallback_sound_id: Some(SoundIdSpec::Bundled("backup".into())),
+                fallback_title: "Alarm".into(),
             },
         });
         (kit, sink)
@@ -1754,6 +1780,164 @@ mod tests {
         ));
     }
 
+    fn plan_of(req: &crate::firing::ExactAlarmRequest) -> serde_json::Value {
+        serde_json::from_str(req.metadata_json.as_deref().expect("a ring plan")).unwrap()
+    }
+
+    #[test]
+    fn an_armed_alarm_carries_the_plan_to_ring_it_by() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.fade_in_secs = 15;
+
+        kit.create(spec).unwrap();
+
+        // Read by the ring service in Kotlin, which runs without any Rust.
+        let plan = plan_of(&sink.last_schedule().unwrap());
+        assert_eq!(plan["title"], "Wake");
+        assert_eq!(plan["sound_uri"], "test://sound");
+        assert_eq!(plan["fade_in_ms"], 15_000);
+        assert_eq!(plan["vibrate"], true);
+        assert_eq!(plan["firing_full_screen"], true);
+        assert_eq!(plan["activity_fqcn"], "dev.test.MainActivity");
+    }
+
+    #[test]
+    fn every_way_of_arming_an_alarm_gives_it_a_plan() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+
+        // The next occurrence, armed while it rings.
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        plan_of(&sink.last_schedule().unwrap());
+        // The snooze.
+        kit.snooze(&id).unwrap();
+        plan_of(&sink.last_schedule().unwrap());
+        // The snooze again after a restart.
+        let now = Utc::now().timestamp_millis();
+        kit.on_startup_at(&[(id.0.clone(), weekday_spec())], Some(now - 60_000), now);
+        plan_of(&sink.last_schedule().unwrap());
+        // The next occurrence after a dismiss.
+        force_state(
+            &kit,
+            &id,
+            SessionState::Firing {
+                fired_at_unix_ms: now,
+            },
+        );
+        kit.dismiss(&id).unwrap();
+        plan_of(&sink.last_schedule().unwrap());
+    }
+
+    #[test]
+    fn a_broken_sound_has_somewhere_to_fall_back_to() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+
+        kit.create(weekday_spec()).unwrap();
+
+        // NoopResolver resolves the chosen sound and the fallback alike, so only
+        // the system default is left after removing duplicates.
+        let plan = plan_of(&sink.last_schedule().unwrap());
+        assert_eq!(
+            plan["fallback_sound_uris"],
+            serde_json::json!(["content://settings/system/default-alarm"])
+        );
+    }
+
+    #[test]
+    fn an_alarm_without_a_label_still_has_a_title() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.label = String::new();
+
+        kit.create(spec).unwrap();
+
+        assert_eq!(plan_of(&sink.last_schedule().unwrap())["title"], "Alarm");
+    }
+
+    #[test]
+    fn refreshing_the_plans_changes_them_without_moving_anything() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let waiting = kit.create(weekday_spec()).unwrap();
+        let snoozed = kit.create(weekday_spec()).unwrap();
+        let ringing = kit.create(weekday_spec()).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &snoozed).unwrap();
+        kit.snooze(&snoozed).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &ringing).unwrap();
+        let next_waiting = kit.next_fire(&waiting).unwrap().unwrap();
+        let next_snoozed = kit.next_fire(&snoozed).unwrap().unwrap();
+
+        let mut config = alarm_class_runtime().config();
+        config.min_volume_percent = 80;
+        alarm_class_runtime().configure(config);
+        let before = sink.schedule_count();
+        kit.refresh_ring_plans();
+
+        let schedules = sink.schedules.lock().unwrap();
+        let refreshed = &schedules[before..];
+        assert_eq!(refreshed.len(), 2, "the ringing alarm is not armed again");
+        assert!(refreshed
+            .iter()
+            .all(|r| plan_of(r)["min_volume_percent"] == 80));
+        let target_of = |id: &InstanceId| {
+            refreshed
+                .iter()
+                .find(|r| r.alarm_id == id.0)
+                .map(|r| r.target_unix_ms)
+        };
+        assert_eq!(target_of(&waiting), Some(next_waiting));
+        assert_eq!(target_of(&snoozed), Some(next_snoozed));
+    }
+
+    #[test]
+    fn the_screen_stays_locked_until_the_last_ringing_alarm_ends() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let a = kit.create(weekday_spec()).unwrap();
+        let b = kit.create(weekday_spec()).unwrap();
+        let releases = || sink.releases.load(std::sync::atomic::Ordering::SeqCst);
+        dispatch_trigger(&kit.store, Trigger::Fire, &a).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &b).unwrap();
+
+        kit.dismiss(&a).unwrap();
+        assert_eq!(*sink.stops.lock().unwrap(), vec![a.0.clone()]);
+        assert_eq!(releases(), 0, "b still rings");
+        assert!(matches!(
+            kit.store().load(&b).unwrap().state,
+            SessionState::Firing { .. }
+        ));
+
+        kit.snooze(&b).unwrap();
+        assert_eq!(releases(), 1);
+    }
+
+    #[test]
+    fn deleting_one_of_two_ringing_alarms_keeps_the_lock() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let a = kit.create(weekday_spec()).unwrap();
+        let b = kit.create(weekday_spec()).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &a).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &b).unwrap();
+
+        kit.delete(&a).unwrap();
+
+        assert_eq!(*sink.stops.lock().unwrap(), vec![a.0.clone()]);
+        assert_eq!(sink.releases.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn the_sound_fades_in_when_the_alarm_first_fires_but_not_when_it_resumes() {
         let _g = lock_and_clear();
@@ -1867,6 +2051,36 @@ mod tests {
         assert_eq!(session.instance_id, id);
         assert_eq!(session.fired_at_unix_ms, 5_000);
         assert_eq!(session.spec.label, "Wake");
+    }
+
+    #[test]
+    fn current_session_is_the_one_firing_longest_and_then_the_next() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let newer = kit.create(weekday_spec()).unwrap();
+        let older = kit.create(weekday_spec()).unwrap();
+        force_state(
+            &kit,
+            &newer,
+            SessionState::Firing {
+                fired_at_unix_ms: 2_000,
+            },
+        );
+        force_state(
+            &kit,
+            &older,
+            SessionState::Firing {
+                fired_at_unix_ms: 1_000,
+            },
+        );
+
+        let current = || kit.current_session().unwrap().map(|s| s.instance_id);
+        assert_eq!(current(), Some(older.clone()));
+        kit.dismiss(&older).unwrap();
+        assert_eq!(current(), Some(newer.clone()));
+        kit.dismiss(&newer).unwrap();
+        assert_eq!(current(), None);
     }
 
     #[test]

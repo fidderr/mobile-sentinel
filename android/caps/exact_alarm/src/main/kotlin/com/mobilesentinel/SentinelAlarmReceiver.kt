@@ -12,13 +12,12 @@ import android.util.Log
  * `android:process=":sentinel"` in the manifest). Its ONLY job:
  *
  * 1. Mark the job for this instance active (instance_id maps to a job id).
- * 2. Call `SentinelJobGuardian.startGuarding()`.
+ * 2. Start the ring from the plan Rust put on this alarm when it armed it, so
+ *    the alarm is heard without waiting for MAIN.
+ * 3. Call `SentinelJobGuardian.startGuarding()`, which brings MAIN up.
  *
- * That's it — no starting activities, no writing trigger files, no deciding
- * what kind of wake this is. ALL logic (audio, kiosk, FGS, state machine)
- * runs in MAIN's Rust, which re-derives what to do from the persisted
- * Context on every heads-up (LoadContext-on-every-trigger). The receiver
- * never interprets a trigger — that decision belongs to Rust.
+ * It decides nothing: the state machine and the UI run in MAIN's Rust, which
+ * re-derives what to do from the persisted Context on every heads-up.
  */
 class SentinelAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -26,21 +25,31 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
 
         val pending = goAsync()
         try {
+            val app = context.applicationContext
             val instanceId = intent.getStringExtra(EXTRA_INSTANCE_ID).orEmpty()
 
             Log.i(TAG, "onReceive: instance=$instanceId")
 
-            // A firing watchdog (`<instance>#watchdog`, armed by MAIN while an
-            // alarm rings) only re-checks the guardian. It must NEVER activate
-            // a job: if the alarm was already dismissed/snoozed, the job is
-            // pending and the guardian correctly does nothing.
+            // The OS only keeps the device awake until this returns.
+            SentinelRing.holdCpu(app, DELIVERY_WAKE_MS)
+
+            // The ring's watchdog must NEVER activate a job: if the alarm was
+            // already dismissed or snoozed, nothing should come back.
             val isWatchdog = instanceId.endsWith(WATCHDOG_SUFFIX)
             val jobId = instanceId.removeSuffix(WATCHDOG_SUFFIX)
 
-            if (!isWatchdog && jobId.isNotBlank()) {
-                SentinelActiveJobs.mark(context.applicationContext, jobId)
+            if (isWatchdog) {
+                SentinelRing.resumeSaved(app)
+            } else if (jobId.isNotBlank()) {
+                val active = SentinelActiveJobs.mark(app, jobId)
                 // It fired, so the OS no longer holds it: do not replay it at boot.
                 SentinelArmedAlarms.forget(context, jobId)
+                val plan = intent.getStringExtra(EXTRA_METADATA_JSON)
+                if (active && !plan.isNullOrBlank()) {
+                    // Armed first, so a service that is refused or dies is retried.
+                    SentinelRing.armWatchdog(app)
+                    SentinelRing.start(app, jobId, plan)
+                }
             }
 
             // Start the job guardian polling loop. It will detect the
@@ -60,8 +69,8 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         const val TAG = "MobileSentinel.AlarmRx"
-        /** Mirrors `WATCHDOG_SUFFIX` in Rust (`recipes::alarm_kit::alarm_class`). */
         const val WATCHDOG_SUFFIX = "#watchdog"
+        private const val DELIVERY_WAKE_MS = 15_000L
         const val ACTION = "com.mobilesentinel.ALARM_DISPATCH"
         const val EXTRA_INSTANCE_ID = "instance_id"
         const val EXTRA_METADATA_JSON = "metadata_json"

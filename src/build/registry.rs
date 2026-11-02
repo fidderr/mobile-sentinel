@@ -564,7 +564,7 @@ pub const CAPABILITIES: &[Capability] = &[
     // like every leaf capability — there is no shared "alarm runtime" bundle.
     Capability {
         id: "foreground_service",
-        description: "Alarm foreground service so the process survives a swipe-kill while firing.",
+        description: "The ring service: an alarm's sound, vibration and notification, in :sentinel.",
         permissions: &[
             Permission::new("android.permission.FOREGROUND_SERVICE"),
             Permission::new("android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"),
@@ -573,10 +573,7 @@ pub const CAPABILITIES: &[Capability] = &[
         features: NO_FEATURES,
         components: "",
         policy_sensitive: false,
-        kotlin_sources: &[
-            "SentinelForegroundService.kt",
-            "SentinelForegroundServicePrimitives.kt",
-        ],
+        kotlin_sources: &["SentinelForegroundService.kt"],
     },
     Capability {
         id: "firing_audio",
@@ -598,12 +595,12 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "wake_lock",
-        description: "Keep the CPU awake while the alarm fires (WAKE_LOCK).",
+        description: "Lets the ring keep the CPU awake while the alarm fires (WAKE_LOCK).",
         permissions: &[Permission::new("android.permission.WAKE_LOCK")],
         features: NO_FEATURES,
         components: "",
         policy_sensitive: false,
-        kotlin_sources: &["SentinelWakeLockPrimitives.kt"],
+        kotlin_sources: &[],
     },
     Capability {
         id: "exact_alarm",
@@ -716,8 +713,11 @@ static FEATURE_EDGES: Lazy<BTreeMap<String, Vec<String>>> =
 ///   MAIN back at fire time).
 /// - `accessibility` → `kiosk`: the accessibility service is the kiosk
 ///   ultra-protection enforcer; it reads `SentinelKioskController`.
-const MODULE_DEPS: &[(&str, &[&str])] =
-    &[("exact_alarm", &["jobs"]), ("accessibility", &["kiosk"])];
+const MODULE_DEPS: &[(&str, &[&str])] = &[
+    ("exact_alarm", &["jobs"]),
+    ("accessibility", &["kiosk"]),
+    ("foreground_service", &["firing_audio", "firing_vibration"]),
+];
 
 /// `[` minus `]` count in a fragment — used to track when a (possibly
 /// multi-line) `name = [ ... ]` feature entry is complete.
@@ -885,9 +885,9 @@ pub struct ManifestInjection {
 ///
 /// A capability has a module exactly when it lists [`Capability::kotlin_sources`];
 /// the module dir name equals the id. Every firing sub-feature
-/// (`foreground_service` / `firing_audio` / `wake_lock` / `exact_alarm` /
+/// (`foreground_service` / `firing_audio` / `firing_vibration` / `exact_alarm` /
 /// `kiosk` / `full_screen_intent`) and the `jobs` building block is now its
-/// own independent module — there is no shared "alarm runtime" bundle.
+/// own module — there is no shared "alarm runtime" bundle.
 ///
 /// Some modules depend on others at the Gradle level (`implementation
 /// project(...)`); those edges are in [`MODULE_DEPS`]. settings.gradle must
@@ -1071,9 +1071,18 @@ mod tests {
     #[test]
     fn enabled_modules_firing_subfeature_is_its_own_module() {
         // Each firing sub-feature is now its own per-feature module (no shared
-        // "alarm runtime" bundle). wake_lock → :sentinel-wake_lock, nothing else.
-        let modules = enabled_modules(&["wake_lock"]);
-        assert_eq!(modules, vec!["wake_lock"]);
+        // "alarm runtime" bundle). kiosk → :sentinel-kiosk, nothing else.
+        let modules = enabled_modules(&["kiosk"]);
+        assert_eq!(modules, vec!["kiosk"]);
+    }
+
+    #[test]
+    fn enabled_modules_ring_service_pulls_what_it_plays() {
+        let modules = enabled_modules(&["foreground_service"]);
+        assert_eq!(
+            modules,
+            vec!["firing_audio", "firing_vibration", "foreground_service"]
+        );
     }
 
     #[test]

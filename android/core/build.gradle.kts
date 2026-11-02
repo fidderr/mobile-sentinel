@@ -11,7 +11,7 @@
 // The firing surfaces (foreground service, alarm/boot/time receivers, boot
 // service, job guardian, kiosk controller) each live in their OWN per-feature
 // module (../caps/<id>: foreground_service, exact_alarm, firing_audio,
-// wake_lock, kiosk, full_screen_intent, jobs), pulled in only when that
+// firing_vibration, kiosk, full_screen_intent, jobs), pulled in only when that
 // capability is enabled. Every leaf capability lives in its own
 // `:sentinel-<cap>` module (../caps/<cap>).
 // build_sentinel includes core + only the ENABLED capability modules, so a

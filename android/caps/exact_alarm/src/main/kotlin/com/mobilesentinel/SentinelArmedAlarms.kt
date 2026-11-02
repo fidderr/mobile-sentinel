@@ -13,8 +13,8 @@ import java.net.URLEncoder
  * This is recovery of OS state, not a decision: Rust decides which alarms
  * exist and when they ring, the arming primitives record exactly what they
  * were asked to arm, and [SentinelBootService] replays that record. Nothing
- * here knows what an alarm *is* — only an id and a time — and it does not
- * read Rust's own files.
+ * here knows what an alarm *is* — only an id, a time and the plan to hand back —
+ * and it does not read Rust's own files.
  *
  * One small file per alarm (`sentinel/armed/<id>.json`, the id URL-encoded),
  * so the MAIN process (arming) and `:sentinel` (forgetting an alarm that just
@@ -30,15 +30,17 @@ internal object SentinelArmedAlarms {
     private fun fileFor(context: Context, id: String) =
         File(dir(context), URLEncoder.encode(id, "UTF-8") + EXT)
 
+    class Armed(val fireAtMs: Long, val metadataJson: String?)
+
     /** Remember that [id] is armed for [fireAtMs]. Internal watchdog alarms are not recorded. */
-    fun record(context: Context, id: String, fireAtMs: Long) {
+    fun record(context: Context, id: String, fireAtMs: Long, metadataJson: String?) {
         if (id.endsWith(SentinelAlarmReceiver.WATCHDOG_SUFFIX)) return
         try {
             val d = dir(context)
             d.mkdirs()
             val file = fileFor(context, id)
             val tmp = File(d, "${file.name}.${android.os.Process.myPid()}.tmp")
-            tmp.writeText(fireAtMs.toString())
+            tmp.writeText(fireAtMs.toString() + "\n" + metadataJson.orEmpty())
             java.nio.file.Files.move(
                 tmp.toPath(),
                 file.toPath(),
@@ -59,14 +61,16 @@ internal object SentinelArmedAlarms {
         }
     }
 
-    /** Every recorded alarm as id to fire time (ms). Unreadable entries are dropped. */
-    fun all(context: Context): Map<String, Long> {
+    /** Every recorded alarm by id. Unreadable entries are dropped. */
+    fun all(context: Context): Map<String, Armed> {
         val files = dir(context).listFiles { f -> f.name.endsWith(EXT) } ?: return emptyMap()
-        val out = HashMap<String, Long>()
+        val out = HashMap<String, Armed>()
         for (file in files) {
             try {
-                val at = file.readText().trim().toLong()
-                out[URLDecoder.decode(file.name.removeSuffix(EXT), "UTF-8")] = at
+                val lines = file.readText().split('\n', limit = 2)
+                val metadata = lines.getOrNull(1)?.takeIf { it.isNotBlank() }
+                out[URLDecoder.decode(file.name.removeSuffix(EXT), "UTF-8")] =
+                    Armed(lines[0].trim().toLong(), metadata)
             } catch (_: Throwable) {
                 file.delete()
             }

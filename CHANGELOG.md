@@ -49,6 +49,25 @@ change.
 
 ### Changed
 
+- **An alarm rings from `:sentinel`, before any Rust runs.** Rust resolves a plan
+  when it arms an alarm (a serialized `FireRequest`, carried by
+  `ExactAlarmRequest::metadata_json`) and the alarm receiver starts the ring
+  service from it. The foreground service, sound and vibration moved out of MAIN,
+  so an exit of the UI can no longer stop the sound, and a ring no longer depends
+  on the activity being allowed to start. Call `AlarmKit::refresh_ring_plans` after
+  changing a runtime config a plan depends on.
+- `FiringSink::start_firing` is safe to repeat: it no longer restarts the sound or
+  the fade-in. `stop_firing` ends one alarm's ring; the new `release_takeover` gives
+  the screen back once none is left.
+- The firing watchdog moved from a Rust thread into the ring service. One watchdog
+  covers all rings.
+- `firing-audio`, `firing-vibration` and `wake-lock` now imply `foreground-service`.
+  `SentinelForegroundServicePrimitives` and the `wake_lock` Kotlin module are gone;
+  the `wake_lock` capability only declares the permission. `SentinelRing` (core) is
+  the command surface.
+- `AlarmKit::current_session` answers with the alarm firing longest, so it does not
+  change while it rings.
+
 - A job is active while its marker file `sentinel/jobs/<id>.active` exists, instead
   of a status in the job file. Kotlin only creates the marker and Rust alone writes
   the job file, so saving a job while it fires can no longer lose the fire.
@@ -59,6 +78,20 @@ change.
   mid-ring without the app being opened.
 
 ### Fixed
+
+- Dismissing one of two ringing alarms silenced the other and released the lock.
+- A sound that cannot be played no longer means silence: `fallback_sound_uris` and
+  `AlarmClassConfig::fallback_sound_id` are tried in turn, also when playback does
+  not advance, and if none works the alarm vibrates.
+- Alarm vibration uses the alarm usage, so it gets through silent mode.
+- The firing notification is `CATEGORY_ALARM`, not `CATEGORY_CALL`, so Do Not
+  Disturb treats it as an alarm. An alarm without a label gets
+  `AlarmClassConfig::fallback_title`.
+- Volume keys are swallowed during the lock (`kiosk_block_volume`) and the minimum
+  volume is applied again every second. The level to restore is kept on disk, so a
+  killed process cannot leave the phone loud.
+- The screen stays on while the lock is on, and API 26 uses the window flags for
+  showing over the lock screen.
 
 - A snooze that ran out with the process dead counted as "ended by a reboot" and
   did not ring. Finishing the UI ends the process, so this hit every snooze.

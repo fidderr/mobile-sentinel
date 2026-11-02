@@ -1,7 +1,7 @@
 // :sentinel-foreground_service — firing sub-feature module. Compiled into the
 // consumer build ONLY when the `foreground-service` Cargo feature is enabled.
-// Holds the alarm foreground service (keeps the process alive while firing)
-// and its start/stop JNI surface.
+// Holds the ring service, which plays an alarm's sound and vibration in
+// :sentinel. Commanded through core's SentinelRing.
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
@@ -30,5 +30,7 @@ android {
 
 dependencies {
     implementation(project(":sentinel-core"))
+    implementation(project(":sentinel-firing_audio"))
+    implementation(project(":sentinel-firing_vibration"))
     implementation("androidx.core:core-ktx:1.12.0")
 }

@@ -1,6 +1,5 @@
 package com.mobilesentinel
 
-import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -103,7 +102,7 @@ object SentinelJobGuardian {
                     break
                 }
 
-                val mainPid = mainPid(context)
+                val mainPid = SentinelRing.mainPid(context)
                 val mainAlive = mainPid != 0
 
                 for (job in activeJobs) {
@@ -169,31 +168,6 @@ object SentinelJobGuardian {
             guarding.set(false)
             Log.i(TAG, "pollLoop: exited")
         }
-    }
-
-    /**
-     * MAIN is alive when a process named exactly `packageName` runs. That
-     * includes this process when the guardian was started inside MAIN (e.g.
-     * by a receiver without `android:process`); skipping our own pid there
-     * made the guardian see MAIN as dead and relaunch it every poll.
-     */
-    private fun isMainProcessAlive(context: Context): Boolean = mainPid(context) != 0
-
-    /** MAIN's pid, or 0 when it is not running. */
-    private fun mainPid(context: Context): Int {
-        try {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return 0
-            val processes = am.runningAppProcesses ?: return 0
-            for (proc in processes) {
-                if (proc.processName == context.packageName) {
-                    return proc.pid
-                }
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "mainPid check failed: ${e.message}")
-        }
-        return 0
     }
 
     /**

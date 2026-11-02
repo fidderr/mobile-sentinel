@@ -1,15 +1,17 @@
 //! `AndroidFiringSink` — the JNI-backed [`FiringSink`] implementation.
 //!
 //! Drives the "alarm is firing" platform surface via the per-feature Kotlin
-//! primitives (each in its own `:sentinel-<feature>` Gradle module), in the
-//! precise order the alarm pipeline requires (foreground service → audio →
-//! kiosk → full-screen intent → wake lock).
+//! primitives, in the precise order the alarm pipeline requires (ring → kiosk
+//! → full-screen intent). Sound, vibration and the foreground notification are
+//! one command to the ring service in `:sentinel` (`SentinelRing`), which
+//! usually rings already by then: the alarm starts it from the plan it was armed
+//! with.
 //!
 //! All JNI for the firing surface lives HERE (not in a shared facade): each
 //! surface is gated by its own firing sub-feature, so a consumer that
 //! enables e.g. only `exact-alarm` + `foreground-service` compiles none of
-//! the kiosk / full-screen-intent / audio code. Disabled surfaces degrade to
-//! no-ops (and `system_default_sound_uri` falls back to a silent URI when
+//! the kiosk / full-screen-intent code. Disabled surfaces degrade to no-ops
+//! (and `system_default_sound_uri` falls back to a silent URI when
 //! `firing-audio` is off). The only shared dependency is the JNI plumbing in
 //! [`crate::platform::android::jni`].
 
@@ -26,93 +28,40 @@ impl AndroidFiringSink {
 }
 
 impl FiringSink for AndroidFiringSink {
-    // `req` is consumed by the foreground-service / firing-audio / kiosk /
-    // full-screen-intent surfaces. If a build enables none of those (e.g.
-    // only `wake-lock`), the parameter is genuinely unused.
+    // `req` is consumed by the foreground-service / kiosk / full-screen-intent
+    // surfaces. If a build enables none of those, the parameter is genuinely
+    // unused.
     #[cfg_attr(
         not(any(
             feature = "foreground-service",
-            feature = "firing-audio",
             feature = "kiosk",
             feature = "full-screen-intent"
         )),
         allow(unused_variables)
     )]
     fn start_firing(&self, req: &FireRequest) -> bool {
-        // Foreground service first — keeps the Rust process alive after a
-        // swipe-kill while the alarm fires. When `foreground-service` is off
-        // there is no critical surface to engage, so report success.
+        // The ring first. When `foreground-service` is off there is no critical
+        // surface to engage, so report success.
         #[cfg(feature = "foreground-service")]
-        let fgs_ok = {
-            // Rust decides whether the full-screen intent / banner is needed:
-            // it is redundant when the firing activity is ALREADY in the
-            // foreground (the UI is visible), so suppress it then. The
-            // foreground check is a core (capability-agnostic) query into the
-            // activity tracker — the FGS Kotlin no longer decides this.
-            let want_full_screen = req.firing_full_screen
-                && match req.activity_fqcn.as_deref() {
-                    Some(fqcn) => !crate::platform::android::is_activity_resumed(fqcn),
-                    None => true,
-                };
-            let ok = jni::start_foreground_service(
-                &req.channel_id,
-                &req.channel_name,
-                &req.title,
-                &req.body,
-                req.importance,
-                req.bypass_dnd,
-                req.activity_fqcn.as_deref(),
-                want_full_screen,
-            );
+        let ring_ok = {
+            // The service leaves out the full-screen banner when the firing UI is
+            // already on screen: it would only cover it.
+            let ui_visible = req
+                .activity_fqcn
+                .as_deref()
+                .is_some_and(crate::platform::android::is_activity_resumed);
+            let ok = serde_json::to_string(req)
+                .is_ok_and(|plan| jni::start_ring(&req.instance_id, &plan, ui_visible));
             if !ok {
                 log::error!(
-                    "[AndroidFiringSink] start_foreground_service FAILED for {}",
+                    "[AndroidFiringSink] start_ring FAILED for {}",
                     req.instance_id
                 );
             }
             ok
         };
         #[cfg(not(feature = "foreground-service"))]
-        let fgs_ok = true;
-
-        // Audio. Skip for silent (empty / "silent://") so the platform
-        // doesn't play system default.
-        #[cfg(feature = "firing-audio")]
-        if !req.sound_uri.is_empty() && req.sound_uri != "silent://" {
-            let audio_ok = jni::play_sound(
-                &req.sound_uri,
-                &req.audio_usage,
-                &req.audio_content_type,
-                req.looping,
-                req.fade_in_ms,
-                req.min_volume_percent,
-            );
-            if !audio_ok {
-                log::warn!(
-                    "[AndroidFiringSink] play_sound failed for {} ({})",
-                    req.instance_id,
-                    req.sound_uri
-                );
-            }
-        }
-
-        // Vibration. A looping waveform that runs until stop_firing / pause.
-        // Independent of audio so vibrate-only alarms work.
-        #[cfg(feature = "firing-vibration")]
-        if req.vibrate {
-            let pattern: &[i64] = if req.vibration_pattern.is_empty() {
-                // Default alarm buzz: pause, long buzz, short gap, long buzz.
-                &[0, 400, 200, 400]
-            } else {
-                &req.vibration_pattern
-            };
-            if !jni::start_vibration(pattern) {
-                log::warn!(
-                    "[AndroidFiringSink] start_vibration failed for {}",
-                    req.instance_id
-                );
-            }
-        }
+        let ring_ok = true;
 
         // Kiosk relaunch policy — MUST engage BEFORE the FSI launch so the
         // activity sees the persisted kiosk state before any HOME/BACK can
@@ -126,6 +75,7 @@ impl FiringSink for AndroidFiringSink {
                     req.kiosk_block_home,
                     req.kiosk_block_back,
                     req.kiosk_block_recents,
+                    req.kiosk_block_volume,
                     req.kiosk_debounce_ms,
                     req.kiosk_hide_status_bar,
                     req.kiosk_hide_nav_bar,
@@ -145,38 +95,28 @@ impl FiringSink for AndroidFiringSink {
             }
         }
 
-        // Wake lock for the firing duration.
-        #[cfg(feature = "wake-lock")]
-        let _ = jni::acquire_wake_lock("sentinel.firing", 5 * 60 * 1000);
-
-        fgs_ok
+        ring_ok
     }
 
     fn stop_firing(&self, instance_id: &str) {
-        #[cfg(feature = "firing-audio")]
-        let _ = jni::stop_sound();
-        #[cfg(feature = "firing-vibration")]
-        let _ = jni::stop_vibration();
-        #[cfg(feature = "wake-lock")]
-        let _ = jni::release_wake_lock("sentinel.firing");
-        #[cfg(feature = "kiosk")]
-        let _ = jni::disable_kiosk_mode();
         #[cfg(feature = "foreground-service")]
-        let _ = jni::stop_foreground_service();
+        let _ = jni::stop_ring(instance_id);
         log::info!(
             "[AndroidFiringSink] stop_firing complete for {}",
             instance_id
         );
     }
 
+    fn release_takeover(&self) {
+        #[cfg(feature = "kiosk")]
+        let _ = jni::disable_kiosk_mode();
+    }
+
     fn pause_audio(&self) {
-        // Pause = stop the firing audio (and vibration). Bringing the alarm
-        // back is a full re-engage (start_firing) issued by the recipe's
-        // Resume handler, so there is no separate resume path on Android.
-        #[cfg(feature = "firing-audio")]
-        let _ = jni::stop_sound();
-        #[cfg(feature = "firing-vibration")]
-        let _ = jni::stop_vibration();
+        // Bringing the alarm back is a full re-engage (start_firing) issued by
+        // the recipe's Resume handler, so there is no separate resume path.
+        #[cfg(feature = "foreground-service")]
+        let _ = jni::pause_ring();
     }
 
     fn schedule_exact_alarm(&self, req: &ExactAlarmRequest) -> bool {
@@ -235,95 +175,29 @@ mod jni {
     use ::jni::sys::{jboolean, jint, jlong};
 
     #[cfg(feature = "foreground-service")]
-    const FGS: &str = "com/mobilesentinel/SentinelForegroundServicePrimitives";
-    #[cfg(feature = "firing-audio")]
-    const FIRING_AUDIO: &str = "com/mobilesentinel/SentinelFiringAudioPrimitives";
-    #[cfg(feature = "firing-vibration")]
-    const FIRING_VIBRATION: &str = "com/mobilesentinel/SentinelFiringVibrationPrimitives";
+    const RING: &str = "com/mobilesentinel/SentinelRing";
     #[cfg(feature = "exact-alarm")]
     const EXACT_ALARM: &str = "com/mobilesentinel/SentinelExactAlarmPrimitives";
     #[cfg(feature = "kiosk")]
     const KIOSK: &str = "com/mobilesentinel/SentinelKioskPrimitives";
     #[cfg(feature = "full-screen-intent")]
     const FULL_SCREEN_INTENT: &str = "com/mobilesentinel/SentinelFullScreenIntentPrimitives";
-    #[cfg(feature = "wake-lock")]
-    const WAKE_LOCK: &str = "com/mobilesentinel/SentinelWakeLockPrimitives";
     #[cfg(any(feature = "alarm-kit", feature = "firing-audio"))]
     const CORE_PRIMITIVES: &str = "com/mobilesentinel/SentinelPrimitives";
 
     #[cfg(feature = "foreground-service")]
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn start_foreground_service(
-        channel_id: &str,
-        channel_name: &str,
-        title: &str,
-        body: &str,
-        importance: i32,
-        bypass_dnd: bool,
-        activity_fqcn: Option<&str>,
-        full_screen: bool,
-    ) -> bool {
-        with_jni_class(FGS, false, |env, class| {
-            let s_channel = jni_str(env, channel_id)?;
-            let s_name = jni_str(env, channel_name)?;
-            let s_title = jni_str(env, title)?;
-            let s_body = jni_str(env, body)?;
-            let s_fqcn = match activity_fqcn {
-                Some(f) => jni_str(env, f)?.into(),
-                None => JObject::null(),
-            };
-            let res = env.call_static_method(
-                class,
-                "startForegroundService",
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IZLjava/lang/String;Z)Z",
-                &[
-                    JValue::Object(&s_channel.into()),
-                    JValue::Object(&s_name.into()),
-                    JValue::Object(&s_title.into()),
-                    JValue::Object(&s_body.into()),
-                    JValue::Int(importance as jint),
-                    JValue::Bool(bypass_dnd as jboolean),
-                    JValue::Object(&s_fqcn),
-                    JValue::Bool(full_screen as jboolean),
-                ],
-            );
-            res.ok().and_then(|v| v.z().ok())
-        })
-    }
-
-    #[cfg(feature = "foreground-service")]
-    pub(super) fn stop_foreground_service() -> bool {
-        with_jni_class(FGS, false, |env, class| {
-            env.call_static_method(class, "stopForegroundService", "()Z", &[])
-                .ok()
-                .and_then(|v| v.z().ok())
-        })
-    }
-
-    #[cfg(feature = "firing-audio")]
-    pub(super) fn play_sound(
-        uri: &str,
-        usage: &str,
-        content_type: &str,
-        looping: bool,
-        fade_in_ms: u32,
-        min_volume_percent: u8,
-    ) -> bool {
-        with_jni_class(FIRING_AUDIO, false, |env, class| {
-            let s_uri = jni_str(env, uri)?;
-            let s_usage = jni_str(env, usage)?;
-            let s_ct = jni_str(env, content_type)?;
+    pub(super) fn start_ring(id: &str, plan_json: &str, ui_visible: bool) -> bool {
+        with_jni_class(RING, false, |env, class| {
+            let s_id = jni_str(env, id)?;
+            let s_plan = jni_str(env, plan_json)?;
             env.call_static_method(
                 class,
-                "playSound",
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZJI)Z",
+                "startRing",
+                "(Ljava/lang/String;Ljava/lang/String;Z)Z",
                 &[
-                    JValue::Object(&s_uri.into()),
-                    JValue::Object(&s_usage.into()),
-                    JValue::Object(&s_ct.into()),
-                    JValue::Bool(looping as jboolean),
-                    JValue::Long(i64::from(fade_in_ms)),
-                    JValue::Int(i32::from(min_volume_percent)),
+                    JValue::Object(&s_id.into()),
+                    JValue::Object(&s_plan.into()),
+                    JValue::Bool(ui_visible as jboolean),
                 ],
             )
             .ok()
@@ -331,10 +205,25 @@ mod jni {
         })
     }
 
-    #[cfg(feature = "firing-audio")]
-    pub(super) fn stop_sound() -> bool {
-        with_jni_class(FIRING_AUDIO, false, |env, class| {
-            env.call_static_method(class, "stopSound", "()Z", &[])
+    #[cfg(feature = "foreground-service")]
+    pub(super) fn stop_ring(id: &str) -> bool {
+        with_jni_class(RING, false, |env, class| {
+            let s_id = jni_str(env, id)?;
+            env.call_static_method(
+                class,
+                "stopRing",
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&s_id.into())],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    #[cfg(feature = "foreground-service")]
+    pub(super) fn pause_ring() -> bool {
+        with_jni_class(RING, false, |env, class| {
+            env.call_static_method(class, "pauseRing", "()Z", &[])
                 .ok()
                 .and_then(|v| v.z().ok())
         })
@@ -355,31 +244,6 @@ mod jni {
             let jstr: JString = obj.into();
             let s: String = env.get_string(&jstr).ok()?.into();
             Some(s)
-        })
-    }
-
-    #[cfg(feature = "firing-vibration")]
-    pub(super) fn start_vibration(pattern: &[i64]) -> bool {
-        with_jni_class(FIRING_VIBRATION, false, |env, class| {
-            let arr = env.new_long_array(pattern.len() as i32).ok()?;
-            env.set_long_array_region(&arr, 0, pattern).ok()?;
-            env.call_static_method(
-                class,
-                "startVibration",
-                "([J)Z",
-                &[JValue::Object(&arr.into())],
-            )
-            .ok()
-            .and_then(|v| v.z().ok())
-        })
-    }
-
-    #[cfg(feature = "firing-vibration")]
-    pub(super) fn stop_vibration() -> bool {
-        with_jni_class(FIRING_VIBRATION, false, |env, class| {
-            env.call_static_method(class, "stopVibration", "()Z", &[])
-                .ok()
-                .and_then(|v| v.z().ok())
         })
     }
 
@@ -432,6 +296,7 @@ mod jni {
         block_home: bool,
         block_back: bool,
         block_recents: bool,
+        block_volume: bool,
         relaunch_debounce_ms: u32,
         hide_status_bar: bool,
         hide_nav_bar: bool,
@@ -441,12 +306,13 @@ mod jni {
             env.call_static_method(
                 class,
                 "enableKioskMode",
-                "(Ljava/lang/String;ZZZIZZ)Z",
+                "(Ljava/lang/String;ZZZZIZZ)Z",
                 &[
                     JValue::Object(&s.into()),
                     JValue::Bool(block_home as jboolean),
                     JValue::Bool(block_back as jboolean),
                     JValue::Bool(block_recents as jboolean),
+                    JValue::Bool(block_volume as jboolean),
                     JValue::Int(relaunch_debounce_ms as jint),
                     JValue::Bool(hide_status_bar as jboolean),
                     JValue::Bool(hide_nav_bar as jboolean),
@@ -478,36 +344,6 @@ mod jni {
                     JValue::Object(&s.into()),
                     JValue::Bool(dismiss_keyguard as jboolean),
                 ],
-            )
-            .ok()
-            .and_then(|v| v.z().ok())
-        })
-    }
-
-    #[cfg(feature = "wake-lock")]
-    pub(super) fn acquire_wake_lock(tag: &str, timeout_ms: u64) -> bool {
-        with_jni_class(WAKE_LOCK, false, |env, class| {
-            let s = jni_str(env, tag)?;
-            env.call_static_method(
-                class,
-                "acquireWakeLock",
-                "(Ljava/lang/String;J)Z",
-                &[JValue::Object(&s.into()), JValue::Long(timeout_ms as jlong)],
-            )
-            .ok()
-            .and_then(|v| v.z().ok())
-        })
-    }
-
-    #[cfg(feature = "wake-lock")]
-    pub(super) fn release_wake_lock(tag: &str) -> bool {
-        with_jni_class(WAKE_LOCK, false, |env, class| {
-            let s = jni_str(env, tag)?;
-            env.call_static_method(
-                class,
-                "releaseWakeLock",
-                "(Ljava/lang/String;)Z",
-                &[JValue::Object(&s.into())],
             )
             .ok()
             .and_then(|v| v.z().ok())

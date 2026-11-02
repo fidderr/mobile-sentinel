@@ -209,20 +209,26 @@ fn schedule_next(
         next_fire_unix_ms: next.timestamp_millis(),
     };
     store.write(record).map_err(RecipeError::Store)?;
-    arm_exact_alarm(instance_id, next.timestamp_millis());
+    arm_exact_alarm(instance_id, alarm_ctx, next.timestamp_millis());
     Ok(())
 }
 
-/// Arm the OS wake for `instance_id`. It replaces any earlier wake for the same
-/// id, so nothing is cancelled first: a process killed between a cancel and an
-/// arm would lose the alarm. Best-effort: a missing sink (host builds, tests)
-/// leaves the record persisted without arming.
-fn arm_exact_alarm(instance_id: &InstanceId, target_unix_ms: i64) {
+/// Arm the OS wake for `instance_id`, with the plan to ring it by: no Rust runs
+/// when it goes off. It replaces any earlier wake for the same id, so nothing is
+/// cancelled first: a process killed between a cancel and an arm would lose the
+/// alarm. Best-effort: a missing sink (host builds, tests) leaves the record
+/// persisted without arming.
+pub(crate) fn arm_exact_alarm(
+    instance_id: &InstanceId,
+    alarm_ctx: &AlarmClassContext,
+    target_unix_ms: i64,
+) {
     if let Some(sink) = alarm_class_runtime().sink() {
+        let plan = fire_request(instance_id, alarm_ctx, sink.as_ref(), true);
         let req = crate::firing::ExactAlarmRequest {
             alarm_id: instance_id.0.clone(),
             target_unix_ms,
-            metadata_json: None,
+            metadata_json: serde_json::to_string(&plan).ok(),
         };
         if !sink.schedule_exact_alarm(&req) {
             log::warn!(
@@ -279,7 +285,7 @@ fn fire(
     if let (Ok(schedule), Ok(zone)) = (parse_schedule(alarm_ctx), parse_zone(alarm_ctx)) {
         let after = now + chrono::Duration::seconds(1);
         if let Ok(next) = next_fire(&schedule, &zone, fire_search_start(alarm_ctx, after)) {
-            arm_exact_alarm(instance_id, next.timestamp_millis());
+            arm_exact_alarm(instance_id, alarm_ctx, next.timestamp_millis());
         }
     }
     Ok(())
@@ -306,57 +312,79 @@ fn resume(
 }
 
 /// Build the [`crate::firing::FireRequest`] for an instance from the current
-/// runtime config + the instance's Context, and drive the installed sink's
-/// `start_firing`. The single place a `FireRequest` is constructed, so `fire`
-/// and `resume` (and AlarmKit's re-engage on cold start) never drift apart.
-/// Sound is resolved through the registered `SoundResolver`, falling back to
-/// the sink's system default. Best-effort: a missing sink (host builds,
-/// tests) is a silent no-op; the sink owns retries / failure logging.
+/// runtime config + the instance's Context. The single place one is constructed,
+/// so the plan an alarm is armed with, `fire` and `resume` never drift apart.
+/// Sound is resolved through the registered `SoundResolver`, falling back to the
+/// sink's system default.
+fn fire_request(
+    instance_id: &InstanceId,
+    alarm_ctx: &AlarmClassContext,
+    sink: &dyn crate::firing::FiringSink,
+    fresh: bool,
+) -> crate::firing::FireRequest {
+    let runtime_cfg = alarm_class_runtime().config();
+    let resolver = alarm_class_runtime().sound_resolver();
+    let sound_uri = match &resolver {
+        Some(r) => r.resolve(&alarm_ctx.sound_id),
+        None => sink.system_default_sound_uri(),
+    };
+    let mut fallback_sound_uris = vec![sink.system_default_sound_uri()];
+    if let (Some(r), Some(id)) = (&resolver, &runtime_cfg.fallback_sound_id) {
+        fallback_sound_uris.push(r.resolve(id));
+    }
+    fallback_sound_uris.retain(|uri| *uri != sound_uri);
+    crate::firing::FireRequest {
+        instance_id: instance_id.0.clone(),
+        channel_id: runtime_cfg.channel_id.clone(),
+        channel_name: runtime_cfg.channel_name.clone(),
+        title: if alarm_ctx.label.is_empty() {
+            runtime_cfg.fallback_title.clone()
+        } else {
+            alarm_ctx.label.clone()
+        },
+        body: runtime_cfg.firing_body.clone(),
+        importance: runtime_cfg.importance,
+        bypass_dnd: alarm_ctx.bypass_dnd,
+        sound_uri,
+        fallback_sound_uris,
+        audio_usage: runtime_cfg.audio_usage.clone(),
+        audio_content_type: runtime_cfg.audio_content_type.clone(),
+        looping: true,
+        // Vibration is the instance's choice (`vibration_enabled`); the
+        // waveform follows the three-level fallback — per-alarm override
+        // (`alarm_ctx.vibration_pattern`) wins, else the consumer's app
+        // default (`runtime_cfg.vibration_pattern`), else (if both empty)
+        // the firing sink's built-in pattern.
+        vibrate: alarm_ctx.vibration_enabled,
+        vibration_pattern: alarm_ctx
+            .vibration_pattern
+            .clone()
+            .unwrap_or_else(|| runtime_cfg.vibration_pattern.clone()),
+        kiosk_mode: alarm_ctx.kiosk_mode,
+        kiosk_block_home: runtime_cfg.kiosk_block_home,
+        kiosk_block_back: runtime_cfg.kiosk_block_back,
+        kiosk_block_recents: runtime_cfg.kiosk_block_recents,
+        kiosk_block_volume: runtime_cfg.kiosk_block_volume,
+        activity_fqcn: runtime_cfg.activity_fqcn.clone(),
+        kiosk_debounce_ms: runtime_cfg.kiosk_debounce_ms,
+        kiosk_hide_status_bar: runtime_cfg.kiosk_hide_status_bar,
+        kiosk_hide_nav_bar: runtime_cfg.kiosk_hide_nav_bar,
+        firing_full_screen: runtime_cfg.firing_full_screen,
+        fade_in_ms: if fresh {
+            u32::from(alarm_ctx.fade_in_secs) * 1000
+        } else {
+            0
+        },
+        min_volume_percent: runtime_cfg.min_volume_percent,
+    }
+}
+
+/// Drive the installed sink's `start_firing` for an instance. Best-effort: a
+/// missing sink (host builds, tests) is a silent no-op; the sink owns retries /
+/// failure logging.
 fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext, fresh: bool) {
     if let Some(sink) = alarm_class_runtime().sink() {
-        let runtime_cfg = alarm_class_runtime().config();
-        let sound_uri = match alarm_class_runtime().sound_resolver() {
-            Some(r) => r.resolve(&alarm_ctx.sound_id),
-            None => sink.system_default_sound_uri(),
-        };
-        let req = crate::firing::FireRequest {
-            instance_id: instance_id.0.clone(),
-            channel_id: runtime_cfg.channel_id.clone(),
-            channel_name: runtime_cfg.channel_name.clone(),
-            title: alarm_ctx.label.clone(),
-            body: runtime_cfg.firing_body.clone(),
-            importance: runtime_cfg.importance,
-            bypass_dnd: alarm_ctx.bypass_dnd,
-            sound_uri,
-            audio_usage: runtime_cfg.audio_usage.clone(),
-            audio_content_type: runtime_cfg.audio_content_type.clone(),
-            looping: true,
-            // Vibration is the instance's choice (`vibration_enabled`); the
-            // waveform follows the three-level fallback — per-alarm override
-            // (`alarm_ctx.vibration_pattern`) wins, else the consumer's app
-            // default (`runtime_cfg.vibration_pattern`), else (if both empty)
-            // the firing sink's built-in pattern.
-            vibrate: alarm_ctx.vibration_enabled,
-            vibration_pattern: alarm_ctx
-                .vibration_pattern
-                .clone()
-                .unwrap_or_else(|| runtime_cfg.vibration_pattern.clone()),
-            kiosk_mode: alarm_ctx.kiosk_mode,
-            kiosk_block_home: runtime_cfg.kiosk_block_home,
-            kiosk_block_back: runtime_cfg.kiosk_block_back,
-            kiosk_block_recents: runtime_cfg.kiosk_block_recents,
-            activity_fqcn: runtime_cfg.activity_fqcn.clone(),
-            kiosk_debounce_ms: runtime_cfg.kiosk_debounce_ms,
-            kiosk_hide_status_bar: runtime_cfg.kiosk_hide_status_bar,
-            kiosk_hide_nav_bar: runtime_cfg.kiosk_hide_nav_bar,
-            firing_full_screen: runtime_cfg.firing_full_screen,
-            fade_in_ms: if fresh {
-                u32::from(alarm_ctx.fade_in_secs) * 1000
-            } else {
-                0
-            },
-            min_volume_percent: runtime_cfg.min_volume_percent,
-        };
+        let req = fire_request(instance_id, alarm_ctx, sink.as_ref(), fresh);
         if !sink.start_firing(&req) {
             log::warn!(
                 "[AlarmClass] start_firing reported failure for {}",
@@ -364,111 +392,21 @@ fn engage_firing_surface(instance_id: &InstanceId, alarm_ctx: &AlarmClassContext
             );
         }
     }
-    start_watchdog(instance_id);
 }
 
-// ---------------------------------------------------------------------------
-// Firing watchdog
-//
-// While an instance is firing, MAIN keeps a separate exact alarm armed a few
-// seconds ahead and keeps pushing it forward. If every app process is killed
-// (e.g. an OEM "swipe-up cleaner" that kills MAIN *and* `:sentinel` at once),
-// the re-arming stops, the watchdog alarm fires, and AlarmManager — an OS
-// service no app-process kill can take down — wakes `:sentinel` again, whose
-// guardian relaunches MAIN for the still-active job.
-//
-// The watchdog uses its own alarm id (`<instance>#watchdog`), never the
-// instance's real fire alarm, and the receiver never *activates* a job for
-// it. A stale watchdog that fires after dismiss/snooze therefore finds no
-// active job and does nothing — it can't re-ring a dismissed alarm.
-// ---------------------------------------------------------------------------
-
-/// Suffix of the watchdog alarm id. Mirrored by `SentinelAlarmReceiver`.
-pub const WATCHDOG_SUFFIX: &str = "#watchdog";
-
-/// How far ahead the watchdog is armed.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-const WATCHDOG_LEAD_MS: i64 = 6_000;
-
-/// How often MAIN pushes the watchdog forward while firing.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-const WATCHDOG_REARM_MS: u64 = 2_000;
-
-/// The watchdog alarm id for an instance.
-pub fn watchdog_alarm_id(instance_id: &InstanceId) -> String {
-    format!("{}{}", instance_id.0, WATCHDOG_SUFFIX)
-}
-
-/// One watchdog step: re-arm while `instance_id` is firing, otherwise cancel.
-/// Returns `true` while the instance is still firing.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub(crate) fn watchdog_tick(
-    store: &ContextStore,
-    sink: &dyn crate::firing::FiringSink,
-    instance_id: &InstanceId,
-    now_ms: i64,
-) -> bool {
-    let firing = matches!(
-        store.load(instance_id).map(|r| r.state),
-        Ok(SessionState::Firing { .. })
-    );
-    if firing {
-        let req = crate::firing::ExactAlarmRequest {
-            alarm_id: watchdog_alarm_id(instance_id),
-            target_unix_ms: now_ms + WATCHDOG_LEAD_MS,
-            metadata_json: None,
-        };
-        if !sink.schedule_exact_alarm(&req) {
-            log::warn!("[AlarmClass] watchdog arm failed for {}", instance_id.0);
-        }
-    } else {
-        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
-    }
-    firing
-}
-
-/// Start the re-arm loop for `instance_id` (one thread per instance; a second
-/// call while it runs is a no-op). Android only: on host builds the sink is a
-/// mock and tests drive [`watchdog_tick`] directly.
-fn start_watchdog(instance_id: &InstanceId) {
-    #[cfg(target_os = "android")]
-    {
-        use std::collections::HashSet;
-        use std::sync::Mutex;
-        static RUNNING: once_cell::sync::Lazy<Mutex<HashSet<String>>> =
-            once_cell::sync::Lazy::new(|| Mutex::new(HashSet::new()));
-
-        let key = instance_id.0.clone();
-        if !RUNNING
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key.clone())
-        {
-            return;
-        }
-        let id = instance_id.clone();
-        std::thread::spawn(move || {
-            loop {
-                let (Some(store), Some(sink)) =
-                    (alarm_class_runtime().store(), alarm_class_runtime().sink())
-                else {
-                    break;
-                };
-                if !watchdog_tick(&store, sink.as_ref(), &id, Utc::now().timestamp_millis()) {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(WATCHDOG_REARM_MS));
-            }
-            RUNNING
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(&key);
-            log::info!("[AlarmClass] watchdog stopped for {}", id.0);
+/// End this alarm's ring. The lock on the screen stays while another one rings.
+pub(crate) fn tear_down_ring(store: &ContextStore, instance_id: &InstanceId) {
+    if let Some(sink) = alarm_class_runtime().sink() {
+        sink.stop_firing(&instance_id.0);
+        let another_rings = store.enumerate_all().is_ok_and(|records| {
+            records
+                .iter()
+                .any(|r| r.id != *instance_id && matches!(r.state, SessionState::Firing { .. }))
         });
-        log::info!("[AlarmClass] watchdog started for {}", instance_id.0);
+        if !another_rings {
+            sink.release_takeover();
+        }
     }
-    #[cfg(not(target_os = "android"))]
-    let _ = instance_id;
 }
 
 fn snooze(
@@ -504,11 +442,8 @@ fn snooze(
 
     // Tear down the firing surface and re-arm the next exact alarm so
     // the snooze re-fires even if the app gets killed in the meantime.
-    if let Some(sink) = alarm_class_runtime().sink() {
-        sink.stop_firing(&instance_id.0);
-        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
-    }
-    arm_exact_alarm(instance_id, next_unix_ms);
+    tear_down_ring(store, instance_id);
+    arm_exact_alarm(instance_id, alarm_ctx, next_unix_ms);
     Ok(())
 }
 
@@ -536,10 +471,7 @@ fn dismiss(
     store.write(record).map_err(RecipeError::Store)?;
 
     // Tear down everything fire engaged.
-    if let Some(sink) = alarm_class_runtime().sink() {
-        sink.stop_firing(&instance_id.0);
-        sink.cancel_exact_alarm(&watchdog_alarm_id(instance_id));
-    }
+    tear_down_ring(store, instance_id);
 
     // For recurring schedules, transition Dismissed → Scheduled with the
     // next fire time. One-shot schedules stay Dismissed.
@@ -553,7 +485,7 @@ fn dismiss(
                 next_fire_unix_ms: next.timestamp_millis(),
             };
             store.write(next_record).map_err(RecipeError::Store)?;
-            arm_exact_alarm(instance_id, next.timestamp_millis());
+            arm_exact_alarm(instance_id, alarm_ctx, next.timestamp_millis());
         }
         Err(_) => {
             // No next fire: one-shot completed, nothing may stay armed.
@@ -664,6 +596,9 @@ pub struct AlarmClassConfig {
     pub kiosk_block_back: bool,
     /// Kiosk: relaunch the activity when the user opens Recents / swipes away.
     pub kiosk_block_recents: bool,
+    /// Kiosk: swallow the volume keys.
+    #[serde(default = "default_true")]
+    pub kiosk_block_volume: bool,
     /// While kiosk-firing, hide the status bar (clock / battery / signal).
     /// `false` keeps the system status bar visible during the alarm.
     pub kiosk_hide_status_bar: bool,
@@ -693,6 +628,17 @@ pub struct AlarmClassConfig {
     /// reported as missed instead.
     #[serde(default = "default_late_ring_window_ms")]
     pub late_ring_window_ms: i64,
+    /// Sound of last resort for an alarm whose own sound and the system default
+    /// both cannot be played.
+    #[serde(default)]
+    pub fallback_sound_id: Option<crate::recipes::context::schema::SoundIdSpec>,
+    /// Notification title for an alarm without a label.
+    #[serde(default)]
+    pub fallback_title: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Fifteen minutes.
@@ -716,12 +662,15 @@ impl Default for AlarmClassConfig {
             kiosk_block_home: true,
             kiosk_block_back: true,
             kiosk_block_recents: true,
+            kiosk_block_volume: true,
             kiosk_hide_status_bar: false,
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
             vibration_pattern: vec![0, 400, 200, 400],
             min_volume_percent: 0,
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
+            fallback_sound_id: None,
+            fallback_title: "Alarm".into(),
         }
     }
 }
@@ -861,12 +810,15 @@ impl AlarmClassConfig {
             kiosk_block_home: true,
             kiosk_block_back: true,
             kiosk_block_recents: true,
+            kiosk_block_volume: true,
             kiosk_hide_status_bar: false,
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
             vibration_pattern: Vec::new(),
             min_volume_percent: 0,
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
+            fallback_sound_id: None,
+            fallback_title: String::new(),
         }
     }
 }
@@ -1140,50 +1092,6 @@ mod tests {
         assert!(!matches!(
             store.load(&id).unwrap().state,
             SessionState::Firing { .. }
-        ));
-    }
-
-    #[test]
-    fn watchdog_rearms_ahead_while_firing() {
-        let dir = TempDir::new().unwrap();
-        let store = ContextStore::new(dir.path());
-        let id = InstanceId::new("a");
-        let mut record = sample_record("a", alarm_ctx());
-        record.state = SessionState::Firing {
-            fired_at_unix_ms: 0,
-        };
-        store.write(record).unwrap();
-        let sink = crate::firing::MockFiringSink::new();
-
-        assert!(watchdog_tick(&store, &sink, &id, 1_000));
-        let req = sink.last_schedule().unwrap();
-        // Own id — never the instance's real fire alarm.
-        assert_eq!(req.alarm_id, "a#watchdog");
-        assert_eq!(req.target_unix_ms, 1_000 + WATCHDOG_LEAD_MS);
-        assert_eq!(sink.cancel_count(), 0);
-    }
-
-    #[test]
-    fn watchdog_cancels_and_stops_once_not_firing() {
-        let dir = TempDir::new().unwrap();
-        let store = ContextStore::new(dir.path());
-        let id = InstanceId::new("a");
-        let mut record = sample_record("a", alarm_ctx());
-        record.state = SessionState::Dismissed {
-            dismissed_at_unix_ms: 0,
-        };
-        store.write(record).unwrap();
-        let sink = crate::firing::MockFiringSink::new();
-
-        assert!(!watchdog_tick(&store, &sink, &id, 1_000));
-        assert_eq!(sink.schedule_count(), 0);
-        assert_eq!(sink.cancel_count(), 1);
-        // A deleted instance also stops the loop.
-        assert!(!watchdog_tick(
-            &store,
-            &sink,
-            &InstanceId::new("gone"),
-            1_000
         ));
     }
 

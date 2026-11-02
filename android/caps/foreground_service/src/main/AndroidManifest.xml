@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!--
-        Foreground service component. Merged into the consumer manifest by
-        Gradle ONLY when this module is a dependency (the `foreground-service`
-        firing sub-feature is enabled). Runs in MAIN process (no
-        android:process) so audio/kiosk/stop all happen same-process.
+        The ring service. Merged into the consumer manifest by Gradle ONLY when
+        this module is a dependency (the `foreground-service` firing sub-feature
+        is enabled). Runs in :sentinel, the one process without the UI framework,
+        so nothing that ends the UI can stop the sound.
 
         The FOREGROUND_SERVICE* / POST_NOTIFICATIONS permissions are injected
         per the registry's `foreground_service` row by build_sentinel.
@@ -14,6 +14,7 @@
             android:name="com.mobilesentinel.SentinelForegroundService"
             android:enabled="true"
             android:exported="false"
+            android:process=":sentinel"
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
     </application>

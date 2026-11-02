@@ -21,9 +21,10 @@ import android.window.OnBackInvokedDispatcher
  * behavioral choices, so other consumers can drive it differently (block back
  * but allow home, longer relaunch debounce, etc.). While `enabled = true`:
  * - `onActivityResumed(target)` asserts `setShowWhenLocked(true)` /
- *   `setTurnScreenOn(true)`, applies the immersive policy, excludes the task
- *   from recents, and registers a high-priority `OnBackInvokedCallback` that
- *   consumes Back (when `blockBack`).
+ *   `setTurnScreenOn(true)`, keeps the screen on, applies the immersive policy,
+ *   excludes the task from recents, and registers a high-priority
+ *   `OnBackInvokedCallback` that consumes Back (when `blockBack`). Volume keys
+ *   are swallowed too (when `blockVolume`).
  * - `onActivityStopped(target)` relaunches the target (subject to
  *   `relaunchDebounceMs`) when `blockHome` / `blockRecents` is set.
  *
@@ -40,11 +41,15 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private const val TAG = "SentinelKiosk"
 
+    /** Cleared again in [disable]. */
+    private const val KEEP_AWAKE_FLAGS = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+
     @Volatile var enabled: Boolean = false
     @Volatile var targetActivityFqcn: String = ""
     @Volatile var blockHome: Boolean = true
     @Volatile var blockBack: Boolean = true
     @Volatile var blockRecents: Boolean = true
+    @Volatile var blockVolume: Boolean = true
     @Volatile var relaunchDebounceMs: Long = 200
     @Volatile var pendingDismissKeyguard: Boolean = false
     /** Whether to hide the status bar (clock/battery) while kiosk-firing. */
@@ -131,7 +136,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     private fun writeKioskStateFile(ctx: Context) {
         try {
             val file = java.io.File(ctx.applicationContext.filesDir, KIOSK_STATE_FILE)
-            file.writeText("$targetActivityFqcn\n$relaunchDebounceMs\n$hideStatusBar\n$hideNavBar")
+            file.writeText("$targetActivityFqcn\n$relaunchDebounceMs\n$hideStatusBar\n$hideNavBar\n$blockVolume")
         } catch (e: Throwable) {
             Log.w(TAG, "writeKioskStateFile failed: ${e.message}")
         }
@@ -151,6 +156,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         val relaunchDebounceMs: Long,
         val hideStatusBar: Boolean,
         val hideNavBar: Boolean,
+        val blockVolume: Boolean,
     )
 
     private fun readKioskStateFile(ctx: Context): KioskState? {
@@ -171,7 +177,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             val debounce = lines[1].trim().toLongOrNull() ?: 50L
             val hideStatus = lines.getOrNull(2)?.trim()?.toBooleanStrictOrNull() ?: false
             val hideNav = lines.getOrNull(3)?.trim()?.toBooleanStrictOrNull() ?: false
-            if (fqcn.isBlank()) null else KioskState(fqcn, debounce, hideStatus, hideNav)
+            val blockVolume = lines.getOrNull(4)?.trim()?.toBooleanStrictOrNull() ?: true
+            if (fqcn.isBlank()) null else KioskState(fqcn, debounce, hideStatus, hideNav, blockVolume)
         } catch (_: Throwable) {
             null
         }
@@ -207,6 +214,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         blockHome: Boolean,
         blockBack: Boolean,
         blockRecents: Boolean,
+        blockVolume: Boolean = true,
         relaunchDebounceMs: Long,
         hideStatusBar: Boolean = false,
         hideNavBar: Boolean = false,
@@ -215,6 +223,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         this.blockHome = blockHome
         this.blockBack = blockBack
         this.blockRecents = blockRecents
+        this.blockVolume = blockVolume
         this.relaunchDebounceMs = relaunchDebounceMs
         this.hideStatusBar = hideStatusBar
         this.hideNavBar = hideNavBar
@@ -227,7 +236,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         }
         Log.i(
             TAG,
-            "enabled — target=$activityFqcn home=$blockHome back=$blockBack recents=$blockRecents debounce=${relaunchDebounceMs}ms hideStatus=$hideStatusBar hideNav=$hideNavBar",
+            "enabled — target=$activityFqcn home=$blockHome back=$blockBack recents=$blockRecents volume=$blockVolume debounce=${relaunchDebounceMs}ms hideStatus=$hideStatusBar hideNav=$hideNavBar",
         )
     }
 
@@ -240,6 +249,15 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         appContext?.let {
             clearTargetResumed(it)
             clearKioskStateFile(it)
+        }
+        currentResumedActivity?.let { a ->
+            a.runOnUiThread {
+                try {
+                    a.window.clearFlags(KEEP_AWAKE_FLAGS)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "clearing the window flags failed: ${e.message}")
+                }
+            }
         }
         // Re-include in recents now that kiosk is released.
         try {
@@ -273,6 +291,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
                 blockHome = true,
                 blockBack = true,
                 blockRecents = true,
+                blockVolume = state.blockVolume,
                 relaunchDebounceMs = state.relaunchDebounceMs,
                 hideStatusBar = state.hideStatusBar,
                 hideNavBar = state.hideNavBar,
@@ -373,7 +392,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
  // so we beat the OS to the dispatcher.
         if (!enabled) return
         if (!isTargetActivity(activity)) return
-        if (blockBack) installBackKeyGuard(activity)
+        if (blockBack || blockVolume) installKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -487,13 +506,21 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
  // Runtime assertion — the manifest attributes may not engage if the
  // activity reaches top via some OEM paths.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            try {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 activity.setShowWhenLocked(true)
                 activity.setTurnScreenOn(true)
-            } catch (e: Exception) {
-                Log.w(TAG, "setShowWhenLocked/setTurnScreenOn failed: ${e.message}")
+            } else {
+                @Suppress("DEPRECATION")
+                activity.window.addFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                )
             }
+            // A challenge can take longer than the screen timeout.
+            activity.window.addFlags(KEEP_AWAKE_FLAGS)
+        } catch (e: Exception) {
+            Log.w(TAG, "keeping the alarm on screen failed: ${e.message}")
         }
 
  // Drain pending keyguard dismiss request.
@@ -512,7 +539,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
  // onActivityCreated registers the same callback with the same key,
  // so this call is idempotent (registerBackCallback checks the map
  // and returns early when already registered).
-        if (blockBack) installBackKeyGuard(activity)
+        if (blockBack || blockVolume) installKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -568,25 +595,32 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         }
     }
 
- // ---- Back-key handling: legacy KEYCODE_BACK (all API levels) ---------------
+ // ---- Key handling: legacy KEYCODE_BACK (all API levels), volume keys -------
  //
  // The OnBackInvokedCallback below only sees Back when the system routes it
  // through predictive back. Some OEMs (seen on ColorOS: "predictive settings
  // is disabled") ignore the app's opt-in and deliver Back the legacy way — a
  // KEYCODE_BACK key event that ends in Activity.onBackPressed → finish. That
  // finish destroyed the alarm activity mid-ring. Wrapping the window callback
- // swallows that key event while the lock is on; the check is live, so the
- // wrapper is inert once the kiosk is disabled.
+ // swallows that key event while the lock is on, and the volume keys as well;
+ // the check is live, so the wrapper is inert once the kiosk is disabled.
 
-    private class BackKeyGuard(
+    private class KeyGuard(
         private val base: android.view.Window.Callback,
     ) : android.view.Window.Callback by base {
         override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-            if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
-                SentinelKioskController.enabled && SentinelKioskController.blockBack
-            ) {
+            val controller = SentinelKioskController
+            val blocked = when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_BACK -> controller.blockBack
+                android.view.KeyEvent.KEYCODE_VOLUME_UP,
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN,
+                android.view.KeyEvent.KEYCODE_VOLUME_MUTE,
+                -> controller.blockVolume
+                else -> false
+            }
+            if (blocked && controller.enabled) {
                 if (event.action == android.view.KeyEvent.ACTION_UP) {
-                    Log.d(TAG, "Back key consumed by kiosk lock (legacy path)")
+                    Log.d(TAG, "key ${event.keyCode} consumed by kiosk lock")
                 }
                 return true
             }
@@ -594,15 +628,15 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    private fun installBackKeyGuard(activity: Activity) {
+    private fun installKeyGuard(activity: Activity) {
         try {
             val window = activity.window ?: return
             val current = window.callback ?: return
-            if (current is BackKeyGuard) return
-            window.callback = BackKeyGuard(current)
-            Log.d(TAG, "legacy Back key guard installed")
+            if (current is KeyGuard) return
+            window.callback = KeyGuard(current)
+            Log.d(TAG, "key guard installed")
         } catch (e: Throwable) {
-            Log.w(TAG, "installBackKeyGuard failed: ${e.message}")
+            Log.w(TAG, "installKeyGuard failed: ${e.message}")
         }
     }
 

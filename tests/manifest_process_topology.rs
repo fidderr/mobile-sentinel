@@ -100,8 +100,8 @@ fn sentinel_process_components() {
         );
     }
 
-    // FGS runs in MAIN process (no android:process attribute = default). It
-    // lives in the foreground_service module's manifest.
+    // The ring service runs in :sentinel too: nothing that ends the UI (and so
+    // MAIN) may stop the sound. It lives in the foreground_service module's manifest.
     let fgs_xml = fs::read_to_string(foreground_service_manifest_path())
         .expect("read foreground_service manifest");
     let fgs_components = extract_components(&fgs_xml);
@@ -116,8 +116,9 @@ fn sentinel_process_components() {
         })
         .expect("foreground_service manifest missing SentinelForegroundService");
     assert_eq!(
-        fgs_process, None,
-        "SentinelForegroundService must run in MAIN process (no android:process)"
+        fgs_process.as_deref(),
+        Some(":sentinel"),
+        "SentinelForegroundService must declare android:process=\":sentinel\""
     );
 }
 

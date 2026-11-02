@@ -8,196 +8,340 @@ import android.app.Service
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
- * Minimal foreground service. Its ONLY job: keep MAIN alive.
+ * The ring: sound, vibration and the foreground notification of every alarm
+ * that is ringing. Runs in `:sentinel`, the one process without the UI
+ * framework, so nothing that happens to the UI can stop the sound, and it needs
+ * no Rust: an alarm rings from the plan Rust wrote when it armed it (see
+ * [SentinelRing]). All policy is in that plan; this service only executes it.
  *
- * Android kills background processes aggressively. A foreground service
- * with a visible notification prevents this. This service has NO logic —
- * no audio, no kiosk, no watchdog, no state management. All of that
- * lives in Rust (MAIN process).
- *
- * Consumer starts this via `SentinelForegroundServicePrimitives.startForegroundService()`
- * when an alarm fires, and stops it via `stopForegroundService()` when the
- * alarm is dismissed. The `fullScreen` flag is the FINAL decision made by
- * Rust (the firing sink decides whether the full-screen banner is redundant);
- * the service does not decide policy.
+ * Several alarms can ring at once. One of them owns the sound and vibration, and
+ * when it ends the next one takes over. The service stops when none is left.
  */
 class SentinelForegroundService : Service() {
 
     companion object {
         private const val TAG = "MobileSentinel.Service"
         private const val NOTIFICATION_ID = 9001
-
-        const val ACTION_FGS_START = "com.mobilesentinel.service.FGS_START"
-        const val ACTION_FGS_STOP = "com.mobilesentinel.service.FGS_STOP"
-
-        const val EXTRA_CHANNEL_ID = "channel_id"
-        const val EXTRA_CHANNEL_NAME = "channel_name"
-        const val EXTRA_TITLE = "title"
-        const val EXTRA_BODY = "body"
-        const val EXTRA_IMPORTANCE = "importance"
-        const val EXTRA_BYPASS_DND = "bypass_dnd"
-        const val EXTRA_ACTIVITY_FQCN = "activity_fqcn"
-        const val EXTRA_FULL_SCREEN = "full_screen"
+        private const val TICK_MS = 1_000L
+        private const val WATCHDOG_EVERY_TICKS = 2
+        private const val CPU_RENEW_EVERY_TICKS = 60
+        private const val CPU_HOLD_MS = 2 * 60 * 1000L
+        /** Long enough for the system to hand over a command it is holding. */
+        private const val RESTART_GRACE_MS = 300L
+        private const val FALLBACK_CHANNEL = "sentinel_foreground"
+        private const val DEFAULT_SOUND = "system://default-alarm"
+        private const val SILENT_SOUND = "silent://"
+        private val DEFAULT_VIBRATION = longArrayOf(0, 400, 200, 400)
     }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val ringing = LinkedHashMap<String, SentinelRing.Ringing>()
+
+    /** The ring whose sound and vibration are on. */
+    private var owner: String? = null
+    private var paused = false
+    private var uiVisible = false
+    private var postedFullScreen = false
+    private var postedOwner: String? = null
+    private var commandSeen = false
+    private var ticking = false
+    private var ticks = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        SentinelPrimitives.init(applicationContext)
         Log.i(TAG, "onCreate")
-        // When Android restarts this sticky service after the app was
-        // killed, some OEMs (seen on ColorOS) call onCreate but never deliver
-        // the null-intent onStartCommand. So the fast "bring the alarm back"
-        // path runs here. On a normal start the firing UI is already resumed
-        // and this does nothing.
-        if (SentinelActivityTracker.currentResumedActivity == null) {
-            relaunchActiveJobActivity()
-        }
+        // When Android restarts this sticky service after a kill, some OEMs (seen
+        // on ColorOS) call onCreate but never deliver the null-intent
+        // onStartCommand, so the ring comes back from here as well.
+        handler.postDelayed({ if (!commandSeen) resumeSaved() }, RESTART_GRACE_MS)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-
-        when (action) {
-            ACTION_FGS_STOP -> {
-                Log.i(TAG, "FGS_STOP received — stopping")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(true)
-                }
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            ACTION_FGS_START, null -> {
-                val channelId = intent?.getStringExtra(EXTRA_CHANNEL_ID) ?: "sentinel_foreground"
-                val channelName = intent?.getStringExtra(EXTRA_CHANNEL_NAME) ?: "Background Service"
-                val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Active"
-                val body = intent?.getStringExtra(EXTRA_BODY) ?: "Running"
-                val importance = intent?.getIntExtra(EXTRA_IMPORTANCE, NotificationManager.IMPORTANCE_MAX)
-                    ?: NotificationManager.IMPORTANCE_MAX
-                val bypassDnd = intent?.getBooleanExtra(EXTRA_BYPASS_DND, true) ?: true
-                val activityFqcn = intent?.getStringExtra(EXTRA_ACTIVITY_FQCN)
-                val fullScreen = intent?.getBooleanExtra(EXTRA_FULL_SCREEN, true) ?: true
-
-                // `fullScreen` is the FINAL decision made by Rust (the firing
-                // sink): Rust already checked whether the firing UI is in the
-                // foreground and suppressed the redundant banner if so. The
-                // service does not decide policy — it just applies it.
-                ensureChannel(channelId, channelName, importance, bypassDnd)
-                val notification = buildNotification(channelId, title, body, activityFqcn, fullScreen)
-                startForeground(NOTIFICATION_ID, notification)
-                Log.i(TAG, "FGS_START — foreground title='$title' fullScreen=$fullScreen")
-                if (intent == null && SentinelActivityTracker.currentResumedActivity == null) {
-                    // `null` = Android restarted this sticky service after the
-                    // app was killed (where the OEM delivers it). Reopen the
-                    // activity of any still-active job; its startup re-engages
-                    // audio/kiosk. Usually onCreate already did this.
-                    relaunchActiveJobActivity()
-                }
-                return START_STICKY
-            }
-            else -> {
-                Log.w(TAG, "Unknown action: $action")
-                return START_STICKY
-            }
+        commandSeen = true
+        when (intent?.action) {
+            SentinelRing.ACTION_RING -> ring(
+                intent.getStringExtra(SentinelRing.EXTRA_ID).orEmpty(),
+                intent.getBooleanExtra(SentinelRing.EXTRA_UI_VISIBLE, false),
+            )
+            SentinelRing.ACTION_STOP -> stop(intent.getStringExtra(SentinelRing.EXTRA_ID).orEmpty())
+            SentinelRing.ACTION_PAUSE -> pause()
+            // RESUME, or null: Android restarted this sticky service after a kill.
+            else -> resumeSaved()
         }
-    }
-
-    /**
-     * Launch the `activity_fqcn` of the first active job. Goes through core so
-     * this module stays independent of the `jobs` module.
-     */
-    private fun relaunchActiveJobActivity() {
-        try {
-            for (job in SentinelActiveJobs.list(this)) {
-                val fqcn = SentinelActiveJobs.activityOf(job) ?: continue
-                startActivity(Intent().apply {
-                    component = ComponentName(packageName, fqcn)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                })
-                Log.i(TAG, "restarted after kill — relaunched $fqcn for ${job.id}")
-                return
-            }
-            Log.i(TAG, "restarted after kill — no active job, nothing to relaunch")
-        } catch (e: Throwable) {
-            Log.w(TAG, "relaunchActiveJobActivity failed: ${e.message}")
-        }
+        return if (ringing.isEmpty()) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        stopOutputs()
         Log.i(TAG, "onDestroy")
+        super.onDestroy()
     }
 
-    private fun ensureChannel(
-        channelId: String,
-        channelName: String,
-        importance: Int,
-        bypassDnd: Boolean,
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java) ?: return
-            if (nm.getNotificationChannel(channelId) != null) return
-            val channel = NotificationChannel(channelId, channelName, importance).apply {
-                setBypassDnd(bypassDnd)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                setSound(null, null)
-            }
-            nm.createNotificationChannel(channel)
-            Log.i(TAG, "Created channel: $channelId (importance=$importance, bypassDnd=$bypassDnd)")
+    // ---- Commands -----------------------------------------------------------
+
+    private fun ring(id: String, visible: Boolean) {
+        reload()
+        uiVisible = visible || SentinelRing.mainOnScreen(this)
+        // First, whatever fails later: Android kills a service started in the
+        // foreground that does not get there in time.
+        showForeground()
+        if (id !in ringing) {
+            Log.w(TAG, "RING for '$id', which has no active job")
+            settle()
+            return
+        }
+        val wasPaused = paused
+        paused = false
+        if (owner == null) {
+            startOutputs(ringing.getValue(id), fade = true)
+        } else if (wasPaused) {
+            ringing[owner]?.let { startOutputs(it, fade = false) }
+        }
+        settle()
+    }
+
+    private fun stop(id: String) {
+        SentinelRing.forget(this, id)
+        drop(id)
+        // A service started just for this command has to find the others first.
+        reload()
+        settle()
+    }
+
+    private fun pause() {
+        reload()
+        showForeground()
+        paused = true
+        stopOutputs()
+        settle()
+    }
+
+    private fun resumeSaved() {
+        commandSeen = true
+        reload()
+        showForeground()
+        if (owner == null) {
+            ringing.values.firstOrNull()?.let { startOutputs(it, fade = false) }
+        }
+        settle()
+    }
+
+    private fun reload() {
+        val saved = SentinelRing.list(this)
+        ringing.keys.retainAll(saved.map { it.id }.toSet())
+        for (ring in saved) ringing[ring.id] = ring
+        if (owner !in ringing) owner = null
+    }
+
+    private fun drop(id: String) {
+        ringing.remove(id)
+        if (owner == id) {
+            stopOutputs()
+            owner = null
+            paused = false
         }
     }
 
-    private fun buildNotification(
-        channelId: String,
-        title: String,
-        body: String,
-        activityFqcn: String?,
-        useFullScreen: Boolean,
-    ): Notification {
+    /** After any change: hand the sound over, or finish when nothing is left. */
+    private fun settle() {
+        if (ringing.isEmpty()) {
+            shutDown()
+            return
+        }
+        if (owner == null && !paused) {
+            ringing.values.firstOrNull()?.let { startOutputs(it, fade = true) }
+        }
+        showForeground()
+        if (!ticking) {
+            ticking = true
+            SentinelRing.holdCpu(this, CPU_HOLD_MS)
+            handler.post(tick)
+        }
+    }
+
+    private fun shutDown() {
+        Log.i(TAG, "nothing is ringing any more, stopping")
+        handler.removeCallbacks(tick)
+        ticking = false
+        stopOutputs()
+        SentinelRing.restoreVolume(this)
+        SentinelRing.cancelWatchdog(this)
+        SentinelRing.releaseCpu()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        stopSelf()
+    }
+
+    // ---- Once a second while ringing ----------------------------------------
+
+    private val tick = object : Runnable {
+        override fun run() {
+            ticks++
+            // The marker is gone when Rust ended the alarm: never ring on without
+            // it, even if the stop command got lost.
+            for (id in ringing.keys.toList()) {
+                if (!SentinelActiveJobs.isActive(this@SentinelForegroundService, id)) {
+                    Log.i(TAG, "$id is no longer active, ending its ring")
+                    SentinelRing.forget(this@SentinelForegroundService, id)
+                    drop(id)
+                }
+            }
+            if (ringing.isEmpty()) {
+                shutDown()
+                return
+            }
+            // Nobody left to bring a paused sound back.
+            if (paused && SentinelRing.mainPid(this@SentinelForegroundService) == 0) {
+                Log.i(TAG, "MAIN died during a pause, sound back on")
+                paused = false
+                ringing[owner]?.let { startOutputs(it, fade = false) }
+            }
+            if (!paused) {
+                if (owner == null) {
+                    ringing.values.firstOrNull()?.let { startOutputs(it, fade = false) }
+                }
+                ringing[owner]?.let {
+                    SentinelRing.holdVolume(this@SentinelForegroundService, it.plan.optInt("min_volume_percent", 0))
+                }
+                SentinelFiringAudioPrimitives.checkPlayback()
+            }
+            if (ticks % WATCHDOG_EVERY_TICKS == 0) SentinelRing.armWatchdog(this@SentinelForegroundService)
+            if (ticks % CPU_RENEW_EVERY_TICKS == 0) SentinelRing.holdCpu(this@SentinelForegroundService, CPU_HOLD_MS)
+            handler.postDelayed(this, TICK_MS)
+        }
+    }
+
+    // ---- Sound and vibration ------------------------------------------------
+
+    private fun startOutputs(ring: SentinelRing.Ringing, fade: Boolean) {
+        owner = ring.id
+        val plan = ring.plan
+        SentinelRing.holdVolume(this, plan.optInt("min_volume_percent", 0))
+        val fadeInMs = if (fade) plan.optLong("fade_in_ms", 0) else 0L
+        val sounds = soundChain(plan)
+        Log.i(TAG, "ringing ${ring.id}: ${sounds.size} sound(s), fade ${fadeInMs}ms")
+        val pattern = vibrationPattern(plan)
+        val vibrating = plan.optBoolean("vibrate", !plan.has("sound_uri"))
+        if (sounds.isNotEmpty()) {
+            SentinelFiringAudioPrimitives.play(
+                sounds,
+                plan.optString("audio_usage", "alarm"),
+                plan.optString("audio_content_type", "sonification"),
+                plan.optBoolean("looping", true),
+                fadeInMs,
+            ) {
+                // No sound at all could be played: never ring silently.
+                if (!vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
+            }
+        }
+        if (vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
+    }
+
+    private fun stopOutputs() {
+        SentinelFiringAudioPrimitives.stop()
+        SentinelFiringVibrationPrimitives.stopVibration()
+    }
+
+    /** The sounds to try, best first. Empty for an alarm that is silent on purpose. */
+    private fun soundChain(plan: JSONObject): List<String> {
+        if (!plan.has("sound_uri")) return listOf(DEFAULT_SOUND)
+        val chosen = plan.optString("sound_uri", "")
+        if (chosen.isEmpty() || chosen == SILENT_SOUND) return emptyList()
+        val chain = arrayListOf(chosen)
+        val fallbacks = plan.optJSONArray("fallback_sound_uris") ?: JSONArray()
+        for (i in 0 until fallbacks.length()) chain.add(fallbacks.optString(i))
+        return chain.filter { it.isNotEmpty() && it != SILENT_SOUND }.distinct()
+    }
+
+    private fun vibrationPattern(plan: JSONObject): LongArray {
+        val raw = plan.optJSONArray("vibration_pattern")
+        if (raw == null || raw.length() == 0) return DEFAULT_VIBRATION
+        return LongArray(raw.length()) { raw.optLong(it) }
+    }
+
+    // ---- Notification -------------------------------------------------------
+
+    /** Show the foreground notification, posting again only if it changed. */
+    private fun showForeground() {
+        val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: JSONObject()
+        val fullScreen = plan.optBoolean("firing_full_screen", true) && !uiVisible
+        if (postedOwner == owner && postedOwner != null && postedFullScreen == fullScreen) return
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen))
+            postedOwner = owner
+            postedFullScreen = fullScreen
+            Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen")
+        } catch (e: Throwable) {
+            // Not allowed from here. The sound plays on for now and the watchdog,
+            // which is allowed to, retries.
+            Log.e(TAG, "startForeground failed: ${e.message}", e)
+        }
+    }
+
+    private fun ensureChannel(plan: JSONObject, channelId: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        val name = plan.optString("channel_name", "").ifEmpty { "Alarms" }
+        val importance = plan.optInt("importance", NotificationManager.IMPORTANCE_MAX)
+        // Creating an existing channel only updates its name, for a language change.
+        val channel = NotificationChannel(channelId, name, importance).apply {
+            setBypassDnd(plan.optBoolean("bypass_dnd", true))
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            setSound(null, null)
+        }
+        nm.createNotificationChannel(channel)
+    }
+
+    private fun buildNotification(plan: JSONObject, fullScreen: Boolean): Notification {
+        val channelId = plan.optString("channel_id", "").ifEmpty { FALLBACK_CHANNEL }
+        ensureChannel(plan, channelId)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, channelId)
         } else {
             @Suppress("DEPRECATION")
-            Notification.Builder(this)
+            Notification.Builder(this).setPriority(Notification.PRIORITY_MAX)
         }
-
-        builder.setContentTitle(title)
-            .setContentText(body)
+        builder.setContentTitle(plan.optString("title", "").ifEmpty { "Alarm" })
+            .setContentText(plan.optString("body", ""))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setOngoing(true)
-            .setCategory(Notification.CATEGORY_CALL)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
 
-        // Tap notification → open the activity
-        if (activityFqcn != null) {
-            val tapIntent = Intent().apply {
-                component = ComponentName(packageName, activityFqcn)
+        val activity = plan.optString("activity_fqcn", "")
+        if (activity.isNotEmpty()) {
+            val tap = Intent().apply {
+                component = ComponentName(packageName, activity)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             val pi = PendingIntent.getActivity(
-                this, 0, tapIntent,
+                this,
+                0,
+                tap,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             builder.setContentIntent(pi)
-            // Only attach the full-screen intent when requested — this is what
-            // produces the on-screen banner. Rust already decided whether it
-            // is needed (suppressed when the UI is already foreground).
-            if (useFullScreen) {
-                builder.setFullScreenIntent(pi, true)
-            }
+            if (fullScreen) builder.setFullScreenIntent(pi, true)
         }
-
         return builder.build()
     }
 }

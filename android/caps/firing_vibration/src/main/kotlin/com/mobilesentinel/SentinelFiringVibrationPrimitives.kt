@@ -1,7 +1,9 @@
 package com.mobilesentinel
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -9,14 +11,12 @@ import android.util.Log
 
 /**
  * Firing-vibration primitives — a sustained, looping vibration waveform while
- * an alarm fires.
+ * an alarm fires, driven by the ring service in `:sentinel`.
  *
  * Distinct from the one-shot [SentinelHapticPrimitives] capability (UI ticks):
- * this owns a *repeating* alarm buzz that runs until [stopVibration] is called
- * on dismiss/snooze/pause. Rust (the firing sink, gated by the
- * `firing-vibration` Cargo feature) decides the pattern and when to start/stop;
- * this object only drives the [Vibrator]. Every method is defensive: it logs
- * and returns a safe fallback on failure.
+ * this owns a *repeating* alarm buzz that runs until [stopVibration] is called.
+ * It vibrates as an alarm, so it also gets through silent mode. Every method is
+ * defensive: it logs and returns a safe fallback on failure.
  */
 object SentinelFiringVibrationPrimitives {
     private const val TAG = "MobileSentinel.FiringVib"
@@ -33,10 +33,16 @@ object SentinelFiringVibrationPrimitives {
         if (pattern.isEmpty()) return false
         return try {
             val vibrator = vibrator(context) ?: return false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 // repeat = 0 → loop the whole waveform from the start.
-                val effect = VibrationEffect.createWaveform(pattern, 0)
-                vibrator.vibrate(effect)
+                vibrator.vibrate(
+                    VibrationEffect.createWaveform(pattern, 0),
+                    VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0), attrs)
             } else {
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(pattern, 0)

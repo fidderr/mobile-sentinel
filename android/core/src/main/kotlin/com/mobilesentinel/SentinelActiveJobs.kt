@@ -23,20 +23,36 @@ object SentinelActiveJobs {
 
     class ActiveJob(val id: String, val json: JSONObject, val sinceMs: Long)
 
-    /** Create [id]'s marker, keeping an existing one (and so its time). */
+    /**
+     * Create [id]'s marker, keeping a current one (and so its time). A marker
+     * from before the boot belongs to a session the reboot ended, not to this
+     * fire. Returns whether the job is active now: without a job file the alarm
+     * no longer exists.
+     */
     @JvmStatic
-    fun mark(context: Context, id: String) {
-        try {
+    fun mark(context: Context, id: String): Boolean {
+        return try {
             val dir = File(context.filesDir, DIR)
             if (!File(dir, "$id.json").exists()) {
                 Log.w(TAG, "mark: no job file for '$id'")
-                return
+                return false
             }
             val marker = File(dir, "$id$SUFFIX")
-            if (!marker.exists()) marker.writeText(System.currentTimeMillis().toString())
+            if (!marker.exists() || SentinelBoot.isFromBeforeBoot(marker)) {
+                marker.writeText(System.currentTimeMillis().toString())
+            }
+            true
         } catch (e: Throwable) {
             Log.w(TAG, "mark('$id') failed: ${e.message}")
+            false
         }
+    }
+
+    /** Whether [id] has a marker from this boot. */
+    @JvmStatic
+    fun isActive(context: Context, id: String): Boolean {
+        val marker = File(File(context.filesDir, DIR), "$id$SUFFIX")
+        return marker.exists() && !SentinelBoot.isFromBeforeBoot(marker)
     }
 
     /**

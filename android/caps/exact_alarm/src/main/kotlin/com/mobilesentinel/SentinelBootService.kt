@@ -13,7 +13,7 @@ import android.util.Log
  * framework registers the Android context the native code depends on only
  * when the Activity is created. So the OS-level arming is replayed in
  * Kotlin from [SentinelArmedAlarms], the record of what this module armed
- * (ids and times only; it never reads Rust's own files). Alarms whose time
+ * (it never reads Rust's own files). Alarms whose time
  * already passed are dropped; the app's own startup reschedules those. Then
  * the service stops itself. The user never sees anything — no activity, no
  * notification.
@@ -46,10 +46,10 @@ class SentinelBootService : Service() {
     private fun replayArmedAlarms() {
         val now = System.currentTimeMillis()
         var armed = 0
-        for ((id, fireAt) in SentinelArmedAlarms.all(this)) {
-            if (fireAt <= now) {
+        for ((id, alarm) in SentinelArmedAlarms.all(this)) {
+            if (alarm.fireAtMs <= now) {
                 SentinelArmedAlarms.forget(this, id)
-            } else if (SentinelExactAlarmPrimitives.scheduleExactAlarm(id, fireAt, null)) {
+            } else if (SentinelExactAlarmPrimitives.scheduleExactAlarm(id, alarm.fireAtMs, alarm.metadataJson)) {
                 armed++
             }
         }
