@@ -235,6 +235,9 @@ const ACTIVITY_FILE: &str = "sentinel/ringing/activity";
 /// see [`AlarmKit::take_ring_ends`].
 static RING_ENDS: std::sync::Mutex<Vec<(InstanceId, RingEnd)>> = std::sync::Mutex::new(Vec::new());
 
+/// See [`AlarmKit::on_ring_end`].
+static RING_END_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
 /// Whether the OS delivering an alarm (the active marker, set at `marker_ms`)
 /// is about the alarm's current state. A wake the app superseded since (it was
 /// moved to a later time, dismissed, deleted) must not make it ring.
@@ -567,6 +570,9 @@ impl AlarmKit {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push((id.clone(), end));
+                if let Some(hook) = RING_END_HOOK.get() {
+                    hook();
+                }
                 return;
             }
         }
@@ -626,6 +632,13 @@ impl AlarmKit {
         if let Ok(mut log) = std::fs::OpenOptions::new().append(true).open(file) {
             let _ = writeln!(log, "{} ui {}", Utc::now().timestamp_millis(), id.0);
         }
+    }
+
+    /// Have `hook` called right after the platform ended a ring while the app runs,
+    /// for it to [`Self::take_ring_ends`]. The app may have no UI to look for them, then
+    /// or ever: it can run without a screen, and die again. Set once, on any thread.
+    pub fn on_ring_end(&self, hook: fn()) {
+        let _ = RING_END_HOOK.set(hook);
     }
 
     /// Rings the platform ended while the app was running, since the last call. The
@@ -2394,6 +2407,10 @@ mod tests {
         active_job(&id);
         dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
         limit_reached(&id);
+        static HOOK_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        kit.on_ring_end(|| {
+            HOOK_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
 
         kit.handle_job_heads_up(&id.0);
 
@@ -2405,6 +2422,7 @@ mod tests {
         assert_eq!(crate::jobs::active_since_ms(&id.0), None);
         assert_eq!(kit.take_ring_ends(), vec![(id.clone(), RingEnd::Limit)]);
         assert!(kit.take_ring_ends().is_empty());
+        assert!(HOOK_CALLS.load(std::sync::atomic::Ordering::SeqCst) >= 1);
         let _ = crate::jobs::remove_job(&id.0);
     }
 
