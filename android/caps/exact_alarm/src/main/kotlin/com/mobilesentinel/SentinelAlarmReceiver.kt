@@ -14,7 +14,8 @@ import android.util.Log
  * 1. Mark the job for this instance active (instance_id maps to a job id).
  * 2. Start the ring from the plan Rust put on this alarm when it armed it, so
  *    the alarm is heard without waiting for MAIN.
- * 3. Call `SentinelJobGuardian.startGuarding()`, which brings MAIN up.
+ * 3. Bring MAIN up: [SentinelRearmReceiver] for the state machine, which needs no
+ *    UI, and `SentinelJobGuardian.startGuarding()` for the screen.
  *
  * It decides nothing: the state machine and the UI run in MAIN's Rust, which
  * re-derives what to do from the persisted Context on every heads-up.
@@ -49,6 +50,12 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
                     // Armed first, so a service that is refused or dies is retried.
                     SentinelRing.armWatchdog(app)
                     SentinelRing.start(app, jobId, plan)
+                }
+                if (active && SentinelRing.mainPid(app) == 0) {
+                    app.sendBroadcast(
+                        Intent(SentinelRearmReceiver.ACTION_RING_STARTED)
+                            .setClass(app, SentinelRearmReceiver::class.java),
+                    )
                 }
             }
 

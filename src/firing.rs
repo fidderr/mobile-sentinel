@@ -84,6 +84,9 @@ pub struct FireRequest {
     /// seconds. `None` rings until it is dealt with. The ring service keeps the
     /// time: it has to work with the app dead.
     pub ring_limit_secs: Option<u32>,
+    /// How late this alarm may still ring when its time passed with the phone
+    /// off. Read by the boot replay, which runs without Rust.
+    pub late_ring_window_ms: i64,
 }
 
 /// Configuration for scheduling an OS exact alarm.
@@ -240,6 +243,7 @@ mod tests {
             fade_in_ms: 0,
             min_volume_percent: 0,
             ring_limit_secs: Some(1800),
+            late_ring_window_ms: 0,
         }
     }
 

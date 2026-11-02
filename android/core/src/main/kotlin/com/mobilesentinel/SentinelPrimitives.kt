@@ -43,6 +43,10 @@ object SentinelPrimitives {
     @JvmStatic
     fun getAppContext(): Context? = appContext
 
+    /** The app's files directory, for native code that may run without an activity. Empty before [init]. */
+    @JvmStatic
+    fun getFilesDirPath(): String = appContext?.filesDir?.absolutePath.orEmpty()
+
     /**
      * IANA time-zone id (e.g. "Europe/Amsterdam"). A generic device query
      * (no alarm/firing semantics) used by the recipe layer to resolve

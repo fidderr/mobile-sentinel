@@ -44,7 +44,7 @@ pub fn get_step_count() -> i32 {
 /// Calls the Kotlin SentinelSensorHelper.startAccelerometer() via JNI.
 #[cfg(target_os = "android")]
 pub fn start_accelerometer() {
-    use crate::platform::android::callbacks::load_app_class_global;
+    use crate::platform::android::jni::load_app_class_global;
 
     STATE.shake_count.store(0, Ordering::Relaxed);
     STATE.accel_active.store(true, Ordering::Relaxed);
@@ -77,7 +77,7 @@ pub fn start_accelerometer() {
 pub fn stop_accelerometer() {
     STATE.accel_active.store(false, Ordering::Relaxed);
 
-    let helper_ref = match crate::platform::android::callbacks::load_app_class_global(
+    let helper_ref = match crate::platform::android::jni::load_app_class_global(
         "com/mobilesentinel/SentinelSensorHelper",
     ) {
         Some(r) => r,
@@ -106,7 +106,7 @@ pub fn start_step_counter() {
     STATE.step_count.store(0, Ordering::Relaxed);
     STATE.steps_active.store(true, Ordering::Relaxed);
 
-    let helper_ref = match crate::platform::android::callbacks::load_app_class_global(
+    let helper_ref = match crate::platform::android::jni::load_app_class_global(
         "com/mobilesentinel/SentinelSensorHelper",
     ) {
         Some(r) => r,
@@ -136,7 +136,7 @@ pub fn start_step_counter() {
 pub fn stop_step_counter() {
     STATE.steps_active.store(false, Ordering::Relaxed);
 
-    let helper_ref = match crate::platform::android::callbacks::load_app_class_global(
+    let helper_ref = match crate::platform::android::jni::load_app_class_global(
         "com/mobilesentinel/SentinelSensorHelper",
     ) {
         Some(r) => r,

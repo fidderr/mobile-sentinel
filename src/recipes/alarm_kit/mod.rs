@@ -200,6 +200,20 @@ enum Rearmed {
     Finished,
 }
 
+/// How [`AlarmKit`]'s startup rings an alarm that is late.
+#[derive(Clone, Copy, PartialEq)]
+enum LateRing {
+    /// Right here: the app is on screen.
+    Now,
+    /// Through an OS alarm a second from now. Without the UI this may be the
+    /// wrong moment to start a ring (Android refuses it right after boot), and an
+    /// alarm being delivered is always allowed to.
+    ByOsAlarm,
+}
+
+/// How long [`LateRing::ByOsAlarm`] waits.
+const LATE_RING_DELAY_MS: i64 = 1_000;
+
 /// Slack when comparing a job's active marker with the time its alarm was due.
 const MARKER_SLOP_MS: i64 = 60_000;
 
@@ -687,12 +701,33 @@ impl AlarmKit {
         )
     }
 
+    /// [`Self::on_startup`] for when the app was started without its UI (a boot,
+    /// an update, the clock changing, an alarm going off).
+    pub fn on_wake(&self, alarms: &[(String, AlarmSpec)]) -> StartupReport {
+        self.sync_at(
+            alarms,
+            crate::utilities::boot::boot_unix_ms(),
+            Utc::now().timestamp_millis(),
+            LateRing::ByOsAlarm,
+        )
+    }
+
     /// [`Self::on_startup`] with the boot time and the clock injected.
     fn on_startup_at(
         &self,
         alarms: &[(String, AlarmSpec)],
         boot_unix_ms: Option<i64>,
         now_ms: i64,
+    ) -> StartupReport {
+        self.sync_at(alarms, boot_unix_ms, now_ms, LateRing::Now)
+    }
+
+    fn sync_at(
+        &self,
+        alarms: &[(String, AlarmSpec)],
+        boot_unix_ms: Option<i64>,
+        now_ms: i64,
+        late_ring: LateRing,
     ) -> StartupReport {
         let mut report = StartupReport::default();
         let late_window = alarm_class_runtime().config().late_ring_window_ms;
@@ -771,8 +806,15 @@ impl AlarmKit {
 
         // Late alarms no job covered: the OS never told us, but it is time.
         for id in due {
-            if engaged.insert(id.0.clone()) {
+            if !engaged.insert(id.0.clone()) {
+                continue;
+            }
+            if late_ring == LateRing::Now {
                 let _ = dispatch_trigger(&self.store, Trigger::Fire, &id);
+            } else if let Ok(record) = self.store.load(&id) {
+                if let RecipeContext::AlarmClass(ctx) = &record.context {
+                    alarm_class::arm_exact_alarm(&id, ctx, now_ms + LATE_RING_DELAY_MS);
+                }
             }
         }
 
@@ -2139,6 +2181,58 @@ mod tests {
         assert_eq!(current(), Some(newer.clone()));
         kit.dismiss(&newer).unwrap();
         assert_eq!(current(), None);
+    }
+
+    #[test]
+    fn a_late_alarm_found_without_the_ui_rings_through_the_os() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let now = Utc::now().timestamp_millis();
+        let due = now - 5 * 60_000;
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: due,
+            },
+        );
+
+        let report = kit.sync_at(
+            &[(id.0.clone(), weekday_spec())],
+            Some(now - 60_000),
+            now,
+            LateRing::ByOsAlarm,
+        );
+
+        assert!(report.missed.is_empty());
+        assert_eq!(sink.fire_count(), 0, "not started from here");
+        let armed = sink.last_schedule().unwrap();
+        assert_eq!(armed.alarm_id, id.0);
+        assert_eq!(armed.target_unix_ms, now + LATE_RING_DELAY_MS);
+        plan_of(&armed);
+        assert!(
+            matches!(
+                kit.store().load(&id).unwrap().state,
+                SessionState::Scheduled { .. }
+            ),
+            "firing starts when the OS delivers it"
+        );
+    }
+
+    #[test]
+    fn the_late_window_is_part_of_the_plan() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+
+        kit.create(weekday_spec()).unwrap();
+
+        assert_eq!(
+            plan_of(&sink.last_schedule().unwrap())["late_ring_window_ms"],
+            LATE_WINDOW
+        );
     }
 
     fn limit_reached(id: &InstanceId) {

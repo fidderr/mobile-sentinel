@@ -616,9 +616,8 @@ pub const CAPABILITIES: &[Capability] = &[
             "SentinelExactAlarmPrimitives.kt",
             "SentinelArmedAlarms.kt",
             "SentinelAlarmReceiver.kt",
-            "SentinelTimeChangeReceiver.kt",
+            "SentinelRearmReceiver.kt",
             "SentinelBootReceiver.kt",
-            "SentinelBootService.kt",
         ],
     },
     Capability {

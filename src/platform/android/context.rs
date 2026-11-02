@@ -10,7 +10,10 @@ use crate::error::SentinelError;
 
 /// Get the current Android Activity as a JNI GlobalRef.
 /// Uses ndk-context to get the Activity pointer provided by the host framework.
+/// That panics until the framework has an Activity, so this is only for what the
+/// user started from the UI; anything else goes through `SentinelPrimitives`.
 #[cfg(target_os = "android")]
+#[allow(dead_code)] // Which capabilities need it depends on the enabled features.
 pub fn get_activity() -> Result<(jni::JavaVM, GlobalRef), SentinelError> {
     let ctx = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| {

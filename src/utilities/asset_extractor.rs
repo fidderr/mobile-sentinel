@@ -24,20 +24,42 @@ impl AssetExtractor {
         let dest_dir = self.target_base.join(target_subdir);
         let _ = fs::create_dir_all(&dest_dir);
 
-        let Ok((vm, activity)) = crate::platform::android::context::get_activity() else {
-            eprintln!("[mobile-sentinel] AssetExtractor: get_activity failed");
-            return 0;
-        };
-        let Ok(mut env) = vm.attach_current_thread() else {
-            eprintln!("[mobile-sentinel] AssetExtractor: attach failed");
-            return 0;
-        };
+        crate::platform::android::jni::with_jni_class(
+            "com/mobilesentinel/SentinelPrimitives",
+            0,
+            |env, class| {
+                let context = env.call_static_method(
+                    class,
+                    "getAppContext",
+                    "()Landroid/content/Context;",
+                    &[],
+                );
+                match context.and_then(|value| value.l()) {
+                    Ok(context) if !context.is_null() => {
+                        Some(Self::extract_with(env, &context, asset_subdir, &dest_dir))
+                    }
+                    Ok(_) => None,
+                    Err(_) => {
+                        let _ = env.exception_clear();
+                        None
+                    }
+                }
+            },
+        )
+    }
 
+    #[cfg(target_os = "android")]
+    fn extract_with(
+        env: &mut jni::JNIEnv,
+        context: &jni::objects::JObject,
+        asset_subdir: &str,
+        dest_dir: &Path,
+    ) -> usize {
         use jni::objects::JValue;
 
         // Get AssetManager
         let asset_manager = match env.call_method(
-            activity.as_obj(),
+            context,
             "getAssets",
             "()Landroid/content/res/AssetManager;",
             &[],

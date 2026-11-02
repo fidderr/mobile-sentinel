@@ -17,8 +17,8 @@ pub fn app_files_dir() -> PathBuf {
         return dir.clone();
     }
     let dir = lookup_app_files_dir();
-    // Don't cache the "." fallback (e.g. `:sentinel` before any Activity
-    // context exists); a later call may succeed.
+    // Don't cache the "." fallback (the app context is not there yet); a later
+    // call may succeed.
     if dir.as_path() != std::path::Path::new(".") {
         let _ = CACHED.set(dir.clone());
     }
@@ -27,54 +27,26 @@ pub fn app_files_dir() -> PathBuf {
 
 #[cfg(target_os = "android")]
 fn lookup_app_files_dir() -> PathBuf {
-    use crate::platform::android::context::get_activity;
+    use crate::platform::android::jni::with_jni_class;
 
-    // ndk_context only knows about the Activity in processes that
-    // registered it (typically MAIN via the host mobile framework).
-    // In `:sentinel` cold-start this returns null pointers; bail out
-    // safely instead of segfaulting on `JObject::from_raw(null)`.
-    let raw = ndk_context::android_context();
-    if raw.vm().is_null() || raw.context().is_null() {
-        return PathBuf::from(".");
+    let path = with_jni_class(
+        "com/mobilesentinel/SentinelPrimitives",
+        String::new(),
+        |env, class| {
+            let value = env
+                .call_static_method(class, "getFilesDirPath", "()Ljava/lang/String;", &[])
+                .ok()?
+                .l()
+                .ok()?;
+            let path: String = env.get_string(&value.into()).ok()?.into();
+            Some(path)
+        },
+    );
+    if path.is_empty() {
+        PathBuf::from(".")
+    } else {
+        PathBuf::from(path)
     }
-
-    let Ok((vm, activity)) = get_activity() else {
-        return PathBuf::from(".");
-    };
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return PathBuf::from(".");
-    };
-
-    let files_dir = match env.call_method(activity.as_obj(), "getFilesDir", "()Ljava/io/File;", &[])
-    {
-        Ok(v) => match v.l() {
-            Ok(obj) => obj,
-            Err(_) => return PathBuf::from("."),
-        },
-        Err(_) => {
-            let _ = env.exception_clear();
-            return PathBuf::from(".");
-        }
-    };
-
-    let path_str = match env.call_method(&files_dir, "getAbsolutePath", "()Ljava/lang/String;", &[])
-    {
-        Ok(v) => match v.l() {
-            Ok(obj) => obj,
-            Err(_) => return PathBuf::from("."),
-        },
-        Err(_) => {
-            let _ = env.exception_clear();
-            return PathBuf::from(".");
-        }
-    };
-
-    let jstr = jni::objects::JString::from(path_str);
-    let result = match env.get_string(&jstr) {
-        Ok(s) => PathBuf::from(String::from(s)),
-        Err(_) => PathBuf::from("."),
-    };
-    result
 }
 
 #[cfg(not(target_os = "android"))]

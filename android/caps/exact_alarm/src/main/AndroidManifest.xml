@@ -29,21 +29,24 @@
             </intent-filter>
         </receiver>
 
-        <!-- Time / Time-Zone / Date change receiver. -->
+        <!-- Runs the app's core without UI when alarms may have to be armed
+             again, or a ring started with MAIN down. In MAIN, where Rust runs. -->
         <receiver
-            android:name="com.mobilesentinel.SentinelTimeChangeReceiver"
+            android:name="com.mobilesentinel.SentinelRearmReceiver"
             android:enabled="true"
-            android:exported="false"
-            android:process=":sentinel">
+            android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
-        <!-- Boot completed receiver — re-arms alarms after reboot. Runs in
-             :sentinel because it starts the job guardian, which must not live
+        <!-- Boot completed receiver — replays what was armed after reboot. Runs
+             in :sentinel because it starts the job guardian, which must not live
              in MAIN (some OEMs, e.g. ColorOS, hold BOOT_COMPLETED back until
              the user opens the app, so MAIN is often already up). -->
         <receiver
@@ -57,11 +60,5 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
-
-        <!-- Invisible boot service — runs in MAIN to trigger Rust re-arm. -->
-        <service
-            android:name="com.mobilesentinel.SentinelBootService"
-            android:enabled="true"
-            android:exported="false" />
     </application>
 </manifest>

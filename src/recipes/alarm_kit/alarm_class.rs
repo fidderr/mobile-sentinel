@@ -377,6 +377,7 @@ fn fire_request(
         },
         min_volume_percent: runtime_cfg.min_volume_percent,
         ring_limit_secs: alarm_ctx.ring_limit_secs,
+        late_ring_window_ms: runtime_cfg.late_ring_window_ms,
     }
 }
 

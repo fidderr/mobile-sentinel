@@ -90,7 +90,7 @@ fn sentinel_process_components() {
     };
 
     // These run in :sentinel (the job guardian process)
-    for required in [".SentinelAlarmReceiver", ".SentinelTimeChangeReceiver"] {
+    for required in [".SentinelAlarmReceiver", ".SentinelBootReceiver"] {
         let process =
             lookup(required).unwrap_or_else(|| panic!("manifest missing component {required}"));
         assert_eq!(
@@ -99,6 +99,13 @@ fn sentinel_process_components() {
             "{required} must declare android:process=\":sentinel\""
         );
     }
+
+    // This one starts Rust, so it runs in MAIN (no android:process).
+    assert_eq!(
+        lookup(".SentinelRearmReceiver").expect("manifest missing SentinelRearmReceiver"),
+        None,
+        "SentinelRearmReceiver must run in MAIN"
+    );
 
     // The ring service runs in :sentinel too: nothing that ends the UI (and so
     // MAIN) may stop the sound. It lives in the foreground_service module's manifest.
@@ -134,6 +141,8 @@ fn legacy_components_are_removed() {
         "SentinelFireWatchdog",
         "SentinelFiringNotifier",
         "SentinelContentProvider",
+        "SentinelTimeChangeReceiver",
+        "SentinelBootService",
     ] {
         assert!(
             !xml.contains(obsolete),

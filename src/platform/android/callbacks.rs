@@ -69,70 +69,15 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Classloader helpers — on Android the default JNI `FindClass` uses the
-// system classloader from non-JNI-called threads, which cannot see app DEX.
-// The only reliable way to load app classes from a worker thread is via the
-// activity's classloader. These helpers centralise the pattern.
-// ---------------------------------------------------------------------------
-
-/// Load an app-side class by FQCN using the activity's `ClassLoader`.
-/// Works from any thread — it fetches the activity via `context::get_activity`,
-/// attaches the current thread, then calls `Activity.getClassLoader().loadClass(name)`.
-/// On failure it clears any pending exception and returns `None`.
-/// `class_fqcn` accepts either the slash form (`"com/mobilesentinel/Foo"`)
-/// or the dotted form (`"com.mobilesentinel.Foo"`) — internal normalisation
-/// converts to dots because `ClassLoader.loadClass` expects dots.
-#[cfg(target_os = "android")]
-pub(crate) fn load_app_class_global(class_fqcn: &str) -> Option<jni::objects::GlobalRef> {
-    use crate::platform::android::context::get_activity;
-
-    let (vm, activity) = get_activity().ok()?;
-    let mut env = vm.attach_current_thread().ok()?;
-
-    // Activity.getClassLoader()
-    let classloader = env
-        .call_method(
-            activity.as_obj(),
-            "getClassLoader",
-            "()Ljava/lang/ClassLoader;",
-            &[],
-        )
-        .ok()?
-        .l()
-        .ok()?;
-
-    // String.replace('/', '.') — FindClass uses '/', loadClass uses '.'
-    let dotted = class_fqcn.replace('/', ".");
-    let name_jstr = env.new_string(&dotted).ok()?;
-
-    // ClassLoader.loadClass(String)
-    let cls_obj = env.call_method(
-        &classloader,
-        "loadClass",
-        "(Ljava/lang/String;)Ljava/lang/Class;",
-        &[jni::objects::JValue::Object(&name_jstr)],
-    );
-    let cls_obj = match cls_obj {
-        Ok(v) => v.l().ok()?,
-        Err(_) => {
-            let _ = env.exception_clear();
-            return None;
-        }
-    };
-
-    env.new_global_ref(cls_obj).ok()
-}
-
-// ---------------------------------------------------------------------------
 // JNI native function implementations
 // These are called from Kotlin via SentinelBridge.nativeOnXxx()
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // JNI_OnLoad — called by the Android JVM when the .so is loaded into a
-// process (whether MAIN or `:sentinel`). We cache the JavaVM so every
-// later JNI helper can attach without depending on ndk_context (which
-// MAIN-only frameworks like Dioxus initialise).
+// process. We cache the JavaVM and the app's ClassLoader so every later JNI
+// helper works without depending on ndk_context (which frameworks like Dioxus
+// only initialise once they have an Activity).
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "android")]
@@ -154,6 +99,9 @@ pub extern "system" fn JNI_OnLoad(
             return jni::sys::JNI_VERSION_1_6;
         }
     };
+    if let Ok(mut env) = java_vm.get_env() {
+        crate::platform::android::jni::cache_class_loader(&mut env);
+    }
     crate::platform::android::jni::set_java_vm(java_vm);
     jni::sys::JNI_VERSION_1_6
 }
