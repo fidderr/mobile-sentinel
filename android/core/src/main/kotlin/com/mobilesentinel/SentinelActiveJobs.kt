@@ -1,6 +1,7 @@
 package com.mobilesentinel
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -21,6 +22,12 @@ object SentinelActiveJobs {
     private const val DIR = "sentinel/jobs"
     private const val SUFFIX = ".active"
 
+    /** A ring stopped at its limit. Mirrors `LIMIT_SUFFIX` in Rust; Rust removes it. */
+    private const val LIMIT_SUFFIX = ".limit"
+
+    const val ACTION_JOB_HEADS_UP = "com.mobilesentinel.JOB_HEADS_UP"
+    const val EXTRA_JOB_ID = "job_id"
+
     class ActiveJob(val id: String, val json: JSONObject, val sinceMs: Long)
 
     /**
@@ -37,6 +44,9 @@ object SentinelActiveJobs {
                 Log.w(TAG, "mark: no job file for '$id'")
                 return false
             }
+            // A new fire makes a limit reached earlier irrelevant, whether or not
+            // the app was around to deal with it.
+            File(dir, "$id$LIMIT_SUFFIX").delete()
             val marker = File(dir, "$id$SUFFIX")
             if (!marker.exists() || SentinelBoot.isFromBeforeBoot(marker)) {
                 marker.writeText(System.currentTimeMillis().toString())
@@ -53,6 +63,23 @@ object SentinelActiveJobs {
     fun isActive(context: Context, id: String): Boolean {
         val marker = File(File(context.filesDir, DIR), "$id$SUFFIX")
         return marker.exists() && !SentinelBoot.isFromBeforeBoot(marker)
+    }
+
+    /**
+     * Leave word that [id]'s ring stopped at its limit, for Rust to end the alarm:
+     * right away if MAIN runs, which is told, and otherwise when the guardian has
+     * brought it up.
+     */
+    @JvmStatic
+    fun markLimitReached(context: Context, id: String) {
+        try {
+            File(File(context.filesDir, DIR), "$id$LIMIT_SUFFIX").writeText("")
+            context.sendBroadcast(
+                Intent(ACTION_JOB_HEADS_UP).setPackage(context.packageName).putExtra(EXTRA_JOB_ID, id),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "markLimitReached('$id') failed: ${e.message}")
+        }
     }
 
     /**

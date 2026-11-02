@@ -29,8 +29,8 @@ object SentinelJobGuardian {
     private const val UI_HEARTBEAT_FILE = "ui_heartbeat"
     /** Written by core's `SentinelActivityTracker`. */
     private const val MAIN_RESUMED_FILE = SentinelActivityTracker.MAIN_RESUMED_FILE
-    const val ACTION_JOB_HEADS_UP = "com.mobilesentinel.JOB_HEADS_UP"
-    const val EXTRA_JOB_ID = "job_id"
+    const val ACTION_JOB_HEADS_UP = SentinelActiveJobs.ACTION_JOB_HEADS_UP
+    const val EXTRA_JOB_ID = SentinelActiveJobs.EXTRA_JOB_ID
 
     private val guarding = AtomicBoolean(false)
     private var guardThread: Thread? = null
@@ -146,6 +146,7 @@ object SentinelJobGuardian {
                             val cap = (config?.optLong("ui_liveness_backoff_cap", 4L) ?: 4L).coerceAtLeast(1L)
                             val timeout = base * minOf(1L shl livenessKills.coerceAtMost(30), cap)
                             if (isUiFrozen(context, mainPid, job.sinceMs, timeout)) {
+                                SentinelRing.noteFrozenKill(context)
                                 killFrozenMain(mainPid, jobId, timeout)
                                 break
                             }

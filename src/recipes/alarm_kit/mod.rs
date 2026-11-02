@@ -29,7 +29,7 @@ use crate::recipes::alarm_class::{
 };
 use crate::recipes::context::schema::{
     AlarmClassContext, ChallengeSpec, ContextRecord, RecipeContext, ScheduleSpec, SessionState,
-    SnoozePolicy, SoundIdSpec,
+    SnoozePolicy, SoundIdSpec, DEFAULT_RING_LIMIT_SECS,
 };
 use crate::recipes::context::{ContextStore, StoreError};
 use crate::recipes::dispatch::dispatch_trigger;
@@ -60,6 +60,9 @@ pub struct AlarmSpec {
     pub skip_until_unix_ms: Option<i64>,
     /// Fade-in time of the alarm sound in seconds (0 = off).
     pub fade_in_secs: u16,
+    /// Stop by itself after ringing this long with nobody doing anything, in
+    /// seconds. `None` rings until it is dealt with.
+    pub ring_limit_secs: Option<u32>,
 }
 
 impl Default for AlarmSpec {
@@ -85,6 +88,7 @@ impl Default for AlarmSpec {
             bypass_dnd: false,
             skip_until_unix_ms: None,
             fade_in_secs: 0,
+            ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
         }
     }
 }
@@ -106,6 +110,7 @@ impl AlarmSpec {
             challenges_solved: false,
             skip_until_unix_ms: self.skip_until_unix_ms,
             fade_in_secs: self.fade_in_secs,
+            ring_limit_secs: self.ring_limit_secs,
         }
     }
 
@@ -125,6 +130,7 @@ impl AlarmSpec {
             bypass_dnd: ctx.bypass_dnd,
             skip_until_unix_ms: ctx.skip_until_unix_ms,
             fade_in_secs: ctx.fade_in_secs,
+            ring_limit_secs: ctx.ring_limit_secs,
         }
     }
 }
@@ -167,6 +173,9 @@ pub struct StartupReport {
     /// One-shot alarms that have nothing left to ring. The consumer should
     /// switch them off.
     pub finished: Vec<InstanceId>,
+    /// Alarms that rang until their limit with nobody doing anything. They were
+    /// dismissed, and the next occurrence, if any, is armed.
+    pub ended_by_limit: Vec<InstanceId>,
 }
 
 /// An alarm that did not ring at its time. See [`StartupReport::missed`].
@@ -193,6 +202,16 @@ enum Rearmed {
 
 /// Slack when comparing a job's active marker with the time its alarm was due.
 const MARKER_SLOP_MS: i64 = 60_000;
+
+/// [`AlarmKit::note_activity`] touches a file at most this often.
+const ACTIVITY_THROTTLE_MS: i64 = 30_000;
+
+/// Mirrors `ACTIVITY_FILE` in `SentinelRing`, relative to the app's files dir.
+const ACTIVITY_FILE: &str = "sentinel/ringing/activity";
+
+/// Alarms that ended by their limit while the app was running, until the consumer
+/// asks; see [`AlarmKit::take_ended_by_limit`].
+static ENDED_BY_LIMIT: std::sync::Mutex<Vec<InstanceId>> = std::sync::Mutex::new(Vec::new());
 
 /// Whether the OS delivering an alarm (the active marker, set at `marker_ms`)
 /// is about the alarm's current state. A wake the app superseded since (it was
@@ -494,6 +513,13 @@ impl AlarmKit {
     /// to ring (the alarm was deleted, or moved on since) is dropped: it would
     /// keep the guardian relaunching the app for no alarm.
     fn engage_or_fire(&self, id: &InstanceId) {
+        if crate::jobs::ring_limit_reached(&id.0) && self.end_session(id) {
+            ENDED_BY_LIMIT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(id.clone());
+            return;
+        }
         let record = match self.store.load(id) {
             Ok(r) => r,
             Err(StoreError::NotFound(_)) => {
@@ -515,6 +541,34 @@ impl AlarmKit {
         } else {
             let _ = dispatch_trigger(&self.store, Trigger::Fire, id);
         }
+    }
+
+    /// The user is doing something about a ringing alarm: its limit counts from
+    /// now. Touches on the alarm screen count by themselves while the kiosk lock is
+    /// on, so this is for what the platform cannot see, like shaking or walking.
+    /// Cheap and throttled, so call it as often as it happens.
+    pub fn note_activity(&self) {
+        static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let now_ms = Utc::now().timestamp_millis();
+        if now_ms - LAST.load(std::sync::atomic::Ordering::Relaxed) < ACTIVITY_THROTTLE_MS {
+            return;
+        }
+        LAST.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+        let file = crate::utilities::app_files_dir().join(ACTIVITY_FILE);
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(file, "");
+    }
+
+    /// Alarms that ended by their limit while the app was running, since the last
+    /// call. The consumer may want to tell the user and switch off a one-time alarm.
+    pub fn take_ended_by_limit(&self) -> Vec<InstanceId> {
+        std::mem::take(
+            &mut ENDED_BY_LIMIT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     /// Pause audio (e.g., during a telephony interruption).
@@ -662,6 +716,10 @@ impl AlarmKit {
                 if ring_from_before_boot {
                     if self.end_session(&record.id) {
                         report.ended_by_reboot.push(record.id.clone());
+                    }
+                } else if crate::jobs::ring_limit_reached(&record.id.0) {
+                    if self.end_session(&record.id) {
+                        report.ended_by_limit.push(record.id.clone());
                     }
                 } else if let Some(due_unix_ms) = snooze_too_late {
                     if self.end_session(&record.id) {
@@ -2081,6 +2139,100 @@ mod tests {
         assert_eq!(current(), Some(newer.clone()));
         kit.dismiss(&newer).unwrap();
         assert_eq!(current(), None);
+    }
+
+    fn limit_reached(id: &InstanceId) {
+        let dir = crate::jobs::jobs_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{}.limit", id.0)), "").unwrap();
+    }
+
+    #[test]
+    fn the_ring_limit_is_part_of_the_plan() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+
+        kit.create(spec.clone()).unwrap();
+        assert_eq!(
+            plan_of(&sink.last_schedule().unwrap())["ring_limit_secs"],
+            1800,
+            "half an hour unless the alarm says otherwise"
+        );
+
+        spec.ring_limit_secs = None;
+        kit.create(spec).unwrap();
+        assert!(plan_of(&sink.last_schedule().unwrap())["ring_limit_secs"].is_null());
+    }
+
+    #[test]
+    fn an_older_record_gets_the_default_limit() {
+        let mut value = serde_json::to_value(weekday_spec().into_context()).unwrap();
+        value.as_object_mut().unwrap().remove("ring_limit_secs");
+        let ctx: AlarmClassContext = serde_json::from_value(value).unwrap();
+        assert_eq!(ctx.ring_limit_secs, Some(DEFAULT_RING_LIMIT_SECS));
+    }
+
+    #[test]
+    fn a_ring_that_reached_its_limit_ends_past_the_gate_with_the_app_running() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.challenges = vec![ChallengeSpec {
+            challenge_type: "math".into(),
+            difficulty: 0,
+            config: serde_json::json!({}),
+        }];
+        let id = kit.create(spec).unwrap();
+        active_job(&id);
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        limit_reached(&id);
+
+        kit.handle_job_heads_up(&id.0);
+
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { .. }
+        ));
+        assert!(!crate::jobs::ring_limit_reached(&id.0));
+        assert_eq!(crate::jobs::active_since_ms(&id.0), None);
+        assert_eq!(kit.take_ended_by_limit(), vec![id.clone()]);
+        assert!(kit.take_ended_by_limit().is_empty());
+        let _ = crate::jobs::remove_job(&id.0);
+    }
+
+    #[test]
+    fn a_ring_that_reached_its_limit_with_the_app_dead_is_reported_at_startup() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        // The app never came up: Rust still has it as waiting, for a time long gone.
+        let now = Utc::now().timestamp_millis();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Scheduled {
+                next_fire_unix_ms: now - 30 * 60_000,
+            },
+        );
+        limit_reached(&id);
+
+        let report = kit.on_startup_at(
+            &[(id.0.clone(), weekday_spec())],
+            Some(now - 3_600_000),
+            now,
+        );
+
+        assert_eq!(report.ended_by_limit, vec![id.clone()]);
+        assert!(report.missed.is_empty(), "it did ring");
+        assert!(matches!(
+            kit.store().load(&id).unwrap().state,
+            SessionState::Scheduled { next_fire_unix_ms } if next_fire_unix_ms > now
+        ));
+        assert!(!crate::jobs::ring_limit_reached(&id.0));
     }
 
     #[test]

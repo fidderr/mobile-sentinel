@@ -36,8 +36,10 @@ object SentinelRing {
     private const val DIR = "sentinel/ringing"
     private const val PLAN_EXT = ".plan"
     private const val VOLUME_FILE = "volume_to_restore"
+    private const val FROZEN_KILL_FILE = "frozen_kill"
+    private const val ACTIVITY_THROTTLE_MS = 30_000L
 
-    /** Touched by the app when the user does something. Mirrors `ACTIVITY_FILE` in Rust. */
+    /** Touched when the user does something. Mirrors `ACTIVITY_FILE` in Rust. */
     private const val ACTIVITY_FILE = "activity"
 
     private const val SERVICE = "com.mobilesentinel.SentinelForegroundService"
@@ -78,10 +80,15 @@ object SentinelRing {
 
     // ---- Commands -----------------------------------------------------------
 
-    /** JNI entry: the firing sink (MAIN) engages a ring. */
+    /**
+     * JNI entry: the firing sink (MAIN) engages a ring. The app coming back counts
+     * as the user being there, unless it is back because the guardian killed a
+     * frozen UI: that would otherwise keep an alarm nobody can solve ringing forever.
+     */
     @JvmStatic
     fun startRing(id: String, planJson: String, uiVisible: Boolean): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
+        if (!File(dir(c), FROZEN_KILL_FILE).delete()) noteActivity(c)
         return start(c, id, planJson, uiVisible)
     }
 
@@ -103,11 +110,15 @@ object SentinelRing {
     /**
      * Keep the plan and bring the service up. The plan goes to disk first, so a
      * service that dies or is refused at this point is retried by the watchdog.
+     * The file's time stays when the ring started.
      */
     @JvmStatic
     fun start(context: Context, id: String, planJson: String, uiVisible: Boolean = false): Boolean {
         try {
-            writeAtomically(planFile(context, id), planJson)
+            val file = planFile(context, id)
+            val startedAt = file.lastModified()
+            writeAtomically(file, planJson)
+            if (startedAt != 0L) file.setLastModified(startedAt)
         } catch (e: Throwable) {
             Log.w(TAG, "saving the plan of $id failed: ${e.message}")
         }
@@ -184,15 +195,28 @@ object SentinelRing {
     @JvmStatic
     fun lastActivityMs(context: Context): Long = File(dir(context), ACTIVITY_FILE).lastModified()
 
-    /** The user is at the phone: a ring limit counts from now. */
+    /** The user is at the phone: a ring limit counts from now. Cheap and throttled. */
     @JvmStatic
     fun noteActivity(context: Context) {
         try {
             val file = File(dir(context), ACTIVITY_FILE)
+            if (System.currentTimeMillis() - file.lastModified() < ACTIVITY_THROTTLE_MS) return
             file.parentFile?.mkdirs()
             file.writeText("")
         } catch (e: Throwable) {
             Log.w(TAG, "noteActivity failed: ${e.message}")
+        }
+    }
+
+    /** The guardian is about to kill a frozen UI; see [startRing]. */
+    @JvmStatic
+    fun noteFrozenKill(context: Context) {
+        try {
+            val file = File(dir(context), FROZEN_KILL_FILE)
+            file.parentFile?.mkdirs()
+            file.writeText("")
+        } catch (e: Throwable) {
+            Log.w(TAG, "noteFrozenKill failed: ${e.message}")
         }
     }
 

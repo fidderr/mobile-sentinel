@@ -90,6 +90,7 @@ fn arb_alarm_class_context() -> impl Strategy<Value = AlarmClassContext> {
                 challenges_solved: false,
                 skip_until_unix_ms: None,
                 fade_in_secs: 0,
+                ring_limit_secs: None,
             },
         )
 }
@@ -210,6 +211,7 @@ fn snooze_count_strictly_monotonic_across_dispatch() {
         challenges_solved: false,
         skip_until_unix_ms: None,
         fade_in_secs: 0,
+        ring_limit_secs: None,
     };
     store
         .write(ContextRecord::new(

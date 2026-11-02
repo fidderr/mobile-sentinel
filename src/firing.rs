@@ -80,6 +80,10 @@ pub struct FireRequest {
     /// Raise the alarm stream volume to at least this percentage while the
     /// sound plays, then restore it (0 = leave the volume alone).
     pub min_volume_percent: u8,
+    /// Stop by itself after ringing this long with nobody doing anything, in
+    /// seconds. `None` rings until it is dealt with. The ring service keeps the
+    /// time: it has to work with the app dead.
+    pub ring_limit_secs: Option<u32>,
 }
 
 /// Configuration for scheduling an OS exact alarm.
@@ -235,6 +239,7 @@ mod tests {
             firing_full_screen: true,
             fade_in_ms: 0,
             min_volume_percent: 0,
+            ring_limit_secs: Some(1800),
         }
     }
 

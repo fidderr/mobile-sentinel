@@ -13,6 +13,12 @@ change.
 
 ### Added
 
+- `ring_limit_secs` (per alarm, default 30 minutes, `None` = until dealt with): the
+  ring service stops an alarm nobody responds to. It counts from the ring's start,
+  a touch on the alarm screen, leaving it, the app coming back, or
+  `AlarmKit::note_activity`, and a guardian kill of a frozen UI does not count. Rust
+  then ends the alarm past the challenge gate; `StartupReport::ended_by_limit` and
+  `AlarmKit::take_ended_by_limit` tell the consumer.
 - `AlarmKit::on_startup` now returns a `StartupReport` and ends rings a reboot
   interrupted (past the challenge gate); a snooze still in the future is kept
   and re-armed. An unchanged alarm is no longer reset to Idle on startup, and

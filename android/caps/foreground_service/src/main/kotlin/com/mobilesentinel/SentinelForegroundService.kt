@@ -202,6 +202,7 @@ class SentinelForegroundService : Service() {
                     drop(id)
                 }
             }
+            endRingsPastTheirLimit()
             if (ringing.isEmpty()) {
                 shutDown()
                 return
@@ -224,6 +225,21 @@ class SentinelForegroundService : Service() {
             if (ticks % WATCHDOG_EVERY_TICKS == 0) SentinelRing.armWatchdog(this@SentinelForegroundService)
             if (ticks % CPU_RENEW_EVERY_TICKS == 0) SentinelRing.holdCpu(this@SentinelForegroundService, CPU_HOLD_MS)
             handler.postDelayed(this, TICK_MS)
+        }
+    }
+
+    /** Rust ends the alarm itself: this cannot, and the app may be dead. */
+    private fun endRingsPastTheirLimit() {
+        val now = System.currentTimeMillis()
+        val lastActivity = SentinelRing.lastActivityMs(this)
+        for (ring in ringing.values.toList()) {
+            val limitSecs = ring.plan.optLong("ring_limit_secs", 0)
+            if (limitSecs > 0 && now - maxOf(ring.sinceMs, lastActivity) >= limitSecs * 1000) {
+                Log.i(TAG, "${ring.id} rang for its limit of ${limitSecs}s")
+                SentinelRing.forget(this, ring.id)
+                drop(ring.id)
+                SentinelActiveJobs.markLimitReached(this, ring.id)
+            }
         }
     }
 

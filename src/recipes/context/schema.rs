@@ -66,6 +66,7 @@ impl SessionState {
 /// forward compatibility.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "recipe_type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // Loaded, used and written back; never kept in bulk.
 pub enum RecipeContext {
     AlarmClass(AlarmClassContext),
     /// Escape hatch for consumer-defined Recipes. The `recipe_type` tag in
@@ -142,6 +143,18 @@ pub struct AlarmClassContext {
     /// brought back after a challenge pause.
     #[serde(default)]
     pub fade_in_secs: u16,
+    /// How long the alarm may ring with nobody doing anything before it stops by
+    /// itself, in seconds. `None` rings until it is dealt with. Older persisted
+    /// records get the default.
+    #[serde(default = "default_ring_limit_secs")]
+    pub ring_limit_secs: Option<u32>,
+}
+
+/// How long an alarm rings by default: half an hour.
+pub const DEFAULT_RING_LIMIT_SECS: u32 = 30 * 60;
+
+fn default_ring_limit_secs() -> Option<u32> {
+    Some(DEFAULT_RING_LIMIT_SECS)
 }
 
 /// Schedule specification — a serializable description of when fires occur.
@@ -386,6 +399,7 @@ mod tests {
             challenges_solved: false,
             skip_until_unix_ms: None,
             fade_in_secs: 0,
+            ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
         }
     }
 }

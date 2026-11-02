@@ -34,6 +34,12 @@ pub enum JobStatus {
 /// became active. Mirrored by `SentinelActiveJobs` in Kotlin.
 pub const ACTIVE_SUFFIX: &str = ".active";
 
+/// Suffix of the marker the ring service leaves when a ring reached its limit,
+/// next to the job file: `<files>/sentinel/jobs/<id>.limit`. Created by Kotlin,
+/// which cannot end the alarm itself, and removed here with the active marker.
+/// Mirrored by `SentinelActiveJobs` in Kotlin.
+pub const LIMIT_SUFFIX: &str = ".limit";
+
 /// Guardian behavior configuration for a single job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobConfig {
@@ -255,6 +261,11 @@ pub fn active_since_ms(id: &str) -> Option<i64> {
     i64::try_from(since_epoch.as_millis()).ok()
 }
 
+/// Whether the ring of this job stopped because it reached its limit.
+pub fn ring_limit_reached(id: &str) -> bool {
+    limit_marker_path(id).exists()
+}
+
 /// Deactivate a job: remove its active marker and keep the job file. Use this
 /// when the job no longer needs MAIN alive *right now* but will be re-activated
 /// by a future trigger (e.g. an alarm that was snoozed: the firing session is
@@ -282,7 +293,12 @@ fn marker_path(id: &str) -> PathBuf {
     jobs_dir().join(format!("{id}{ACTIVE_SUFFIX}"))
 }
 
+fn limit_marker_path(id: &str) -> PathBuf {
+    jobs_dir().join(format!("{id}{LIMIT_SUFFIX}"))
+}
+
 fn remove_marker(id: &str) -> Result<(), JobGuardianError> {
+    let _ = std::fs::remove_file(limit_marker_path(id));
     let marker = marker_path(id);
     match std::fs::remove_file(&marker) {
         Ok(()) => Ok(()),

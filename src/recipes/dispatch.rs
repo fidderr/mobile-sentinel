@@ -100,6 +100,7 @@ mod tests {
             challenges_solved: false,
             skip_until_unix_ms: None,
             fade_in_secs: 0,
+            ring_limit_secs: None,
         })
     }
 

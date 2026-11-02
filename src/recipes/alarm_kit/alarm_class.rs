@@ -376,6 +376,7 @@ fn fire_request(
             0
         },
         min_volume_percent: runtime_cfg.min_volume_percent,
+        ring_limit_secs: alarm_ctx.ring_limit_secs,
     }
 }
 
@@ -864,6 +865,7 @@ mod tests {
             challenges_solved: false,
             skip_until_unix_ms: None,
             fade_in_secs: 0,
+            ring_limit_secs: None,
         }
     }
 

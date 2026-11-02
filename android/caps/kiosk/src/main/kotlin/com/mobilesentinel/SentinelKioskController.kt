@@ -353,6 +353,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             return
         }
         if (targetActivityFqcn.isBlank()) return
+        // Somebody tried to leave, so somebody is there.
+        SentinelRing.noteActivity(ctx)
         val intent = Intent().apply {
             component = ComponentName(ctx.packageName, targetActivityFqcn)
  // NO CLEAR_TOP — it destroys the existing instance, and with our
@@ -625,6 +627,14 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
                 return true
             }
             return base.dispatchKeyEvent(event)
+        }
+
+        override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+            val controller = SentinelKioskController
+            if (controller.enabled && event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                controller.appContext?.let { SentinelRing.noteActivity(it) }
+            }
+            return base.dispatchTouchEvent(event)
         }
     }
 
