@@ -49,7 +49,7 @@ object SentinelPrimitives {
 
     /** The app's files directory, for native code that may run without an activity. Empty before [init]. */
     @JvmStatic
-    fun getFilesDirPath(): String = appContext?.filesDir?.absolutePath.orEmpty()
+    fun getFilesDirPath(): String = appContext?.let { SentinelStorage.filesDir(it).absolutePath }.orEmpty()
 
     /**
      * IANA time-zone id (e.g. "Europe/Amsterdam"). A generic device query

@@ -31,10 +31,10 @@ object SentinelBoot {
         context.getSystemService(UserManager::class.java)?.isUserUnlocked ?: true
 
     /**
-     * Whether this app's files can be read. Before the first unlock that takes an app
-     * built with `direct_boot = true`, whose files are device-encrypted.
+     * Whether this library's files can be read. Before the first unlock that takes
+     * an app built with `direct_boot = true`; see [SentinelStorage].
      */
     @JvmStatic
     fun filesAvailable(context: Context): Boolean =
-        isUserUnlocked(context) || context.isDeviceProtectedStorage
+        isUserUnlocked(context) || SentinelStorage.isDirectBoot(context)
 }

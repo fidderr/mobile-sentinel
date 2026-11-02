@@ -198,12 +198,12 @@ object SentinelJobGuardian {
      */
     private fun isUiFrozen(context: Context, mainPid: Int, activeSinceMs: Long, timeoutMs: Long): Boolean {
         try {
-            val marker = File(context.filesDir, MAIN_RESUMED_FILE)
+            val marker = File(SentinelStorage.filesDir(context), MAIN_RESUMED_FILE)
             if (!marker.exists()) return false
             val parts = marker.readText().trim().split(' ')
             if (parts.size != 2 || parts[0].toIntOrNull() != mainPid) return false
             val resumedAt = parts[1].toLongOrNull() ?: return false
-            val beatAt = File(context.filesDir, "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
+            val beatAt = File(SentinelStorage.filesDir(context), "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
             val lastSign = maxOf(resumedAt, beatAt, activeSinceMs)
             return System.currentTimeMillis() - lastSign > timeoutMs
         } catch (e: Throwable) {
@@ -213,7 +213,7 @@ object SentinelJobGuardian {
     }
 
     private fun lastBeatMs(context: Context): Long =
-        File(context.filesDir, "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
+        File(SentinelStorage.filesDir(context), "$JOBS_DIR/$UI_HEARTBEAT_FILE").lastModified()
 
     /** After as many failures as the job config allows, the backup screen takes over. */
     private fun noteUiFailure(context: Context, config: org.json.JSONObject?) {

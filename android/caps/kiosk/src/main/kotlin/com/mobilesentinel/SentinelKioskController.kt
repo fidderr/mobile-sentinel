@@ -103,7 +103,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     @JvmStatic
     fun isTargetResumed(context: Context): Boolean {
         return try {
-            java.io.File(context.applicationContext.filesDir, TARGET_RESUMED_FILE).exists()
+            java.io.File(SentinelStorage.filesDir(context), TARGET_RESUMED_FILE).exists()
         } catch (_: Throwable) {
             false
         }
@@ -111,7 +111,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private fun writeTargetResumed(activity: Activity, resumed: Boolean) {
         try {
-            val file = java.io.File(activity.applicationContext.filesDir, TARGET_RESUMED_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(activity), TARGET_RESUMED_FILE)
             if (resumed) {
                 file.writeText("1")
             } else if (file.exists()) {
@@ -124,7 +124,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private fun clearTargetResumed(context: Context) {
         try {
-            val file = java.io.File(context.applicationContext.filesDir, TARGET_RESUMED_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(context), TARGET_RESUMED_FILE)
             if (file.exists()) file.delete()
         } catch (e: Throwable) {
             Log.w(TAG, "clearTargetResumed failed: ${e.message}")
@@ -135,7 +135,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private fun writeKioskStateFile(ctx: Context) {
         try {
-            val file = java.io.File(ctx.applicationContext.filesDir, KIOSK_STATE_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(ctx), KIOSK_STATE_FILE)
             file.writeText("$targetActivityFqcn\n$relaunchDebounceMs\n$hideStatusBar\n$hideNavBar\n$blockVolume")
         } catch (e: Throwable) {
             Log.w(TAG, "writeKioskStateFile failed: ${e.message}")
@@ -144,7 +144,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private fun clearKioskStateFile(ctx: Context) {
         try {
-            val file = java.io.File(ctx.applicationContext.filesDir, KIOSK_STATE_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(ctx), KIOSK_STATE_FILE)
             if (file.exists()) file.delete()
         } catch (e: Throwable) {
             Log.w(TAG, "clearKioskStateFile failed: ${e.message}")
@@ -161,7 +161,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private fun readKioskStateFile(ctx: Context): KioskState? {
         return try {
-            val file = java.io.File(ctx.applicationContext.filesDir, KIOSK_STATE_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(ctx), KIOSK_STATE_FILE)
             if (!file.exists()) return null
             // Written before the current boot: that alarm died with the
             // reboot. Engaging the lock for it would trap the user in an

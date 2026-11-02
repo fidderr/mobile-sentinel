@@ -25,7 +25,7 @@ internal object SentinelArmedAlarms {
     private const val DIR = "sentinel/armed"
     private const val EXT = ".armed"
 
-    private fun dir(context: Context) = File(context.applicationContext.filesDir, DIR)
+    private fun dir(context: Context) = File(SentinelStorage.filesDir(context), DIR)
 
     private fun fileFor(context: Context, id: String) =
         File(dir(context), URLEncoder.encode(id, "UTF-8") + EXT)

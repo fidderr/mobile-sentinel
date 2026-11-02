@@ -209,20 +209,24 @@ fn inject_link_scheme(project_path: &Path, scheme: &str) {
 /// Keeps the app's files in device-encrypted storage, so an alarm can ring from a
 /// boot until the first unlock, as a system clock does. The price is that they are
 /// protected less than credential-encrypted files, so it is opt-in. Files from a
-/// build without this stay behind: the app starts empty once.
+/// build without this stay behind: the app starts empty once. Android ignores the
+/// manifest's own attribute for this outside system apps, so the library does it
+/// (`SentinelStorage`) and this tells it to.
 fn inject_direct_boot(project_path: &Path) {
-    const ATTR: &str = "android:defaultToDeviceProtectedStorage=\"true\"";
+    const META: &str =
+        "<meta-data android:name=\"com.mobilesentinel.direct_boot\" android:value=\"true\" />";
     let path = project_path.join("app/src/main/AndroidManifest.xml");
     let Ok(mut manifest) = fs::read_to_string(&path) else {
         return;
     };
-    if manifest.contains(ATTR) {
+    if manifest.contains(META) {
         return;
     }
-    let Some(idx) = manifest.find("<application") else {
+    let Some(idx) = manifest.find("</application>") else {
         return;
     };
-    manifest.insert_str(idx + "<application".len(), &format!(" {ATTR}"));
+    let line_start = manifest[..idx].rfind('\n').map_or(0, |n| n + 1);
+    manifest.insert_str(line_start, &format!("        {META}\n"));
     match fs::write(&path, manifest) {
         Ok(()) => eprintln!("  Direct boot: files are device-encrypted"),
         Err(e) => eprintln!("  Failed to write direct boot: {e}"),

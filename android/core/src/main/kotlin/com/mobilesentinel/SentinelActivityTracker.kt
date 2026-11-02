@@ -95,7 +95,7 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
 
     private fun writeMainResumed(activity: Activity, resumed: Boolean) {
         try {
-            val file = java.io.File(activity.applicationContext.filesDir, MAIN_RESUMED_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(activity), MAIN_RESUMED_FILE)
             if (resumed) {
                 // "<pid> <resume time ms>": a marker left behind by a killed
                 // process names a pid that is no longer MAIN's.

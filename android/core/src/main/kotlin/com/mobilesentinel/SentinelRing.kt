@@ -66,7 +66,7 @@ object SentinelRing {
 
     class Ringing(val id: String, val plan: JSONObject, val sinceMs: Long)
 
-    private fun dir(context: Context) = File(context.applicationContext.filesDir, DIR)
+    private fun dir(context: Context) = File(SentinelStorage.filesDir(context), DIR)
 
     private fun planFile(context: Context, id: String) =
         File(dir(context), URLEncoder.encode(id, "UTF-8") + PLAN_EXT)
@@ -294,7 +294,7 @@ object SentinelRing {
     @JvmStatic
     fun mainOnScreen(context: Context): Boolean {
         return try {
-            val file = File(context.filesDir, SentinelActivityTracker.MAIN_RESUMED_FILE)
+            val file = File(SentinelStorage.filesDir(context), SentinelActivityTracker.MAIN_RESUMED_FILE)
             if (!file.exists()) return false
             val pid = file.readText().trim().substringBefore(' ').toIntOrNull() ?: return false
             pid != 0 && pid == mainPid(context)

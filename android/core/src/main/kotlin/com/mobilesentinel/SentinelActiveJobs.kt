@@ -42,7 +42,7 @@ object SentinelActiveJobs {
     @JvmStatic
     fun mark(context: Context, id: String): Boolean {
         return try {
-            val dir = File(context.filesDir, DIR)
+            val dir = File(SentinelStorage.filesDir(context), DIR)
             if (!File(dir, "$id.json").exists()) {
                 Log.w(TAG, "mark: no job file for '$id'")
                 return false
@@ -65,7 +65,7 @@ object SentinelActiveJobs {
     /** Whether [id] has a marker from this boot. */
     @JvmStatic
     fun isActive(context: Context, id: String): Boolean {
-        val marker = File(File(context.filesDir, DIR), "$id$SUFFIX")
+        val marker = File(File(SentinelStorage.filesDir(context), DIR), "$id$SUFFIX")
         return marker.exists() && !SentinelBoot.isFromBeforeBoot(marker)
     }
 
@@ -83,7 +83,7 @@ object SentinelActiveJobs {
 
     private fun leaveWord(context: Context, id: String, suffix: String) {
         try {
-            File(File(context.filesDir, DIR), "$id$suffix").writeText("")
+            File(File(SentinelStorage.filesDir(context), DIR), "$id$suffix").writeText("")
             context.sendBroadcast(
                 Intent(ACTION_JOB_HEADS_UP).setPackage(context.packageName).putExtra(EXTRA_JOB_ID, id),
             )
@@ -99,7 +99,7 @@ object SentinelActiveJobs {
      */
     @JvmStatic
     fun list(context: Context): List<ActiveJob> {
-        val dir = File(context.filesDir, DIR)
+        val dir = File(SentinelStorage.filesDir(context), DIR)
         val markers = dir.listFiles { f -> f.name.endsWith(SUFFIX) } ?: return emptyList()
         val active = ArrayList<ActiveJob>(markers.size)
         for (marker in markers) {
