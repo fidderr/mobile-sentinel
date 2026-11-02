@@ -6,3 +6,5 @@ target/
 android/builds/
 android/.gradle/
 sentinel/
+android/ci-check/.gradle/
+android/ci-check/build/

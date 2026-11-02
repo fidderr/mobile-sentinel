@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, hardening]
+    branches: [main, hardening, alarm-reliability-qol]
   pull_request:
 
 env:
@@ -58,9 +58,16 @@ jobs:
           - notifications
           - file_system
           - accessibility
+          - background_service
+          - webview_media
+          - recorder
           - state-store
           - sound-library
           - jobs
+          - foreground-service
+          - exact-alarm
+          - kiosk
+          - full-screen-intent
           - recipes
           - alarm-kit
     steps:
@@ -69,8 +76,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --no-default-features --features ${{ matrix.feature }}
 
+  kotlin:
+    name: kotlin modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.1.0"
+      - run: gradle -p android/ci-check compileDebugKotlin
+
   android:
-    name: android cross-check + kotlin modules
+    name: android cross-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
