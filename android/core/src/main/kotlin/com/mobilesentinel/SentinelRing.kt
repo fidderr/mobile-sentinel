@@ -253,6 +253,7 @@ object SentinelRing {
 
     @JvmStatic
     fun uiFailed(context: Context): Boolean {
+        if (SentinelWebViewCheck.isTooOld(context)) return true
         val file = File(dir(context), UI_FAILED_FILE)
         return file.exists() && !SentinelBoot.isFromBeforeBoot(file)
     }

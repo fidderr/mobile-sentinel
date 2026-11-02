@@ -69,7 +69,10 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         currentResumedActivity = activity
-        if (isMainActivity(activity)) writeMainResumed(activity, true)
+        if (isMainActivity(activity)) {
+            writeMainResumed(activity, true)
+            SentinelWebViewCheck.tellIfTooOld(activity)
+        }
     }
 
     override fun onActivityPaused(activity: Activity) {

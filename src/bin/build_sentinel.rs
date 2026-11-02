@@ -25,6 +25,7 @@
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
 //! direct_boot = true                     # optional — files are device-encrypted, so alarms ring before the first unlock
+//! min_webview = 90                       # optional — older WebViews get the backup screen and a notice
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -88,7 +89,20 @@ fn main() {
     }
 
     if config.direct_boot {
-        inject_direct_boot(&config.project_path);
+        inject_meta_data(
+            &config.project_path,
+            "com.mobilesentinel.direct_boot",
+            "true",
+            "  Direct boot: files are device-encrypted",
+        );
+    }
+    if let Some(version) = config.min_webview {
+        inject_meta_data(
+            &config.project_path,
+            "com.mobilesentinel.min_webview",
+            &version.to_string(),
+            "  Too old a WebView is detected",
+        );
     }
 
     if let Some(scheme) = &config.link_scheme {
@@ -212,24 +226,25 @@ fn inject_link_scheme(project_path: &Path, scheme: &str) {
 /// build without this stay behind: the app starts empty once. Android ignores the
 /// manifest's own attribute for this outside system apps, so the library does it
 /// (`SentinelStorage`) and this tells it to.
-fn inject_direct_boot(project_path: &Path) {
-    const META: &str =
-        "<meta-data android:name=\"com.mobilesentinel.direct_boot\" android:value=\"true\" />";
+///
+/// `min_webview` works the same way: `SentinelWebViewCheck` reads it.
+fn inject_meta_data(project_path: &Path, name: &str, value: &str, done: &str) {
+    let meta = format!("<meta-data android:name=\"{name}\" android:value=\"{value}\" />");
     let path = project_path.join("app/src/main/AndroidManifest.xml");
     let Ok(mut manifest) = fs::read_to_string(&path) else {
         return;
     };
-    if manifest.contains(META) {
+    if manifest.contains(&meta) {
         return;
     }
     let Some(idx) = manifest.find("</application>") else {
         return;
     };
     let line_start = manifest[..idx].rfind('\n').map_or(0, |n| n + 1);
-    manifest.insert_str(line_start, &format!("        {META}\n"));
+    manifest.insert_str(line_start, &format!("        {meta}\n"));
     match fs::write(&path, manifest) {
-        Ok(()) => eprintln!("  Direct boot: files are device-encrypted"),
-        Err(e) => eprintln!("  Failed to write direct boot: {e}"),
+        Ok(()) => eprintln!("{done}"),
+        Err(e) => eprintln!("  Failed to write {name}: {e}"),
     }
 }
 
@@ -242,6 +257,7 @@ struct Config {
     default_screen_orientation: Option<String>,
     link_scheme: Option<String>,
     direct_boot: bool,
+    min_webview: Option<u32>,
     release: bool,
     bundle_aab: bool,
 }
@@ -325,6 +341,7 @@ fn load_config() -> Config {
         default_screen_orientation,
         link_scheme,
         direct_boot: toml.get("direct_boot").is_some_and(|v| v == "true"),
+        min_webview: toml.get("min_webview").and_then(|v| v.parse().ok()),
         release,
         bundle_aab,
     }
