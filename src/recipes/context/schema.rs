@@ -148,6 +148,10 @@ pub struct AlarmClassContext {
     /// records get the default.
     #[serde(default = "default_ring_limit_secs")]
     pub ring_limit_secs: Option<u32>,
+    /// When this session first rang (unix ms), across its snoozes. Cleared when the
+    /// session ends.
+    #[serde(default)]
+    pub first_fired_unix_ms: Option<i64>,
 }
 
 /// How long an alarm rings by default: half an hour.
@@ -400,6 +404,7 @@ mod tests {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
+            first_fired_unix_ms: None,
         }
     }
 }

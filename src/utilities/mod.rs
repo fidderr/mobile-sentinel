@@ -7,5 +7,5 @@ pub mod boot;
 #[cfg(any(feature = "jobs", feature = "state-store"))]
 pub(crate) mod atomic_write;
 
-pub use app_dirs::app_files_dir;
+pub use app_dirs::{app_files_dir, device_language};
 pub use asset_extractor::AssetExtractor;

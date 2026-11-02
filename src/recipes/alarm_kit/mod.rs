@@ -112,6 +112,7 @@ impl AlarmSpec {
             skip_until_unix_ms: self.skip_until_unix_ms,
             fade_in_secs: self.fade_in_secs,
             ring_limit_secs: self.ring_limit_secs,
+            first_fired_unix_ms: None,
         }
     }
 
@@ -155,7 +156,10 @@ pub struct AlarmKit {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlarmKitSession {
     pub instance_id: InstanceId,
+    /// When this ring started; a snooze ending starts a new one.
     pub fired_at_unix_ms: i64,
+    /// When the first ring of this session started, across its snoozes.
+    pub first_fired_unix_ms: i64,
     pub spec: AlarmSpec,
     pub snooze_count: u32,
     pub challenges_solved: bool,
@@ -260,6 +264,23 @@ fn has_no_next_fire(e: &AlarmKitError) -> bool {
             crate::recipes::recurrence::RecurrenceError::NoFireTime
         ))
     )
+}
+
+fn session_of(record: &ContextRecord) -> Option<AlarmKitSession> {
+    let SessionState::Firing { fired_at_unix_ms } = record.state else {
+        return None;
+    };
+    let RecipeContext::AlarmClass(ctx) = &record.context else {
+        return None;
+    };
+    Some(AlarmKitSession {
+        instance_id: record.id.clone(),
+        fired_at_unix_ms,
+        first_fired_unix_ms: ctx.first_fired_unix_ms.unwrap_or(fired_at_unix_ms),
+        spec: AlarmSpec::from_context(ctx),
+        snooze_count: ctx.snooze_count,
+        challenges_solved: ctx.challenges_solved,
+    })
 }
 
 /// Whether two specs differ in nothing but the time zone.
@@ -393,9 +414,13 @@ impl AlarmKit {
     pub fn update(&self, id: &InstanceId, spec: AlarmSpec) -> Result<(), AlarmKitError> {
         let transition = crate::recipes::dispatch::lock_transitions();
         let mut record = self.store.load(id)?;
-        let mut keep_counts = (0, false);
+        let mut keep_counts = (0, false, None);
         if let RecipeContext::AlarmClass(old) = &record.context {
-            keep_counts = (old.snooze_count, old.challenges_solved);
+            keep_counts = (
+                old.snooze_count,
+                old.challenges_solved,
+                old.first_fired_unix_ms,
+            );
             let old_spec = AlarmSpec::from_context(old);
             let armed = match record.state {
                 SessionState::Scheduled { next_fire_unix_ms } => {
@@ -412,6 +437,7 @@ impl AlarmKit {
             {
                 let mut context = spec.into_context();
                 context.snooze_count = keep_counts.0;
+                context.first_fired_unix_ms = keep_counts.2;
                 record.context = RecipeContext::AlarmClass(context);
                 self.store.write(record)?;
                 return Ok(());
@@ -421,7 +447,11 @@ impl AlarmKit {
         // A firing session is not disturbed: the consumer must dismiss first, and
         // the next dismiss or snooze re-arms naturally.
         if matches!(record.state, SessionState::Firing { .. }) {
-            (context.snooze_count, context.challenges_solved) = keep_counts;
+            (
+                context.snooze_count,
+                context.challenges_solved,
+                context.first_fired_unix_ms,
+            ) = keep_counts;
             record.context = RecipeContext::AlarmClass(context);
             self.store.write(record)?;
             return Ok(());
@@ -647,25 +677,20 @@ impl AlarmKit {
         let mut records = self.store.enumerate_all()?;
         records.sort_by(|a, b| a.id.0.cmp(&b.id.0));
         let mut current: Option<AlarmKitSession> = None;
-        for record in records {
-            if let SessionState::Firing { fired_at_unix_ms } = record.state {
-                if let RecipeContext::AlarmClass(ctx) = &record.context {
-                    if current
-                        .as_ref()
-                        .map_or(true, |c| fired_at_unix_ms < c.fired_at_unix_ms)
-                    {
-                        current = Some(AlarmKitSession {
-                            instance_id: record.id.clone(),
-                            fired_at_unix_ms,
-                            spec: AlarmSpec::from_context(ctx),
-                            snooze_count: ctx.snooze_count,
-                            challenges_solved: ctx.challenges_solved,
-                        });
-                    }
-                }
+        for session in records.iter().filter_map(session_of) {
+            if current
+                .as_ref()
+                .map_or(true, |c| session.fired_at_unix_ms < c.fired_at_unix_ms)
+            {
+                current = Some(session);
             }
         }
         Ok(current)
+    }
+
+    /// Snapshot of this alarm if it is firing.
+    pub fn session(&self, id: &InstanceId) -> Option<AlarmKitSession> {
+        session_of(&self.store.load(id).ok()?)
     }
 
     /// Permissions every consumer needs to declare in its manifest. Read
@@ -892,6 +917,7 @@ impl AlarmKit {
                 if current != *spec {
                     let mut context = spec.clone().into_context();
                     context.snooze_count = ctx.snooze_count;
+                    context.first_fired_unix_ms = ctx.first_fired_unix_ms;
                     let mut record = record.clone();
                     record.context = RecipeContext::AlarmClass(context);
                     self.store.write(record)?;
@@ -2376,6 +2402,31 @@ mod tests {
         assert_eq!(plan["backup_holds"], 20);
         assert_eq!(plan["backup_hold_ms"], 3_000);
         assert_eq!(plan["backup_text"], "Hold");
+    }
+
+    #[test]
+    fn a_session_knows_when_it_first_rang_across_its_snoozes() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        let first_of = |kit: &AlarmKit| kit.session(&id).map(|s| s.first_fired_unix_ms);
+
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        let first = first_of(&kit).expect("firing");
+        assert_eq!(kit.session(&id).unwrap().fired_at_unix_ms, first);
+
+        kit.snooze(&id).unwrap();
+        assert_eq!(kit.session(&id), None, "not firing while snoozed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        assert_eq!(first_of(&kit), Some(first));
+        assert!(kit.session(&id).unwrap().fired_at_unix_ms > first);
+        assert_eq!(kit.session(&id).unwrap().snooze_count, 1);
+
+        kit.dismiss(&id).unwrap();
+        dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+        assert!(first_of(&kit).unwrap() > first, "a new session starts over");
     }
 
     #[test]

@@ -49,6 +49,30 @@ fn lookup_app_files_dir() -> PathBuf {
     }
 }
 
+/// The device's language as a two-letter code ("nl"), empty when unknown.
+#[cfg(target_os = "android")]
+pub fn device_language() -> String {
+    crate::platform::android::jni::with_jni_class(
+        "com/mobilesentinel/SentinelPrimitives",
+        String::new(),
+        |env, class| {
+            let value = env
+                .call_static_method(class, "getDeviceLanguage", "()Ljava/lang/String;", &[])
+                .ok()?
+                .l()
+                .ok()?;
+            let language: String = env.get_string(&value.into()).ok()?.into();
+            Some(language)
+        },
+    )
+}
+
+/// The device's language as a two-letter code ("nl"), empty when unknown.
+#[cfg(not(target_os = "android"))]
+pub fn device_language() -> String {
+    String::new()
+}
+
 #[cfg(not(target_os = "android"))]
 pub fn app_files_dir() -> PathBuf {
     PathBuf::from(".")

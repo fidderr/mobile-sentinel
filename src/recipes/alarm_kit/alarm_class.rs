@@ -269,6 +269,8 @@ fn fire(
     // Reset challenges_solved at the start of every Firing session.
     if let RecipeContext::AlarmClass(ctx) = &mut record.context {
         ctx.challenges_solved = false;
+        ctx.first_fired_unix_ms
+            .get_or_insert(now.timestamp_millis());
     }
     store.write(record).map_err(RecipeError::Store)?;
 
@@ -472,6 +474,7 @@ fn dismiss(
     if let RecipeContext::AlarmClass(ctx) = &mut record.context {
         ctx.snooze_count = 0;
         ctx.challenges_solved = false;
+        ctx.first_fired_unix_ms = None;
     }
     store.write(record).map_err(RecipeError::Store)?;
 
@@ -565,6 +568,7 @@ fn reset_snooze(ctx: &AlarmClassContext) -> RecipeContext {
     let mut c = ctx.clone();
     c.snooze_count = 0;
     c.challenges_solved = false;
+    c.first_fired_unix_ms = None;
     RecipeContext::AlarmClass(c)
 }
 
@@ -887,6 +891,7 @@ mod tests {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: None,
+            first_fired_unix_ms: None,
         }
     }
 

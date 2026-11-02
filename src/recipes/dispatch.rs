@@ -101,6 +101,7 @@ mod tests {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: None,
+            first_fired_unix_ms: None,
         })
     }
 
