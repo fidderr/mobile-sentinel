@@ -796,7 +796,25 @@ impl AlarmKit {
                     } if now_ms - next_fire_unix_ms > late_window => Some(next_fire_unix_ms),
                     _ => None,
                 };
-                if ring_from_before_boot {
+                // Nothing ran between that ring and this start, and the alarm went
+                // off again in the meantime. The old ring is over, but this one
+                // must go on: it is ringing right now.
+                let rang_again_since_boot = crate::jobs::active_since_ms(&record.id.0)
+                    .is_some_and(|marker| boot_unix_ms.is_some_and(|boot| marker >= boot));
+                if ring_from_before_boot && rang_again_since_boot {
+                    let mut fresh = record.clone();
+                    fresh.state = SessionState::Firing {
+                        fired_at_unix_ms: now_ms,
+                    };
+                    if let RecipeContext::AlarmClass(ctx) = &mut fresh.context {
+                        ctx.snooze_count = 0;
+                        ctx.challenges_solved = false;
+                        ctx.first_fired_unix_ms = Some(now_ms);
+                    }
+                    if self.store.write(fresh).is_ok() {
+                        report.ended_by_reboot.push(record.id.clone());
+                    }
+                } else if ring_from_before_boot {
                     if self.end_session(&record.id) {
                         report.ended_by_reboot.push(record.id.clone());
                     }
@@ -2233,6 +2251,47 @@ mod tests {
         assert_eq!(current(), Some(newer.clone()));
         kit.dismiss(&newer).unwrap();
         assert_eq!(current(), None);
+    }
+
+    #[test]
+    fn a_ring_after_a_reboot_nobody_handled_is_not_taken_for_the_old_one() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+        let id = kit.create(weekday_spec()).unwrap();
+        // Rang yesterday, the phone restarted, and no Rust ran since: the phone
+        // holds back the boot signal. This morning the OS delivers the next one.
+        let now = Utc::now().timestamp_millis();
+        force_state(
+            &kit,
+            &id,
+            SessionState::Firing {
+                fired_at_unix_ms: now - 86_400_000,
+            },
+        );
+        active_job(&id);
+        let boot = crate::jobs::active_since_ms(&id.0).unwrap() - 1_000;
+
+        let report = kit.on_startup_at(&[(id.0.clone(), weekday_spec())], Some(boot), now);
+
+        assert_eq!(
+            report.ended_by_reboot,
+            vec![id.clone()],
+            "the old ring is over"
+        );
+        assert!(
+            matches!(
+                kit.store().load(&id).unwrap().state,
+                SessionState::Firing { fired_at_unix_ms } if fired_at_unix_ms == now
+            ),
+            "but this one rings"
+        );
+        assert!(
+            crate::jobs::active_since_ms(&id.0).is_some(),
+            "and without its marker the sound would stop"
+        );
+        assert_eq!(sink.last_fire().unwrap().instance_id, id.0);
+        let _ = crate::jobs::remove_job(&id.0);
     }
 
     #[test]
