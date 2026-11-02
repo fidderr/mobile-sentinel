@@ -261,7 +261,6 @@ pub const CAPABILITIES: &[Capability] = &[
         description: "Accelerometer shake counter + hardware step counter (ACTIVITY_RECOGNITION + high-rate sensors).",
         permissions: &[
             Permission::new("android.permission.ACTIVITY_RECOGNITION"),
-            Permission::new("android.permission.HIGH_SAMPLING_RATE_SENSORS"),
         ],
         features: NO_FEATURES,
         components: "",
@@ -616,6 +615,7 @@ pub const CAPABILITIES: &[Capability] = &[
             "SentinelExactAlarmPrimitives.kt",
             "SentinelArmedAlarms.kt",
             "SentinelAlarmReceiver.kt",
+            "SentinelReminders.kt",
             "SentinelRearmReceiver.kt",
             "SentinelBootReceiver.kt",
         ],

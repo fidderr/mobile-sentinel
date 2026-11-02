@@ -241,6 +241,9 @@ const ACTIVITY_FILE: &str = "sentinel/ringing/activity";
 /// see [`AlarmKit::take_ring_ends`].
 static RING_ENDS: std::sync::Mutex<Vec<(InstanceId, RingEnd)>> = std::sync::Mutex::new(Vec::new());
 
+#[cfg(target_os = "android")]
+const REMINDERS_CLASS: &str = "com/mobilesentinel/SentinelReminders";
+
 /// See [`AlarmKit::on_ring_end`].
 static RING_END_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 
@@ -645,6 +648,71 @@ impl AlarmKit {
     /// or ever: it can run without a screen, and die again. Set once, on any thread.
     pub fn on_ring_end(&self, hook: fn()) {
         let _ = RING_END_HOOK.set(hook);
+    }
+
+    /// Show a quiet notification at `at_ms`, replacing an earlier one for this alarm. It
+    /// has nothing to do with the ring, and may come a few minutes off on a dozing phone.
+    /// It goes away after `lasts_ms`. `channel_name` is what the user sees in the phone's
+    /// settings. No-op off Android.
+    pub fn set_reminder(
+        &self,
+        id: &InstanceId,
+        at_ms: i64,
+        title: &str,
+        body: &str,
+        channel_name: &str,
+        lasts_ms: i64,
+    ) {
+        #[cfg(target_os = "android")]
+        {
+            use crate::platform::android::jni::{jni_str, with_jni_class};
+            use ::jni::objects::JValue;
+            with_jni_class(REMINDERS_CLASS, false, |env, class| {
+                let id = jni_str(env, &id.0)?;
+                let title = jni_str(env, title)?;
+                let body = jni_str(env, body)?;
+                let channel = jni_str(env, channel_name)?;
+                env.call_static_method(
+                    class,
+                    "set",
+                    "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;J)Z",
+                    &[
+                        JValue::Object(&id),
+                        JValue::Long(at_ms),
+                        JValue::Object(&title),
+                        JValue::Object(&body),
+                        JValue::Object(&channel),
+                        JValue::Long(lasts_ms),
+                    ],
+                )
+                .ok()
+                .and_then(|v| v.z().ok())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = (id, at_ms, title, body, channel_name, lasts_ms);
+    }
+
+    /// Take away what [`Self::set_reminder`] set for this alarm.
+    pub fn clear_reminder(&self, id: &InstanceId) {
+        #[cfg(target_os = "android")]
+        {
+            use crate::platform::android::jni::{jni_str, with_jni_class};
+            use ::jni::objects::JValue;
+            with_jni_class(REMINDERS_CLASS, false, |env, class| {
+                let id = jni_str(env, &id.0)?;
+                env.call_static_method(
+                    class,
+                    "clear",
+                    "(Ljava/lang/String;)Z",
+                    &[JValue::Object(&id)],
+                )
+                .ok()
+                .and_then(|v| v.z().ok())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = id;
     }
 
     /// Rings the platform ended while the app was running, since the last call. The

@@ -30,6 +30,13 @@
             </intent-filter>
         </receiver>
 
+        <!-- A quiet notification before an alarm, nothing to do with its ring. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelReminderReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":sentinel" />
+
         <!-- Runs the app's core without UI when alarms may have to be armed
              again, or a ring started with MAIN down. In MAIN, where Rust runs. -->
         <receiver
