@@ -54,6 +54,8 @@ pub mod utilities;
 // Standalone building-block features live under `features/`. Re-export them
 // at the crate root under their canonical module names so existing paths
 // (`crate::state_store`, `crate::sound`, `crate::jobs`) resolve.
+#[cfg(feature = "alarm-kit")]
+pub use features::health;
 #[cfg(feature = "jobs")]
 pub use features::jobs;
 #[cfg(feature = "sound-library")]

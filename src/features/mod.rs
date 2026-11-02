@@ -115,6 +115,10 @@ pub mod torch;
 
 // ---- Standalone building-block features (real independent value) --------
 
+/// What the phone allows, for alarms to ring on time. Gated behind `alarm-kit`.
+#[cfg(feature = "alarm-kit")]
+pub mod health;
+
 /// Cross-process Job Guardian persistence. Gated behind `jobs`.
 #[cfg(feature = "jobs")]
 pub mod jobs;

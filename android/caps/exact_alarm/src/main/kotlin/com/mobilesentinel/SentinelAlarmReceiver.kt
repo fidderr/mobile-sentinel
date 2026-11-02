@@ -46,6 +46,7 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             if (isWatchdog) {
                 SentinelRing.resumeSaved(app)
             } else if (jobId.isNotBlank()) {
+                SentinelRing.logTiming(app, "delivered", jobId)
                 val active = SentinelActiveJobs.mark(app, jobId)
                 // It fired, so the OS no longer holds it: do not replay it at boot.
                 SentinelArmedAlarms.forget(context, jobId)

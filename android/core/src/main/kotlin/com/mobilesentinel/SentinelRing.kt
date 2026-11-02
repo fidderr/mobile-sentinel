@@ -38,6 +38,10 @@ object SentinelRing {
     private const val VOLUME_FILE = "volume_to_restore"
     private const val FROZEN_KILL_FILE = "frozen_kill"
     private const val UI_FAILED_FILE = "ui_failed"
+
+    /** Read by `AlarmKit::timing_log`. */
+    private const val TIMING_FILE = "timing.log"
+    private const val TIMING_KEEP_BYTES = 32_000
     private const val ACTIVITY_THROTTLE_MS = 30_000L
 
     /** Touched when the user does something. Mirrors `ACTIVITY_FILE` in Rust. */
@@ -212,6 +216,26 @@ object SentinelRing {
             file.writeText("")
         } catch (e: Throwable) {
             Log.w(TAG, "noteActivity failed: ${e.message}")
+        }
+    }
+
+    /**
+     * One line in the record of how fast rings were: when an alarm was delivered, the
+     * service came up, the sound started. It is how a problem on a phone nobody here
+     * has gets found. Kept small: the oldest half goes when it is full.
+     */
+    @JvmStatic
+    fun logTiming(context: Context, event: String, id: String) {
+        try {
+            val file = File(dir(context), TIMING_FILE)
+            file.parentFile?.mkdirs()
+            if (file.length() > TIMING_KEEP_BYTES) {
+                val text = file.readText()
+                writeAtomically(file, text.substring(text.indexOf('\n', text.length / 2) + 1))
+            }
+            file.appendText("${System.currentTimeMillis()} $event $id\n")
+        } catch (e: Throwable) {
+            Log.w(TAG, "logTiming failed: ${e.message}")
         }
     }
 

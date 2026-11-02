@@ -1,0 +1,105 @@
+package com.mobilesentinel
+
+import android.app.ActivityManager
+import android.app.AlarmManager
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import android.util.Log
+import org.json.JSONObject
+
+/**
+ * What the phone allows, for an app that needs alarms to ring on time, and how to
+ * get to where each is changed. Rust decides what counts as a problem and what to
+ * say about it; this only reads and opens. Fields are read in `features::health`.
+ */
+object SentinelHealth {
+    private const val TAG = "MobileSentinel.Health"
+
+    @JvmStatic
+    fun snapshot(channelId: String): String {
+        val c = SentinelPrimitives.getAppContext() ?: return "{}"
+        val out = JSONObject()
+        val read = { key: String, value: () -> Any ->
+            try {
+                out.put(key, value())
+            } catch (e: Throwable) {
+                Log.w(TAG, "reading $key failed: ${e.message}")
+            }
+        }
+        val nm = c.getSystemService(NotificationManager::class.java)
+        read("exact_alarms") {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                c.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        }
+        read("notifications") { nm.areNotificationsEnabled() }
+        read("full_screen") {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || nm.canUseFullScreenIntent()
+        }
+        read("overlay") { Settings.canDrawOverlays(c) }
+        read("battery_unrestricted") {
+            c.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName)
+        }
+        read("background_allowed") {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+                !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+        }
+        read("kept_when_unused") {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || c.packageManager.isAutoRevokeWhitelisted
+        }
+        read("channel_importance") {
+            nm.getNotificationChannel(channelId)?.importance ?: -1
+        }
+        read("total_silence") {
+            nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_NONE
+        }
+        read("manufacturer") { Build.MANUFACTURER.orEmpty().lowercase() }
+        return out.toString()
+    }
+
+    /** Open the system page where [check] is changed. [check] is a field of [snapshot]. */
+    @JvmStatic
+    fun openSettings(check: String, channelId: String): Boolean {
+        val c = SentinelPrimitives.getAppContext() ?: return false
+        val pkg = Uri.parse("package:${c.packageName}")
+        val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+        val intent = when (check) {
+            "exact_alarms" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)
+            } else {
+                appDetails
+            }
+            "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+            "full_screen" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg)
+            } else {
+                appDetails
+            }
+            "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg)
+            "battery_unrestricted" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            "channel_importance" -> Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+            // Background use, keeping permissions when unused, and the OEM's auto-start
+            // switch all live on or near the app's own page.
+            else -> appDetails
+        }
+        return try {
+            c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "opening settings for $check failed: ${e.message}")
+            try {
+                c.startActivity(appDetails.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+    }
+}

@@ -13,6 +13,16 @@ change.
 
 ### Added
 
+- `health::report` and `health::open_settings`: what the phone allows for alarms to
+  ring on time, and how to get to where it is changed. `AlarmKit::timing_log` keeps
+  a small record of how fast rings were, for testers on other phones.
+- `direct_boot = true` in `sentinel.toml`: alarms ring before the first unlock, from
+  device-encrypted files. `SentinelBackupActivity` is the alarm's screen then, and
+  when the UI keeps failing (`JobConfig::ui_failures_before_backup`); see
+  `AlarmClassConfig::backup_holds`.
+- `SentinelRearmReceiver`: alarms are armed again with no app open on a boot, an app
+  update, a clock or time zone change, through a `nativeRearm` hook the app
+  implements. `AlarmKit::on_wake` is the startup for that case.
 - `ring_limit_secs` (per alarm, default 30 minutes, `None` = until dealt with): the
   ring service stops an alarm nobody responds to. It counts from the ring's start,
   a touch on the alarm screen, leaving it, the app coming back, or

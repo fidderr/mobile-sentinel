@@ -225,6 +225,9 @@ const MARKER_SLOP_MS: i64 = 60_000;
 /// [`AlarmKit::note_activity`] touches a file at most this often.
 const ACTIVITY_THROTTLE_MS: i64 = 30_000;
 
+/// Mirrors `TIMING_FILE` in `SentinelRing`, relative to the app's files dir.
+const TIMING_FILE: &str = "sentinel/ringing/timing.log";
+
 /// Mirrors `ACTIVITY_FILE` in `SentinelRing`, relative to the app's files dir.
 const ACTIVITY_FILE: &str = "sentinel/ringing/activity";
 
@@ -606,6 +609,23 @@ impl AlarmKit {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(file, "");
+    }
+
+    /// The record of how fast rings were, one `<unix ms> <event> <alarm>` per line,
+    /// for a user to send in. Events: `delivered`, `service`, `sound`, `no_sound`,
+    /// `ui`. Empty when nothing has rung yet.
+    pub fn timing_log(&self) -> String {
+        std::fs::read_to_string(crate::utilities::app_files_dir().join(TIMING_FILE))
+            .unwrap_or_default()
+    }
+
+    /// Add to the record of [`Self::timing_log`] that the alarm's screen is up.
+    pub fn note_ui_up(&self, id: &InstanceId) {
+        use std::io::Write;
+        let file = crate::utilities::app_files_dir().join(TIMING_FILE);
+        if let Ok(mut log) = std::fs::OpenOptions::new().append(true).open(file) {
+            let _ = writeln!(log, "{} ui {}", Utc::now().timestamp_millis(), id.0);
+        }
     }
 
     /// Rings the platform ended while the app was running, since the last call. The

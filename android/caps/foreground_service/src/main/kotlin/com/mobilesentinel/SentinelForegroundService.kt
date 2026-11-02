@@ -97,7 +97,10 @@ class SentinelForegroundService : Service() {
         reload()
         uiVisible = visible || SentinelRing.mainOnScreen(this)
         val first = owner == null && id in ringing
-        if (first) owner = id
+        if (first) {
+            owner = id
+            SentinelRing.logTiming(this, "service", id)
+        }
         // First, whatever fails later: Android kills a service started in the
         // foreground that does not get there in time.
         showForeground()
@@ -291,8 +294,10 @@ class SentinelForegroundService : Service() {
                 fadeInMs,
             ) {
                 // No sound at all could be played: never ring silently.
+                SentinelRing.logTiming(this, "no_sound", ring.id)
                 if (!vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
             }
+            SentinelRing.logTiming(this, "sound", ring.id)
         }
         if (vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
     }
