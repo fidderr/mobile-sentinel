@@ -31,6 +31,10 @@ object SentinelActiveJobs {
     const val ACTION_JOB_HEADS_UP = "com.mobilesentinel.JOB_HEADS_UP"
     const val EXTRA_JOB_ID = "job_id"
 
+    /** Starts the app's core without a screen, if the app has the exact_alarm module. */
+    const val ACTION_WAKE_MAIN = "com.mobilesentinel.RING_STARTED"
+    private const val REARM_RECEIVER = "com.mobilesentinel.SentinelRearmReceiver"
+
     class ActiveJob(val id: String, val json: JSONObject, val sinceMs: Long)
 
     /**
@@ -62,6 +66,13 @@ object SentinelActiveJobs {
         }
     }
 
+    /** Whether [id]'s ring is over and Rust only has to deal with that. */
+    @JvmStatic
+    fun ringEnded(context: Context, id: String): Boolean {
+        val dir = File(SentinelStorage.filesDir(context), DIR)
+        return File(dir, "$id$LIMIT_SUFFIX").exists() || File(dir, "$id$DISMISS_SUFFIX").exists()
+    }
+
     /** Whether [id] has a marker from this boot. */
     @JvmStatic
     fun isActive(context: Context, id: String): Boolean {
@@ -71,8 +82,8 @@ object SentinelActiveJobs {
 
     /**
      * Leave word that [id]'s ring stopped at its limit, for Rust to end the alarm:
-     * right away if MAIN runs, which is told, and otherwise when the guardian has
-     * brought it up.
+     * right away if MAIN runs, which is told, and otherwise by starting it without
+     * a screen. Nobody may be there, so nothing should light up for this.
      */
     @JvmStatic
     fun markLimitReached(context: Context, id: String) = leaveWord(context, id, LIMIT_SUFFIX)
@@ -84,9 +95,15 @@ object SentinelActiveJobs {
     private fun leaveWord(context: Context, id: String, suffix: String) {
         try {
             File(File(SentinelStorage.filesDir(context), DIR), "$id$suffix").writeText("")
-            context.sendBroadcast(
-                Intent(ACTION_JOB_HEADS_UP).setPackage(context.packageName).putExtra(EXTRA_JOB_ID, id),
-            )
+            if (SentinelRing.mainPid(context) != 0) {
+                context.sendBroadcast(
+                    Intent(ACTION_JOB_HEADS_UP).setPackage(context.packageName).putExtra(EXTRA_JOB_ID, id),
+                )
+            } else {
+                context.sendBroadcast(
+                    Intent(ACTION_WAKE_MAIN).setClassName(context.packageName, REARM_RECEIVER),
+                )
+            }
         } catch (e: Throwable) {
             Log.w(TAG, "leaving word $suffix for '$id' failed: ${e.message}")
         }

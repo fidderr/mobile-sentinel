@@ -117,6 +117,12 @@ object SentinelJobGuardian {
                     val jobId = job.id
                     val config = job.json.optJSONObject("config")
                     if (!mainAlive) {
+                        // No screen is wanted: the backup screen has taken over, and
+                        // launching over it would hide the only way out; or the ring
+                        // is over, and Rust is being started without one.
+                        if (SentinelRing.uiFailed(context) || SentinelActiveJobs.ringEnded(context, jobId)) {
+                            continue
+                        }
                         // MAIN is dead — start it. Clear heads-up tracking
                         // so we re-send after it comes back up.
                         headsUpSent.remove(jobId)

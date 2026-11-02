@@ -39,7 +39,7 @@ class SentinelRearmReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "MobileSentinel.Rearm"
-        const val ACTION_RING_STARTED = "com.mobilesentinel.RING_STARTED"
+        const val ACTION_RING_STARTED = SentinelActiveJobs.ACTION_WAKE_MAIN
     }
 }
 
