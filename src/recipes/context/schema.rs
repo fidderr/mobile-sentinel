@@ -148,6 +148,10 @@ pub struct AlarmClassContext {
     /// records get the default.
     #[serde(default = "default_ring_limit_secs")]
     pub ring_limit_secs: Option<u32>,
+    /// The alarm volume while this alarm rings is at least this percentage, instead
+    /// of the consumer's general minimum.
+    #[serde(default)]
+    pub min_volume_percent: Option<u8>,
     /// When this session first rang (unix ms), across its snoozes. Cleared when the
     /// session ends.
     #[serde(default)]
@@ -404,6 +408,7 @@ mod tests {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
+            min_volume_percent: None,
             first_fired_unix_ms: None,
         }
     }

@@ -250,6 +250,19 @@ object SentinelDisplayPrimitives {
      * or light icons (`light = false`, for dark backgrounds).
      */
     @JvmStatic
+    fun isSystemDark(): Boolean {
+        val c = SentinelPrimitives.getAppContext() ?: return true
+        val night = c.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return night == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
+    @JvmStatic
+    fun uses24HourClock(): Boolean {
+        val c = SentinelPrimitives.getAppContext() ?: return true
+        return android.text.format.DateFormat.is24HourFormat(c)
+    }
+
+    @JvmStatic
     fun setLightSystemBars(light: Boolean): Boolean {
         val activity = SentinelActivityTracker.currentResumedActivity
             ?: activityOrNull()

@@ -182,6 +182,16 @@ pub fn safe_area_insets() -> Option<SafeAreaInsets> {
     android_or!(parse_safe_area(&android::get_safe_area_insets()), None)
 }
 
+/// Whether the phone is set to its dark theme.
+pub fn system_dark() -> bool {
+    android_or!(android::flag("isSystemDark"), true)
+}
+
+/// Whether the phone is set to show the time as 24 hours.
+pub fn uses_24_hour_clock() -> bool {
+    android_or!(android::flag("uses24HourClock"), true)
+}
+
 /// Use dark system-bar icons (`true`, for light app backgrounds) or light
 /// icons (`false`, for dark backgrounds). No-op on host.
 pub fn set_light_system_bars(light: bool) {
@@ -312,6 +322,14 @@ mod android {
                 .ok()?;
             let s: String = env.get_string(&obj.into()).ok()?.into();
             Some(s)
+        })
+    }
+
+    pub(super) fn flag(method: &str) -> bool {
+        with_jni_class(DISPLAY, true, |env, class| {
+            env.call_static_method(class, method, "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
         })
     }
 

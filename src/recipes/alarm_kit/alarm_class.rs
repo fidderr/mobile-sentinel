@@ -377,7 +377,9 @@ fn fire_request(
         } else {
             0
         },
-        min_volume_percent: runtime_cfg.min_volume_percent,
+        min_volume_percent: alarm_ctx
+            .min_volume_percent
+            .unwrap_or(runtime_cfg.min_volume_percent),
         ring_limit_secs: alarm_ctx.ring_limit_secs,
         late_ring_window_ms: runtime_cfg.late_ring_window_ms,
         backup_holds: runtime_cfg.backup_holds,
@@ -891,6 +893,7 @@ mod tests {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: None,
+            min_volume_percent: None,
             first_fired_unix_ms: None,
         }
     }

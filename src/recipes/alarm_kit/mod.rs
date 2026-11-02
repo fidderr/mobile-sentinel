@@ -64,6 +64,9 @@ pub struct AlarmSpec {
     /// Stop by itself after ringing this long with nobody doing anything, in
     /// seconds. `None` rings until it is dealt with.
     pub ring_limit_secs: Option<u32>,
+    /// The alarm volume while this alarm rings is at least this percentage. `None`
+    /// → the consumer's `AlarmClassConfig::min_volume_percent`.
+    pub min_volume_percent: Option<u8>,
 }
 
 impl Default for AlarmSpec {
@@ -90,6 +93,7 @@ impl Default for AlarmSpec {
             skip_until_unix_ms: None,
             fade_in_secs: 0,
             ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
+            min_volume_percent: None,
         }
     }
 }
@@ -112,6 +116,7 @@ impl AlarmSpec {
             skip_until_unix_ms: self.skip_until_unix_ms,
             fade_in_secs: self.fade_in_secs,
             ring_limit_secs: self.ring_limit_secs,
+            min_volume_percent: self.min_volume_percent,
             first_fired_unix_ms: None,
         }
     }
@@ -133,6 +138,7 @@ impl AlarmSpec {
             skip_until_unix_ms: ctx.skip_until_unix_ms,
             fade_in_secs: ctx.fade_in_secs,
             ring_limit_secs: ctx.ring_limit_secs,
+            min_volume_percent: ctx.min_volume_percent,
         }
     }
 }
