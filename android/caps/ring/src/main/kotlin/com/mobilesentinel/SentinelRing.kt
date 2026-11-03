@@ -38,6 +38,7 @@ object SentinelRing {
     private const val VOLUME_FILE = "volume_to_restore"
     private const val FROZEN_KILL_FILE = "frozen_kill"
     private const val UI_FAILED_FILE = "ui_failed"
+    private const val PAUSED_FILE = "paused"
 
     /** Read by `AlarmKit::timing_log`. */
     private const val TIMING_FILE = "timing.log"
@@ -260,6 +261,39 @@ object SentinelRing {
     @JvmStatic
     fun clearUiFailed(context: Context) {
         File(dir(context), UI_FAILED_FILE).delete()
+    }
+
+    /** A pause, for the ring service that comes back after a kill: which ring, and who asked. */
+    @JvmStatic
+    fun notePaused(context: Context, id: String) {
+        try {
+            val file = File(dir(context), PAUSED_FILE)
+            file.parentFile?.mkdirs()
+            file.writeText("${mainPid(context)}\n$id")
+        } catch (e: Throwable) {
+            Log.w(TAG, "notePaused failed: ${e.message}")
+        }
+    }
+
+    /** The ring that is paused, as long as MAIN, which has to end that, is the one that asked. */
+    @JvmStatic
+    fun pausedFor(context: Context): String? {
+        try {
+            val file = File(dir(context), PAUSED_FILE)
+            if (!file.exists() || SentinelBoot.isFromBeforeBoot(file)) return null
+            val lines = file.readLines()
+            val pid = lines.firstOrNull()?.toIntOrNull() ?: return null
+            if (pid == 0 || pid != mainPid(context)) return null
+            return lines.getOrNull(1)
+        } catch (e: Throwable) {
+            Log.w(TAG, "pausedFor failed: ${e.message}")
+        }
+        return null
+    }
+
+    @JvmStatic
+    fun clearPaused(context: Context) {
+        File(dir(context), PAUSED_FILE).delete()
     }
 
     /** The guardian is about to kill a frozen UI; see [startRing]. */

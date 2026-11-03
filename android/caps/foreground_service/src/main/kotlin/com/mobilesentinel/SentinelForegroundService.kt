@@ -40,6 +40,7 @@ class SentinelForegroundService : Service() {
         private const val FALLBACK_CHANNEL = "sentinel_foreground"
         private const val DEFAULT_SOUND = "system://default-alarm"
         private const val SILENT_SOUND = "silent://"
+        private const val QUIET_CHANNEL_SUFFIX = "_quiet"
         private val DEFAULT_VIBRATION = longArrayOf(0, 400, 200, 400)
     }
 
@@ -55,6 +56,7 @@ class SentinelForegroundService : Service() {
     private var uiVisible = false
     private var postedFullScreen = false
     private var postedBackup = false
+    private var postedQuiet = false
     private var postedOwner: String? = null
     private var backupLaunched = false
     private var commandSeen = false
@@ -114,7 +116,7 @@ class SentinelForegroundService : Service() {
             return
         }
         val wasPaused = paused
-        paused = false
+        notPaused()
         if (first) {
             startOutputs(ringing.getValue(id), fade = true)
         } else if (wasPaused) {
@@ -135,13 +137,30 @@ class SentinelForegroundService : Service() {
         reload()
         showForeground()
         paused = true
+        owner?.let { SentinelRing.notePaused(this, it) }
         stopOutputs()
         settle()
+    }
+
+    private fun notPaused() {
+        paused = false
+        SentinelRing.clearPaused(this)
     }
 
     private fun resumeSaved() {
         commandSeen = true
         reload()
+        uiVisible = SentinelRing.mainOnScreen(this)
+        if (owner == null) {
+            // Killed during a pause: what asked for it is still there, and still brings the sound
+            // back. Should it die as well, the tick does.
+            val quiet = SentinelRing.pausedFor(this)
+            if (quiet in ringing) {
+                Log.i(TAG, "back after a kill, $quiet stays paused")
+                owner = quiet
+                paused = true
+            }
+        }
         showForeground()
         if (owner == null) {
             ringing.values.firstOrNull()?.let { startOutputs(it, fade = false) }
@@ -161,7 +180,7 @@ class SentinelForegroundService : Service() {
         if (owner == id) {
             stopOutputs()
             owner = null
-            paused = false
+            notPaused()
         }
     }
 
@@ -187,6 +206,7 @@ class SentinelForegroundService : Service() {
         handler.removeCallbacks(tick)
         ticking = false
         stopOutputs()
+        SentinelRing.clearPaused(this)
         SentinelRing.restoreVolume(this)
         SentinelRing.clearUiFailed(this)
         SentinelRing.cancelWatchdog(this)
@@ -218,7 +238,7 @@ class SentinelForegroundService : Service() {
             // Nobody left to bring a paused sound back.
             if (paused && SentinelRing.mainPid(this@SentinelForegroundService) == 0) {
                 Log.i(TAG, "MAIN died during a pause, sound back on")
-                paused = false
+                notPaused()
                 ringing[owner]?.let { startOutputs(it, fade = false) }
             }
             if (!paused) {
@@ -349,16 +369,18 @@ class SentinelForegroundService : Service() {
         val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: JSONObject()
         val backup = needsBackup(plan)
         val fullScreen = plan.optBoolean("firing_full_screen", true) && (!uiVisible || backup)
+        val quiet = uiVisible && !backup
         if (postedOwner == owner && postedOwner != null &&
-            postedFullScreen == fullScreen && postedBackup == backup
+            postedFullScreen == fullScreen && postedBackup == backup && postedQuiet == quiet
         ) {
             return
         }
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen, backup))
+            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen, backup, quiet))
             postedOwner = owner
             postedFullScreen = fullScreen
             postedBackup = backup
+            postedQuiet = quiet
             Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen backup=$backup")
         } catch (e: Throwable) {
             // Not allowed from here. The sound plays on for now and the watchdog,
@@ -367,11 +389,15 @@ class SentinelForegroundService : Service() {
         }
     }
 
-    private fun ensureChannel(plan: JSONObject, channelId: String) {
+    private fun ensureChannel(plan: JSONObject, channelId: String, quiet: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         val name = plan.optString("channel_name", "").ifEmpty { "Alarms" }
-        val importance = plan.optInt("importance", NotificationManager.IMPORTANCE_MAX)
+        val importance = if (quiet) {
+            NotificationManager.IMPORTANCE_LOW
+        } else {
+            plan.optInt("importance", NotificationManager.IMPORTANCE_MAX)
+        }
         // Creating an existing channel only updates its name, for a language change.
         val channel = NotificationChannel(channelId, name, importance).apply {
             setBypassDnd(plan.optBoolean("bypass_dnd", true))
@@ -381,9 +407,13 @@ class SentinelForegroundService : Service() {
         nm.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(plan: JSONObject, fullScreen: Boolean, backup: Boolean): Notification {
-        val channelId = plan.optString("channel_id", "").ifEmpty { FALLBACK_CHANNEL }
-        ensureChannel(plan, channelId)
+    private fun buildNotification(plan: JSONObject, fullScreen: Boolean, backup: Boolean, quiet: Boolean): Notification {
+        // A banner would only cover the alarm's own screen, for some seconds. The loud channel is
+        // for when that screen is not there. The sound is not the notification's: it stays. A
+        // channel, as not every phone goes along with a notification that says it should not alert.
+        val loudChannel = plan.optString("channel_id", "").ifEmpty { FALLBACK_CHANNEL }
+        val channelId = if (quiet) loudChannel + QUIET_CHANNEL_SUFFIX else loudChannel
+        ensureChannel(plan, channelId, quiet)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, channelId)
         } else {
@@ -397,11 +427,6 @@ class SentinelForegroundService : Service() {
             .setOnlyAlertOnce(!fullScreen)
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-        // A banner would only cover the alarm's own screen, for some seconds. The channel is loud
-        // for when that screen is not there. The sound is not the notification's: it stays.
-        if (uiVisible && !backup && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setSilent(true)
-        }
 
         val activity = if (backup) {
             SentinelBackupActivity::class.java.name

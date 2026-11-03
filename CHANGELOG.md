@@ -37,10 +37,17 @@ change.
   then stands still until something like a touch.
 - An exact alarm's broadcast goes through the foreground queue. In the background queue, up to
   Android 13, it waited its turn behind whatever else was going on: 13 seconds right after a boot.
-- No banner over the alarm's own screen: the ring's notification is silent while that screen is up,
-  on Android 12 and newer. The channel made it a heads-up all the same.
+- No banner over the alarm's own screen: the ring's notification does not alert while that screen is
+  up. The channel made it a heads-up all the same.
 - A ring that comes back (`AlarmKit::resume`) no longer takes the screen from whatever of the app
   is in front, such as a scanner. A new ring still does.
+- Kiosk: Recents on a recent launcher got past the lock, because the activity stays resumed behind it
+  and only loses the window focus. The activity is brought back for that too.
+- The ring service killed during a pause stays quiet as long as the process that asked for the pause
+  lives. It came back loud, with nothing to quiet it again.
+- `display::set_system_bar_color()`, for the bars an app does not draw under up to Android 14.
+- `scanner` no longer asks for the lock screen to go away. On a phone with a PIN that put the PIN
+  prompt over the camera.
 - `scanner`, `media_picker`, `camera`: what was scanned, picked or taken after a minute or two was
   lost, with the activity still open and the app no longer waiting. They wait 30 minutes, and 10
   for a photo.

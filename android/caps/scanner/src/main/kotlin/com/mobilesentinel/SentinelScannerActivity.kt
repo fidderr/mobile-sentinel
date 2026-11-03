@@ -87,16 +87,11 @@ class SentinelScannerActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         // Show over the lock screen + turn the screen on, matching the host's
-        // lock-screen flags so scanning works when the phone is locked.
+        // lock-screen flags so scanning works when the phone is locked. It does not ask for
+        // the phone to be unlocked: that puts the PIN prompt over the camera.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-            try {
-                val km = getSystemService(android.app.KeyguardManager::class.java)
-                km?.requestDismissKeyguard(this, null)
-            } catch (e: Throwable) {
-                Log.w(TAG, "requestDismissKeyguard failed: ${e.message}")
-            }
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(

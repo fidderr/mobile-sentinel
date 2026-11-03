@@ -26,7 +26,8 @@ import android.window.OnBackInvokedDispatcher
  *   `OnBackInvokedCallback` that consumes Back (when `blockBack`). Volume keys
  *   are swallowed too (when `blockVolume`).
  * - `onActivityStopped(target)` relaunches the target (subject to
- *   `relaunchDebounceMs`) when `blockHome` / `blockRecents` is set.
+ *   `relaunchDebounceMs`) when `blockHome` / `blockRecents` is set. So does the
+ *   target losing the window focus while it stays resumed: see [onTargetFocus].
  *
  * Relaunch is suppressed while a capability (camera scanner, file picker) is
  * launching an internal activity, via [SentinelActivityTracker]
@@ -43,6 +44,9 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     /** Cleared again in [disable]. */
     private const val KEEP_AWAKE_FLAGS = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+
+    /** Long enough for what does get paused, a dialog or the scanner, to have been paused. */
+    private const val NO_FOCUS_RELAUNCH_MS = 600L
 
     @Volatile var enabled: Boolean = false
     @Volatile var targetActivityFqcn: String = ""
@@ -137,6 +141,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     private var lastRelaunchAtMs: Long = 0L
     private var appContext: Context? = null
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var noFocusCheck: Runnable? = null
     private val backCallbacks: MutableMap<Int, OnBackInvokedCallback> = mutableMapOf()
 
     /**
@@ -283,6 +289,24 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         relaunchTarget()
     }
 
+    /**
+     * Recents on a recent launcher leaves the target resumed and visible, as a tile in its list:
+     * no pause and no stop comes, the window focus is all that goes. Anything that covers the
+     * target in another way pauses it, and [onActivityStopped] or nothing should deal with that:
+     * a permission dialog has to stay.
+     */
+    private fun onTargetFocus(activity: Activity, hasFocus: Boolean) {
+        noFocusCheck?.let(handler::removeCallbacks)
+        noFocusCheck = null
+        if (hasFocus || !enabled || !(blockHome || blockRecents)) return
+        noFocusCheck = Runnable {
+            if (enabled && SentinelActivityTracker.isActivityResumed(targetActivityFqcn)) {
+                Log.i(TAG, "target on screen without the focus")
+                onActivityLeaving(activity)
+            }
+        }.also { handler.postDelayed(it, NO_FOCUS_RELAUNCH_MS) }
+    }
+
     private fun relaunchTarget() {
         val ctx = appContext ?: run {
             Log.w(TAG, "relaunchTarget skipped — no Application context")
@@ -332,7 +356,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // so we beat the OS to the dispatcher.
         if (!enabled) return
         if (!isTargetActivity(activity)) return
-        if (blockBack || blockVolume) installKeyGuard(activity)
+        installKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -463,7 +487,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // onActivityCreated registers the same callback with the same key,
         // so this call is idempotent (registerBackCallback checks the map
         // and returns early when already registered).
-        if (blockBack || blockVolume) installKeyGuard(activity)
+        installKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
@@ -520,10 +544,17 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     // finish destroyed the alarm activity mid-ring. Wrapping the window callback
     // swallows that key event while the lock is on, and the volume keys as well;
     // the check is live, so the wrapper is inert once the kiosk is disabled.
+    // It is also where the window focus can be seen without being the activity.
 
     private class KeyGuard(
+        private val activity: Activity,
         private val base: android.view.Window.Callback,
     ) : android.view.Window.Callback by base {
+        override fun onWindowFocusChanged(hasFocus: Boolean) {
+            base.onWindowFocusChanged(hasFocus)
+            SentinelKioskController.onTargetFocus(activity, hasFocus)
+        }
+
         override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
             val controller = SentinelKioskController
             val blocked = when (event.keyCode) {
@@ -557,7 +588,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             val window = activity.window ?: return
             val current = window.callback ?: return
             if (current is KeyGuard) return
-            window.callback = KeyGuard(current)
+            window.callback = KeyGuard(activity, current)
             Log.d(TAG, "key guard installed")
         } catch (e: Throwable) {
             Log.w(TAG, "installKeyGuard failed: ${e.message}")

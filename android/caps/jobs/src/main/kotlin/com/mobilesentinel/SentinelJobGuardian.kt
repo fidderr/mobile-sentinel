@@ -142,11 +142,15 @@ object SentinelJobGuardian {
                         // MAIN is alive — send heads-up ONCE per job.
                         // Don't spam every poll cycle (causes audio restart).
                         if (!headsUpSent.contains(jobId)) {
-                            val headsUpDelay = config?.optLong("heads_up_delay_ms", 200) ?: 200
-                            if (headsUpDelay > 0) {
-                                Thread.sleep(headsUpDelay)
+                            // This process came back after a kill during a pause. MAIN asked for
+                            // that pause, so it knows: the news would only bring the sound back.
+                            if (SentinelRing.pausedFor(context) != jobId) {
+                                val headsUpDelay = config?.optLong("heads_up_delay_ms", 200) ?: 200
+                                if (headsUpDelay > 0) {
+                                    Thread.sleep(headsUpDelay)
+                                }
+                                sendHeadsUpBroadcast(context, jobId)
                             }
-                            sendHeadsUpBroadcast(context, jobId)
                             headsUpSent.add(jobId)
                         }
                         // Opt-in liveness check. Each kill doubles the allowed
