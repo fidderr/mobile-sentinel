@@ -170,6 +170,9 @@ pub struct SafeAreaInsets {
     pub bottom: f32,
     pub left: f32,
     pub right: f32,
+    /// How far the keyboard covers the content from the bottom. An edge-to-edge window
+    /// does not shrink for it, and nothing tells the page: re-query while it can show.
+    pub keyboard: f32,
 }
 
 /// Current overlap between system bars/cutout and the app content.
@@ -205,7 +208,7 @@ pub fn set_light_system_bars(light: bool) {
     )
 }
 
-/// Parse `"top,bottom,left,right"` from the Kotlin side.
+/// Parse `"top,bottom,left,right,keyboard"` from the Kotlin side.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn parse_safe_area(raw: &str) -> Option<SafeAreaInsets> {
     let mut it = raw.split(',').map(|v| v.trim().parse::<f32>().ok());
@@ -214,8 +217,15 @@ fn parse_safe_area(raw: &str) -> Option<SafeAreaInsets> {
         bottom: it.next()??,
         left: it.next()??,
         right: it.next()??,
+        keyboard: it.next()??,
     };
-    let all = [insets.top, insets.bottom, insets.left, insets.right];
+    let all = [
+        insets.top,
+        insets.bottom,
+        insets.left,
+        insets.right,
+        insets.keyboard,
+    ];
     all.iter()
         .all(|v| v.is_finite() && *v >= 0.0)
         .then_some(insets)
@@ -228,12 +238,13 @@ mod tests {
     #[test]
     fn parses_kotlin_inset_string() {
         assert_eq!(
-            parse_safe_area("24.0,48.5,0.0,0.0"),
+            parse_safe_area("24.0,48.5,0.0,0.0,290.0"),
             Some(SafeAreaInsets {
                 top: 24.0,
                 bottom: 48.5,
                 left: 0.0,
-                right: 0.0
+                right: 0.0,
+                keyboard: 290.0
             })
         );
     }
@@ -241,10 +252,10 @@ mod tests {
     #[test]
     fn rejects_empty_or_malformed() {
         assert_eq!(parse_safe_area(""), None);
-        assert_eq!(parse_safe_area("1,2,3"), None);
-        assert_eq!(parse_safe_area("a,b,c,d"), None);
-        assert_eq!(parse_safe_area("-1,0,0,0"), None);
-        assert_eq!(parse_safe_area("NaN,0,0,0"), None);
+        assert_eq!(parse_safe_area("1,2,3,4"), None);
+        assert_eq!(parse_safe_area("a,b,c,d,e"), None);
+        assert_eq!(parse_safe_area("-1,0,0,0,0"), None);
+        assert_eq!(parse_safe_area("NaN,0,0,0,0"), None);
     }
 }
 

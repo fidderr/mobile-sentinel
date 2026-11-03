@@ -216,7 +216,8 @@ object SentinelDisplayPrimitives {
 
     /**
      * How far (in dp) the system bars + display cutout overlap the app's
-     * content view, as `"top,bottom,left,right"`; `""` when unavailable.
+     * content view, and then how far the keyboard does, as
+     * `"top,bottom,left,right,keyboard"`; `""` when unavailable.
      *
      * Measured against where the content view actually sits on screen, so it
      * is right in both worlds: edge-to-edge (Android 15+ with targetSdk 35
@@ -238,12 +239,14 @@ object SentinelDisplayPrimitives {
             val loc = IntArray(2)
             content.getLocationOnScreen(loc)
             val root = content.rootView
+            val below = root.height - (loc[1] + content.height)
             val top = maxOf(0, bars.top - loc[1])
-            val bottom = maxOf(0, bars.bottom - (root.height - (loc[1] + content.height)))
+            val bottom = maxOf(0, bars.bottom - below)
+            val keyboard = maxOf(0, insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom - below)
             val left = maxOf(0, bars.left - loc[0])
             val right = maxOf(0, bars.right - (root.width - (loc[0] + content.width)))
             val d = activity.resources.displayMetrics.density
-            "${top / d},${bottom / d},${left / d},${right / d}"
+            "${top / d},${bottom / d},${left / d},${right / d},${keyboard / d}"
         } catch (e: Throwable) {
             Log.w(TAG, "getSafeAreaInsets: ${e.message}", e)
             ""
