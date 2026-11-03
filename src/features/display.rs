@@ -190,6 +190,19 @@ pub fn system_dark() -> bool {
     android_or!(android::flag("isSystemDark"), true)
 }
 
+/// The colour of the system bars as `0xAARRGGBB`, to go with the app's background where it does
+/// not draw under them: up to Android 14. No-op on host.
+pub fn set_system_bar_color(argb: u32) {
+    android_or!(
+        {
+            let _ = android::set_system_bar_color(argb);
+        },
+        {
+            let _ = argb;
+        }
+    )
+}
+
 /// Whether the phone is set to show the time as 24 hours.
 pub fn uses_24_hour_clock() -> bool {
     android_or!(android::flag("uses24HourClock"), true)
@@ -351,6 +364,19 @@ mod android {
                 "setLightSystemBars",
                 "(Z)Z",
                 &[JValue::Bool(light as u8)],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn set_system_bar_color(argb: u32) -> bool {
+        with_jni_class(DISPLAY, false, |env, class| {
+            env.call_static_method(
+                class,
+                "setSystemBarColor",
+                "(I)Z",
+                &[JValue::Int(argb as i32)],
             )
             .ok()
             .and_then(|v| v.z().ok())

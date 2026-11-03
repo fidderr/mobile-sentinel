@@ -296,6 +296,39 @@ object SentinelDisplayPrimitives {
     }
 
     /**
+     * The colour of the system bars, as ARGB. Up to Android 14 the app does not draw under them
+     * unless it asks to; from Android 15 on it always does and this changes nothing.
+     */
+    @JvmStatic
+    fun setSystemBarColor(color: Int): Boolean {
+        val activity = SentinelActivityTracker.currentResumedActivity
+            ?: activityOrNull()
+            ?: return false
+        return try {
+            activity.runOnUiThread {
+                try {
+                    @Suppress("DEPRECATION")
+                    activity.window.apply {
+                        clearFlags(
+                            android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or
+                                android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
+                        )
+                        addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                        statusBarColor = color
+                        navigationBarColor = color
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "setSystemBarColor(UI): ${e.message}", e)
+                }
+            }
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "setSystemBarColor: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
      * Read back `activity.requestedOrientation`.
      * Returns -100 when no Activity is available (sentinel for Rust side).
      */
