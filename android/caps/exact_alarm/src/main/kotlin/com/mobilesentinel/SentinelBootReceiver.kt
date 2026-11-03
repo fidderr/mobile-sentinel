@@ -37,6 +37,7 @@ class SentinelBootReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         SentinelPrimitives.init(app)
         if (!SentinelBoot.filesAvailable(app)) return
+        SentinelHealth.noteBootSignal(app)
 
         // A reboot mid-ring left the volume up, with nothing left to put it back.
         SentinelRing.restoreVolumeIfIdle(app)

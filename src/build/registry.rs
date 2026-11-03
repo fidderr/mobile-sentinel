@@ -680,7 +680,11 @@ pub const CAPABILITIES: &[Capability] = &[
         features: NO_FEATURES,
         components: "",
         policy_sensitive: false,
-        kotlin_sources: &["SentinelJobGuardian.kt", "SentinelJobsInitializer.kt"],
+        kotlin_sources: &[
+            "SentinelJobGuardian.kt",
+            "SentinelJobsInitializer.kt",
+            "SentinelGuardianStarter.kt",
+        ],
     },
 ];
 

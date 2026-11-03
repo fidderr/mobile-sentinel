@@ -7,10 +7,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import org.json.JSONObject
+import java.io.File
 
 /**
  * What the phone allows, for an app that needs alarms to ring on time, and how to
@@ -19,6 +21,7 @@ import org.json.JSONObject
  */
 object SentinelHealth {
     private const val TAG = "MobileSentinel.Health"
+    private const val BOOT_SIGNAL_WAIT_MS = 5 * 60 * 1000L
 
     @JvmStatic
     fun snapshot(channelId: String): String {
@@ -57,8 +60,37 @@ object SentinelHealth {
         read("total_silence") {
             nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_NONE
         }
-        read("manufacturer") { Build.MANUFACTURER.orEmpty().lowercase() }
+        read("boot_signal_missed") { bootSignalMissed(c) }
         return out.toString()
+    }
+
+    private fun bootSignalFile(c: Context) = File(SentinelStorage.filesDir(c), "sentinel/boot_signal")
+
+    /** The phone told this app that it restarted. */
+    @JvmStatic
+    fun noteBootSignal(c: Context) {
+        try {
+            val file = bootSignalFile(c)
+            file.parentFile?.mkdirs()
+            file.writeText("")
+        } catch (e: Throwable) {
+            Log.w(TAG, "noting the boot signal failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Some makers keep the boot signal from an app behind a switch of their own
+     * ("auto-start"), which no app can read and often no app can open. So this goes by what
+     * happened: the phone restarted with this app on it, and the signal never came.
+     */
+    private fun bootSignalMissed(c: Context): Boolean {
+        val boot = SentinelBoot.bootTimeMs()
+        // It can take a while after a restart.
+        if (SystemClock.elapsedRealtime() < BOOT_SIGNAL_WAIT_MS) return false
+        // Installed or updated since: there was nothing to tell it.
+        if (c.packageManager.getPackageInfo(c.packageName, 0).lastUpdateTime >= boot) return false
+        val file = bootSignalFile(c)
+        return !file.exists() || file.lastModified() < boot
     }
 
     /** Open the system page where [check] is changed. [check] is a field of [snapshot]. */
@@ -85,8 +117,14 @@ object SentinelHealth {
             "channel_importance" -> Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
                 .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
-            // Background use, keeping permissions when unused, and the OEM's auto-start
-            // switch all live on or near the app's own page.
+            // Where Android has a page for it. Some makers send this to the app's own page,
+            // where the switch is too.
+            "kept_when_unused" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, pkg)
+            } else {
+                appDetails
+            }
+            // Background use and the maker's auto-start switch live on or near the app's page.
             else -> appDetails
         }
         return try {

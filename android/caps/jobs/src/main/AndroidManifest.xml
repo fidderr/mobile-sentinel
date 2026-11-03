@@ -13,5 +13,12 @@
             android:directBootAware="true"
             android:exported="false"
             android:initOrder="89" />
+        <!-- In :sentinel: see the class. Starts nothing that is not running already. -->
+        <provider
+            android:name="com.mobilesentinel.SentinelGuardianStarter"
+            android:authorities="${applicationId}.sentinel.guardian.start"
+            android:directBootAware="true"
+            android:exported="false"
+            android:process=":sentinel" />
     </application>
 </manifest>

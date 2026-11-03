@@ -28,6 +28,8 @@ pub enum Check {
     ChannelImportance,
     /// Do Not Disturb is not on Total Silence, which silences alarms too.
     NotTotalSilence,
+    /// Whether the phone told the app about its last restart.
+    BootSignal,
 }
 
 impl Check {
@@ -41,6 +43,7 @@ impl Check {
             Check::BatteryUnrestricted => "battery_unrestricted",
             Check::BackgroundAllowed => "background_allowed",
             Check::KeptWhenUnused => "kept_when_unused",
+            Check::BootSignal => "boot_signal_missed",
             Check::ChannelImportance => "channel_importance",
             Check::NotTotalSilence => "total_silence",
         }
@@ -66,8 +69,9 @@ pub struct HealthReport {
     /// creates it).
     pub channel_importance: i32,
     pub total_silence: bool,
-    /// Lower case, for advice about what a phone maker changes (auto-start).
-    pub manufacturer: String,
+    /// The phone restarted with the app on it, and never told the app. On some phones a
+    /// setting of the maker's does that ("auto-start"), which no app can read.
+    pub boot_signal_missed: bool,
 }
 
 impl Default for HealthReport {
@@ -82,7 +86,7 @@ impl Default for HealthReport {
             kept_when_unused: true,
             channel_importance: -1,
             total_silence: false,
-            manufacturer: String::new(),
+            boot_signal_missed: false,
         }
     }
 }
@@ -106,6 +110,7 @@ impl HealthReport {
                 self.channel_importance < 0 || self.channel_importance >= IMPORTANCE_HIGH
             }
             Check::NotTotalSilence => !self.total_silence,
+            Check::BootSignal => !self.boot_signal_missed,
         }
     }
 
@@ -120,21 +125,12 @@ impl HealthReport {
             Check::FullScreen,
             Check::ChannelImportance,
             Check::Overlay,
+            Check::BootSignal,
             Check::KeptWhenUnused,
         ]
         .into_iter()
         .filter(|c| !self.is_ok(*c))
         .collect()
-    }
-
-    /// Whether this phone maker is known to stop apps in its own way, behind a
-    /// setting no app can read.
-    pub fn maker_restricts_background(&self) -> bool {
-        const MAKERS: [&str; 10] = [
-            "oneplus", "oppo", "realme", "xiaomi", "redmi", "poco", "huawei", "honor", "vivo",
-            "samsung",
-        ];
-        MAKERS.contains(&self.manufacturer.as_str())
     }
 }
 
@@ -249,12 +245,14 @@ mod tests {
     }
 
     #[test]
-    fn a_phone_maker_that_stops_apps_is_known_by_its_lower_case_name() {
-        let of = |m: &str| HealthReport {
-            manufacturer: m.to_owned(),
-            ..HealthReport::default()
+    fn a_restart_nobody_was_told_about_is_a_problem() {
+        let told = HealthReport::default();
+        assert!(told.is_ok(Check::BootSignal));
+        let missed = HealthReport {
+            boot_signal_missed: true,
+            ..Default::default()
         };
-        assert!(of("oneplus").maker_restricts_background());
-        assert!(!of("google").maker_restricts_background());
+        assert!(!missed.is_ok(Check::BootSignal));
+        assert!(missed.problems().contains(&Check::BootSignal));
     }
 }
