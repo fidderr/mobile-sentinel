@@ -37,6 +37,9 @@ change.
   then stands still until something like a touch.
 - An exact alarm's broadcast goes through the foreground queue. In the background queue, up to
   Android 13, it waited its turn behind whatever else was going on: 13 seconds right after a boot.
+- `scanner`, `media_picker`, `camera`: what was scanned, picked or taken after a minute or two was
+  lost, with the activity still open and the app no longer waiting. They wait 30 minutes, and 10
+  for a photo.
 - `scanner`: cancelling said so twice, the second time when the activity was destroyed. A scan
   started within that moment ended at once, and what it scanned was lost. From Android 13 on Back
   said so only then, which could leave the app waiting for seconds. It says so once, at finishing.

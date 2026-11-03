@@ -20,9 +20,9 @@ use crate::error::SentinelError;
 
 /// Scan a barcode / QR code, returning the decoded value.
 ///
-/// Blocks until the user completes or cancels the scan. Returns
-/// [`SentinelError::PlatformUnsupported`] when no scanner is available
-/// (host builds, or a cancelled/timed-out scan on device).
+/// Blocks until the user completes or cancels the scan, which can take a while: the code can be
+/// in another room. Returns [`SentinelError::PlatformUnsupported`] when no scanner is available
+/// (host builds, or a cancelled scan on device).
 ///
 /// Requires the `scanner` feature. The corresponding Android manifest
 /// pieces (CAMERA permission, `SentinelScannerActivity`) and the ZXing
@@ -55,6 +55,8 @@ mod android {
     use jni::objects::{JString, JValue};
 
     const SCANNER: &str = "com/mobilesentinel/SentinelScannerHelper";
+    /// Only for a scanner that never came up: what is scanned after this is lost.
+    const WAIT_SECS: i64 = 30 * 60;
 
     /// Blocking barcode/QR scan from the app context. Returns the decoded
     /// string, or empty on cancel/timeout.
@@ -65,7 +67,7 @@ mod android {
                     class,
                     "scanFromAppContext",
                     "(J)Ljava/lang/String;",
-                    &[JValue::Long(60)],
+                    &[JValue::Long(WAIT_SECS)],
                 )
                 .ok()?;
             let obj = res.l().ok()?;

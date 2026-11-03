@@ -152,6 +152,9 @@ mod tests {
 
 #[cfg(target_os = "android")]
 mod android {
+    /// Only for a picker that never came up: what is picked after this is lost.
+    const WAIT_SECS: i64 = 30 * 60;
+
     use super::PickedFile;
     use crate::platform::android::context::get_activity;
     use crate::platform::android::jni::resolve_helper_class;
@@ -180,7 +183,7 @@ mod android {
                 JValue::Object(activity.as_obj()),
                 JValue::Object(&s_mimes.into()),
                 JValue::Bool(multiple as u8),
-                JValue::Long(300),
+                JValue::Long(WAIT_SECS),
             ],
         );
         if env.exception_check().unwrap_or(false) {
@@ -231,7 +234,7 @@ mod android {
             &[
                 JValue::Object(activity.as_obj()),
                 JValue::Object(&s_mime.into()),
-                JValue::Long(120),
+                JValue::Long(WAIT_SECS),
             ],
         );
         match res.ok().and_then(|v| v.l().ok()) {

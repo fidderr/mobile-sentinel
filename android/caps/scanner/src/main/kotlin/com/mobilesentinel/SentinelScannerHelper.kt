@@ -25,7 +25,7 @@ object SentinelScannerHelper {
      * MUST be called from a background thread.
      */
     @JvmStatic
-    fun scanFromAppContext(timeoutSeconds: Long = 60): String {
+    fun scanFromAppContext(timeoutSeconds: Long = 1800): String {
         val ctx = SentinelPrimitives.getAppContext()
             ?: run {
                 Log.e(TAG, "scanFromAppContext: no appContext")
@@ -66,10 +66,7 @@ object SentinelScannerHelper {
             if (resultFile.exists()) {
                 val content = resultFile.readText().trim()
                 resultFile.delete()
-                Log.i(
-                    TAG,
-                    "Scan result: ${if (content.isNotEmpty()) content.take(20) + "..." else "(empty)"}",
-                )
+                Log.i(TAG, "Scan result: ${content.length} characters")
                 return content
             }
             Thread.sleep(100)

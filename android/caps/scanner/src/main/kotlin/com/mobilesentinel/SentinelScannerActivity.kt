@@ -155,7 +155,7 @@ class SentinelScannerActivity : Activity() {
             decodeSingle(object : BarcodeCallback {
                 override fun barcodeResult(result: BarcodeResult) {
                     val content = result.text ?: ""
-                    Log.i(TAG, "Scanned: ${content.take(50)}")
+                    Log.i(TAG, "Scanned ${content.length} characters")
                     deliver(content)
                     finish()
                 }

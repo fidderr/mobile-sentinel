@@ -85,7 +85,7 @@ mod android {
     /// Blocking photo capture from the app context. Returns the absolute path
     /// to the saved JPEG, or empty on cancel/timeout.
     pub(super) fn capture_photo() -> String {
-        call_capture("captureFromAppContext", 120)
+        call_capture("captureFromAppContext", 600)
     }
 
     /// Blocking video capture. Returns the `.mp4` path, or empty.
