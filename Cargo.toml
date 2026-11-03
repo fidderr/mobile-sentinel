@@ -68,11 +68,11 @@ media_picker = ["dep:rfd"]
 clipboard = []
 # System share sheet.
 share = ["dep:opener", "dep:dirs"]
-# Encrypted key/value storage.
+# Key/value storage private to the app. Not encrypted.
 secure_storage = []
 # SMS sending (SEND_SMS).
 sms = []
-# Phone dial / call state (CALL_PHONE).
+# Open the dialer / call state.
 phone = []
 # Network connectivity status (ACCESS_NETWORK_STATE).
 network = []
@@ -124,7 +124,7 @@ jobs = ["ring"]
 # Split into granular sub-features so a consumer composes only the firing
 # surfaces it needs (a silent timer needs foreground-service but no
 # full-screen-intent/kiosk; a pure scheduler needs exact-alarm only).
-# `firing` is the convenience bundle of all six. The FiringSink trait itself
+# `firing` is the convenience bundle of all seven. The FiringSink trait itself
 # stays stable; each sub-feature gates its platform surface + permissions.
 # Lets the ring keep the CPU awake while firing (WAKE_LOCK).
 wake-lock = ["foreground-service"]

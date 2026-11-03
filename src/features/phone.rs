@@ -1,10 +1,10 @@
-//! Phone capability — dial / call state. Gated behind `phone` (CALL_PHONE).
+//! Phone capability — open the dialer, call state. Gated behind `phone`.
 //! Sole entry point. The JNI calls into
 //! `com.mobilesentinel.SentinelPhonePrimitives` live here.
 
 use crate::error::SentinelError;
 
-/// Dial `number` (opens the dialer / places the call per platform policy).
+/// Open the dialer with `number` filled in. Placing the call is up to the user.
 pub fn dial(number: &str) -> Result<(), SentinelError> {
     #[cfg(target_os = "android")]
     {

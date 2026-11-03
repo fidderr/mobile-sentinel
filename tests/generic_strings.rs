@@ -47,15 +47,6 @@ const EXCLUDE_PATH_SEGMENTS: &[&str] = &[
     "/docs/",
 ];
 
-/// Exception: `tests/fixtures/canonical_json/**/*.json` is exempt from the
-/// scan. The fixture files are the single source of truth for the
-/// cross-platform wire format and must mirror real-world payloads, including
-/// legitimate platform constants such as `"usage":"alarm"` (Android
-/// `AudioAttributes.USAGE_ALARM`) and `"source":"system:default-alarm"`.
-/// These are vendor strings, not consumer-app vocabulary, so they do not
-/// make the crate app-specific.
-const EXEMPT_PATH_SEGMENTS: &[&str] = &[];
-
 /// (file relative path, line pattern): permitted exceptions where the
 /// forbidden substring appears in a way that doesn't violate the intent
 /// of this rule.
@@ -81,11 +72,6 @@ fn is_excluded(path: &Path) -> bool {
     EXCLUDE_PATH_SEGMENTS.iter().any(|seg| s.contains(seg))
 }
 
-fn is_exempt(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('\\', "/");
-    EXEMPT_PATH_SEGMENTS.iter().any(|seg| s.contains(seg))
-}
-
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
@@ -94,9 +80,6 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if is_excluded(&path) {
-            continue;
-        }
-        if is_exempt(&path) {
             continue;
         }
         if path.is_dir() {

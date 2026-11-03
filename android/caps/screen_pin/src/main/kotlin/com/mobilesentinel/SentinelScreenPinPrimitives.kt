@@ -1,6 +1,5 @@
 package com.mobilesentinel
 
-import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
@@ -11,12 +10,9 @@ import android.util.Log
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
  * around an Android API. Reached from Rust via `crate::features::screen_pin`.
  *
- * Screen pinning requires an Activity (`startLockTask` / `stopLockTask`
- * are Activity methods). The application context returned by
- * [SentinelPrimitives.getAppContext] is generally NOT an Activity, so
- * [pin] / [unpin] only succeed when the stored context is an Activity;
- * otherwise they log a warning and return a safe fallback. The host must
- * call from an Activity context for pinning to work.
+ * Screen pinning requires an Activity (`startLockTask` / `stopLockTask` are
+ * Activity methods), so [pin] / [unpin] work on the resumed one, and return a
+ * safe fallback when the app is not on screen.
  *
  * Every method is `@JvmStatic`, wrapped in try/catch, logs via [Log.w],
  * never throws, and returns a safe fallback.
@@ -28,18 +24,13 @@ object SentinelScreenPinPrimitives {
      * Starts lock task mode (screen pinning) on the current Activity.
      *
      * Returns true if `startLockTask` was invoked on an Activity.
-     * Safe fallback: false (including when the context is not an Activity).
+     * Safe fallback: false (including when no Activity is resumed).
      */
     @JvmStatic
     fun pin(): Boolean {
         return try {
-            val c: Context = SentinelPrimitives.getAppContext() ?: run {
-                Log.w(TAG, "pin: no app context")
-                return false
-            }
-            val activity = c as? Activity
-            if (activity == null) {
-                Log.w(TAG, "pin: context is not an Activity; host must call from an Activity context")
+            val activity = SentinelActivityTracker.currentResumedActivity ?: run {
+                Log.w(TAG, "pin: no resumed Activity")
                 return false
             }
             activity.startLockTask()
@@ -54,18 +45,13 @@ object SentinelScreenPinPrimitives {
      * Stops lock task mode (screen pinning) on the current Activity.
      *
      * Returns true if `stopLockTask` was invoked on an Activity.
-     * Safe fallback: false (including when the context is not an Activity).
+     * Safe fallback: false (including when no Activity is resumed).
      */
     @JvmStatic
     fun unpin(): Boolean {
         return try {
-            val c: Context = SentinelPrimitives.getAppContext() ?: run {
-                Log.w(TAG, "unpin: no app context")
-                return false
-            }
-            val activity = c as? Activity
-            if (activity == null) {
-                Log.w(TAG, "unpin: context is not an Activity; host must call from an Activity context")
+            val activity = SentinelActivityTracker.currentResumedActivity ?: run {
+                Log.w(TAG, "unpin: no resumed Activity")
                 return false
             }
             activity.stopLockTask()

@@ -70,25 +70,25 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `camera` | `camera` | `capture_photo() -> Result<String>`, `is_available() -> bool` | none — delegates to the system camera (`ACTION_IMAGE_CAPTURE`) + `FileProvider`; returns saved JPEG path |
 | `haptics` | `haptics` | `vibrate(Duration)`, `vibrate_pattern(&[u64])`, `cancel()`, `has_vibrator() -> bool` | `VIBRATE` |
 | `home_widget` | `home_widget` | `set_text(title, detail)`, `can_add() -> bool`, `add() -> bool` | Home-screen widget with two lines the app sets; tapping it opens the app. No permissions, no periodic updates |
-| `audio` | `audio` | `play(uri: &str, looping: bool) -> Result<PlaybackHandle>`, `stop(&PlaybackHandle) -> Result<()>`, `set_volume(f32) -> Result<()>` | none — non-firing preview audio |
+| `audio` | `audio` | `play(uri: &str, looping: bool) -> Result<PlaybackHandle>`, `play_as_alarm(uri, looping)` (on the alarm volume, as the ring will sound), `stop(&PlaybackHandle) -> Result<()>`, `set_volume(f32) -> Result<()>` | none — non-firing preview audio |
 | `overlay` | `overlay` | `is_granted() -> bool`, `request()` | `SYSTEM_ALERT_WINDOW` |
 | `permissions` | `permissions` | `status(&str) -> PermissionState`, `request(&str) -> PermissionState`, `open_app_settings()` | none |
-| `sensors` | `sensors` | `start_accelerometer()`, `stop_accelerometer()`, `shake_count() -> i32`, `reset_shake_count()`, `start_step_counter()`, `stop_step_counter()`, `step_count() -> i32` | `ACTIVITY_RECOGNITION`, `HIGH_SAMPLING_RATE_SENSORS` |
+| `sensors` | `sensors` | `start_accelerometer()`, `stop_accelerometer()`, `shake_count() -> i32`, `reset_shake_count()`, `start_step_counter()`, `stop_step_counter()`, `step_count() -> i32` | `ACTIVITY_RECOGNITION` |
 | `torch` | `torch` | `on(Option<f32>)`, `off()`, `is_available() -> bool` | none |
-| `display` | `display` | `set_brightness(f32)`, `brightness() -> f32`, `set_max_brightness()`, `restore_brightness()`, `keep_screen_on(bool)`, `set_requested_orientation(ScreenOrientation)`, `current_requested_orientation() -> Option<ScreenOrientation>` | none; also supports build-time `screen_orientation = "portrait"` (etc.) in sentinel.toml to set the static default on the main activity |
+| `display` | `display` | `set_brightness(f32)`, `brightness() -> f32`, `set_max_brightness()`, `restore_brightness()`, `keep_screen_on(bool)`, `set_requested_orientation(ScreenOrientation)`, `current_requested_orientation() -> Option<ScreenOrientation>`, `safe_area_insets() -> Option<SafeAreaInsets>` (with how far the keyboard covers the content), `system_dark() -> bool`, `uses_24_hour_clock() -> bool`, `set_light_system_bars(bool)` | none; also supports build-time `screen_orientation = "portrait"` (etc.) in sentinel.toml to set the static default on the main activity |
 | `battery` | `battery` | `is_exempt() -> bool`, `request_exemption()`, `open_settings()` | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` |
 | `screen_pin` | `screen_pin` | `pin()`, `unpin()`, `is_pinned() -> bool` | none |
-| `foregrounding` | `foregrounding` | `finish_activity()` | none |
-| `media_picker` | `media_picker` | `pick_file(&[&str]) -> Result<String>` | none; `SentinelFilePickerActivity`. Use instead of `<input type="file">` in a WebView. |
+| `foregrounding` | `foregrounding` | `finish_activity()`, `move_to_back()`, `on_back(callback)` | none |
+| `media_picker` | `media_picker` | `pick_file(&[&str]) -> Result<String>`, `pick_files(&[&str], multiple: bool) -> Result<Vec<PickedFile>>` | none; `SentinelFilePickerActivity`. Use instead of `<input type="file">` in a WebView. Blocks until the user picked or cancelled. |
 | `clipboard` | `clipboard` | `set_text(&str) -> Result<()>`, `get_text() -> Result<Option<String>>`, `has_text() -> bool` | none |
-| `share` | `share` | `text(&str, Option<&str>) -> Result<()>`, `url(&str, Option<&str>) -> Result<()>`, `file(&str, &str) -> Result<()>` | none |
-| `secure_storage` | `secure_storage` | `set(&str, &str) -> Result<()>`, `get(&str) -> Result<Option<String>>`, `delete(&str) -> Result<()>`, `clear() -> Result<()>` | none — encrypted KV |
+| `share` | `share` | `text(&str, Option<&str>) -> Result<()>`, `url(&str, Option<&str>) -> Result<()>`, `file(&str, &str) -> Result<()>`, `open(path, mime) -> Result<()>`, `open_url(&str) -> Result<()>`, `save_to_downloads(path, name, mime) -> Result<String>` | `WRITE_EXTERNAL_STORAGE`, up to Android 9 |
+| `secure_storage` | `secure_storage` | `set(&str, &str) -> Result<()>`, `get(&str) -> Result<Option<String>>`, `delete(&str) -> Result<()>`, `clear() -> Result<()>` | none — private to the app, **not encrypted** |
 | `sms` | `sms` | `send(number, message) -> Result<()>`, `is_available() -> bool` | `SEND_SMS` **POLICY-SENSITIVE** |
-| `phone` | `phone` | `dial(&str) -> Result<()>`, `is_in_call() -> bool` | `CALL_PHONE` **POLICY-SENSITIVE** |
+| `phone` | `phone` | `dial(&str) -> Result<()>` (opens the dialer), `is_in_call() -> bool` | none |
 | `network` | `network` | `is_connected() -> bool`, `connection_type() -> ConnectionType` | `ACCESS_NETWORK_STATE` |
-| `location` | `location` | `current() -> Result<Coordinate>`, `is_enabled() -> bool` | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` **POLICY-SENSITIVE** |
+| `location` | `location` | `current() -> Result<Coordinate>` (the last known position), `is_enabled() -> bool` | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` **POLICY-SENSITIVE** |
 | `maps` | `maps` | `geocode(&str) -> Result<Coordinate>`, `reverse_geocode(f64, f64) -> Result<String>` | none |
-| `biometric` | `biometric` | `is_available() -> bool`, `authenticate(&str) -> Result<()>`, `biometric_type() -> BiometricType` | none |
+| `biometric` | `biometric` | `is_available() -> bool`, `authenticate(&str) -> Result<()>` (blocks until answered; `Ok` only if recognised), `biometric_type() -> BiometricType` | none |
 | `device_admin` | `device_admin` | `is_active() -> bool`, `request()`, `relinquish()` | `BIND_DEVICE_ADMIN` **POLICY-SENSITIVE** |
 | `contacts` | `contacts` | `get_all() -> Result<Vec<Contact>>`, `search(&str) -> Result<Vec<Contact>>`, `has_permission() -> bool` | `READ_CONTACTS` **POLICY-SENSITIVE** |
 | `calendar` | `calendar` | `get_events(SystemTime, SystemTime) -> Result<Vec<CalendarEvent>>`, `create_event(&CalendarEvent) -> Result<()>`, `delete_event(&str) -> Result<()>` | `READ_CALENDAR`, `WRITE_CALENDAR` **POLICY-SENSITIVE** |
@@ -96,6 +96,9 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `notifications` | `notifications` | `post(id, channel, title, body, importance, full_screen) -> bool`, `update(id, title, body) -> bool`, `cancel(id)` | none (distinct from the firing FGS) |
 | `file_system` | `file_system` | `copy_asset(src, dst) -> bool`, `list_assets(path) -> String` (JSON array) | none |
 | `accessibility` | `accessibility` | `is_service_enabled() -> bool`, `open_settings() -> Result<(), String>` | `SentinelAccessibilityService` **POLICY-SENSITIVE**; pulls in `kiosk` |
+| `recorder` | `recorder` | `has_permission() -> bool`, `request_permission()`, `start(dir) -> Result<()>`, `level() -> f32`, `is_recording() -> bool`, `stop() -> Result<Recording>`, `cancel()` | `RECORD_AUDIO` |
+| `background_service` | `background_service` | `set_texts(...)`, `start() -> bool`, `stop()`, `is_enabled() -> bool`, `post(tag, title, body, open, kind)`, `cancel(tag)`, `cancel_all()`, `take_open_request() -> Option<String>`, `is_foreground() -> bool`, `move_to_back() -> bool`, `exit_app() -> bool`, `warm_up()` | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_REMOTE_MESSAGING`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `USE_FULL_SCREEN_INTENT`. Keeps a messenger's connection with the UI closed |
+| `webview_media` | none | none: declares what `getUserMedia` needs inside the app's WebView | `CAMERA`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` |
 
 ### Examples
 
@@ -339,6 +342,7 @@ pub struct JobConfig {
     pub ui_liveness_timeout_ms: u64,   // 0 = off (default). Restart MAIN if its UI sends no `jobs::ui_heartbeat()` for this long while the main activity is on screen
     pub ui_liveness_backoff_cap: u32,  // default 4: each kill doubles the allowed silence, up to this multiple
     pub min_launch_interval_ms: u64,   // default 3000: never launch MAIN more often than this
+    pub ui_failures_before_backup: u32, // 0 = off (default). After this many UI restarts the native backup screen takes over
 }
 
 // The UI proves it is alive with `jobs::ui_heartbeat()`, called only after a real
@@ -358,8 +362,8 @@ pub struct Job {
 ```
 
 Full API: `register_job`, `activate_job`, `deactivate_job`, `complete_job`,
-`get_active_jobs`, `get_job`, `remove_job`, `jobs_dir`. Error type:
-`JobGuardianError` (`Io`, `Parse`, `NotFound`).
+`get_active_jobs`, `get_job`, `remove_job`, `jobs_dir`, `active_since_ms`, `ring_end`,
+`ui_heartbeat`. Error type: `JobGuardianError` (`Io`, `Parse`, `NotFound`).
 
 `deactivate` vs `complete`: `complete_job` means *done* (file removed, guardian
 never acts again); `deactivate_job` means *pause until the next trigger* (file
@@ -636,11 +640,14 @@ pub struct AlarmClassConfig {
     pub kiosk_block_home: bool,
     pub kiosk_block_back: bool,
     pub kiosk_block_recents: bool,
+    pub kiosk_block_volume: bool,
     pub kiosk_hide_status_bar: bool,
     pub kiosk_hide_nav_bar: bool,
     pub firing_full_screen: bool,
     pub vibration_pattern: Vec<i64>,     // app-default waveform (alternating wait/vibrate ms)
     pub min_volume_percent: u8,          // raise the alarm stream to at least this % while ringing, restore after (0 = leave alone)
+    pub late_ring_window_ms: i64,        // found this late after a restart it still rings; later it is a miss
+    pub fallback_sound_id: Option<SoundIdSpec>, // tried when the alarm's own sound cannot play
 }
 ```
 
@@ -671,6 +678,9 @@ pub struct AlarmSpec {
     pub bypass_dnd: bool,
     pub skip_until_unix_ms: Option<i64>,      // skip every occurrence at or before this instant (one skipped occurrence)
     pub fade_in_secs: u16,                    // sound fade-in on the first ring (0 = off); not applied on resume
+    pub ring_limit_secs: Option<u32>,         // stop by itself after this long with nobody doing anything; None rings until dealt with
+    pub min_volume_percent: Option<u8>,       // None = AlarmClassConfig's
+    pub sound_delay_secs: u16,                // vibrate first, the sound this much later
 }
 impl AlarmSpec {
     pub fn from_context(ctx: &AlarmClassContext) -> Self;
@@ -692,6 +702,14 @@ kit.resume(&id) -> Result<(), AlarmKitError>                     // full re-enga
 kit.reengage(&id) -> Result<(), AlarmKitError>                   // re-engage firing surface (MAIN restart)
 kit.handle_job_heads_up(job_id: &str)                            // sentinel heads-up landing pad
 kit.on_startup(&[(String, AlarmSpec)])                           // end rings a reboot interrupted, rearm (a snooze in progress is kept), process jobs, reengage firing -> StartupReport { ended_by_reboot, missed, finished, ring_ends }
+kit.on_wake(&[(String, AlarmSpec)])                              // the same with no screen: from the wake hook
+kit.refresh_ring_plans()                                         // write the ring plans again, after what they depend on changed (minimum volume, texts)
+kit.note_activity()                                              // the user did something: the ring limit starts over
+kit.note_ui_up(&id)                                              // the alarm's screen is up, for the timing log
+kit.on_ring_end(hook: fn())                                      // called when the platform ended a ring while the app runs
+kit.take_ring_ends() -> Vec<(InstanceId, RingEnd)>               // rings that ended without the app: limit reached, solved on the backup screen
+kit.set_reminder(&id, at_ms, title, body, channel_name, lasts_ms) // a quiet notification before an alarm
+kit.clear_reminder(&id)
 ```
 
 ### Inspection
@@ -702,6 +720,8 @@ kit.get(&id) -> Result<AlarmSpec, AlarmKitError>
 kit.next_fire(&id) -> Result<Option<i64>, AlarmKitError>         // unix ms, Scheduled/Snoozed only
 kit.snoozed_until(&id) -> Option<i64>                            // unix ms, if it is snoozed right now
 kit.current_session() -> Result<Option<AlarmKitSession>, AlarmKitError>
+kit.session(&id) -> Option<AlarmKitSession>                      // of this alarm, if it is ringing
+kit.timing_log() -> String                                       // how fast rings were: `<unix ms> <event> <alarm>` per line
 kit.required_permissions() -> Vec<&'static str>
 kit.store() -> &Arc<ContextStore>
 AlarmKit::detect_timezone() -> String                           // device tz, falls back to TZ / "UTC"
@@ -710,7 +730,8 @@ AlarmKit::detect_timezone() -> String                           // device tz, fa
 ```rust
 pub struct AlarmKitSession {
     pub instance_id: InstanceId,
-    pub fired_at_unix_ms: i64,
+    pub fired_at_unix_ms: i64,      // when this ring started; a snooze ending starts a new one
+    pub first_fired_unix_ms: i64,   // when the first ring of this session started
     pub spec: AlarmSpec,
     pub snooze_count: u32,
     pub challenges_solved: bool,
@@ -718,6 +739,21 @@ pub struct AlarmKitSession {
 ```
 
 Error type: `AlarmKitError` (`NotFound`, `Store`, `Recipe`).
+
+### What the phone allows
+
+`mobile_sentinel::health`, with `alarm-kit`. What stands in the way of an alarm ringing on
+time, and the way to the setting for it.
+
+```rust
+let report = health::report(channel_id);          // HealthReport
+report.is_ok(Check::ExactAlarms);
+report.problems();                                // Vec<Check>, most serious first
+health::open_settings(Check::Overlay, channel_id); // false if there is no such page
+```
+
+`Check`: `ExactAlarms`, `Notifications`, `FullScreen`, `Overlay`, `BatteryUnrestricted`,
+`BackgroundAllowed`, `KeptWhenUnused`, `ChannelImportance`, `NotTotalSilence`, `BootSignal`.
 
 ### Custom sound resolution
 
@@ -755,9 +791,12 @@ mobile_sentinel::callbacks::on_job_heads_up(|job_id: String| {
 Always available (no feature required).
 
 ```rust
-// App's internal files directory. On Android: Context.getFilesDir() via JNI;
-// elsewhere (and in :sentinel cold-start without a registered Activity): ".".
+// App's files directory. On Android the one the Kotlin side uses, device-encrypted when
+// `direct_boot` is set, also with no Activity; elsewhere ".".
 pub fn app_files_dir() -> std::path::PathBuf;
+
+// The device's language as a two-letter code ("nl"), empty when unknown.
+pub fn device_language() -> String;
 
 // Extract bundled APK assets to the filesystem (idempotent — skips existing).
 pub struct AssetExtractor { /* … */ }
@@ -807,10 +846,13 @@ recipes   = ["state-store"]
 firing    = ["wake-lock", "firing-audio", "firing-vibration",
              "foreground-service", "exact-alarm", "kiosk", "full-screen-intent"]
 
+wake-lock, firing-audio, firing-vibration = ["foreground-service"]
+foreground-service, exact-alarm, kiosk, full-screen-intent, jobs = ["ring"]
+
 dismiss_guard = ["screen_pin"]
 accessibility = ["kiosk"]
 ```
 
-All other features (the leaf capabilities and the standalone building blocks
-`state-store`, `sound-library`, `jobs`, plus each firing sub-feature) have no
-dependencies — enable exactly what you call.
+`ring` is what a ring is made of; it comes with what needs it. All other features (the leaf
+capabilities and the building blocks `state-store` and `sound-library`) have no
+dependencies: enable exactly what you call.

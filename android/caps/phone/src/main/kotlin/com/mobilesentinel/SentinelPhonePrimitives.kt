@@ -2,8 +2,8 @@ package com.mobilesentinel
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.net.Uri
-import android.telephony.TelephonyManager
 import android.util.Log
 
 /**
@@ -51,26 +51,19 @@ object SentinelPhonePrimitives {
     /**
      * Report whether a phone call is currently active (ringing or off-hook).
      *
-     * Reads `TelephonyManager.getCallState()` and returns `true` when the
-     * state is not `CALL_STATE_IDLE` (0). On newer API levels reading the
-     * call state may require `READ_PHONE_STATE`; a [SecurityException] is
-     * caught and treated as "not in a call".
+     * Reads the audio mode, which needs no permission (`TelephonyManager`'s call
+     * state wants `READ_PHONE_STATE` from Android 12 on).
      *
-     * @return `true` if a call is ringing or off-hook, `false` otherwise
-     *   (including when state is unavailable or permission is denied).
+     * @return `true` if a call is ringing or in progress, `false` otherwise.
      */
     @JvmStatic
     fun isInCall(): Boolean {
         val c: Context = SentinelPrimitives.getAppContext() ?: return false
         return try {
-            val tm = c.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                 ?: return false
-            @Suppress("DEPRECATION")
-            val state = tm.callState
-            state != TelephonyManager.CALL_STATE_IDLE
-        } catch (e: SecurityException) {
-            Log.w(TAG, "isInCall: missing READ_PHONE_STATE: ${e.message}")
-            false
+            am.mode == AudioManager.MODE_RINGTONE || am.mode == AudioManager.MODE_IN_CALL ||
+                am.mode == AudioManager.MODE_IN_COMMUNICATION
         } catch (e: Throwable) {
             Log.w(TAG, "isInCall: ${e.message}", e)
             false

@@ -13,12 +13,6 @@ import android.util.Log
  * Android APIs — no orchestration, no state machines, no Recipe-specific
  * behavior.
  *
- * This implementation uses the modern [ConnectivityManager.getActiveNetwork]
- * + [ConnectivityManager.getNetworkCapabilities] API (API 23+), in contrast
- * to the legacy `getActiveNetworkInfo` path used by the raw-JNI Rust backend.
- * The integer mappings returned to Rust are identical so either backend is
- * interchangeable from the Rust side.
- *
  * Connection-type integers (matching the Rust `ConnectionType` enum):
  *   - 0 = None
  *   - 1 = Wifi
@@ -35,13 +29,8 @@ object SentinelNetworkPrimitives {
     private const val TAG = "MobileSentinel.Network"
 
     /**
-     * Returns `true` when the active network has validated internet access.
-     *
-     * Uses [NetworkCapabilities.NET_CAPABILITY_INTERNET] together with
-     * [NetworkCapabilities.NET_CAPABILITY_VALIDATED]; if the validated
-     * capability is unavailable for any reason, falls back to requiring only
-     * the internet capability. Returns `false` when there is no app context,
-     * no active network, or no capabilities.
+     * Returns `true` when the active network says it has internet access. Returns
+     * `false` when there is no app context, no active network, or no capabilities.
      */
     @JvmStatic
     fun isConnected(): Boolean {
@@ -52,12 +41,7 @@ object SentinelNetworkPrimitives {
 
             val network = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(network) ?: return false
-
-            val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            val isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-
-            // Prefer validated internet; fall back to plain internet capability.
-            hasInternet && isValidated || hasInternet
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         } catch (e: Throwable) {
             Log.w(TAG, "isConnected: ${e.message}", e)
             false

@@ -17,7 +17,9 @@ pub fn is_available() -> bool {
     }
 }
 
-/// Prompt for biometric auth with `reason`.
+/// Prompt for biometric auth with `reason`, and wait for the answer: `Ok` only if the
+/// user was recognised. Blocks, so not on the UI thread. Needs the app's Activity to be a
+/// `FragmentActivity` and on screen.
 pub fn authenticate(reason: &str) -> Result<(), SentinelError> {
     #[cfg(target_os = "android")]
     {

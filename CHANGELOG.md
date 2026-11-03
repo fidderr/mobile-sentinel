@@ -32,6 +32,16 @@ change.
 
 ### Fixed
 
+- `display::safe_area_insets` also says how far the keyboard covers the content
+  (`keyboard`): an edge-to-edge window does not shrink for it.
+- `screen_pin`: `pin` and `unpin` looked for an Activity in the application context, which
+  never is one, so they could not work. They use the resumed Activity.
+- `biometric`: `authenticate` had the same problem, and would have called a prompt on screen
+  a success. It waits for the answer now, and is `Ok` only if the user was recognised.
+- `phone`: opening the dialer needs no `CALL_PHONE`, so it is gone, and with it the Play
+  review. `is_in_call` reads the audio mode, as the call state wants a permission from
+  Android 12 on.
+- `secure_storage` is private to the app but not encrypted, whatever the docs said.
 - A ring whose processes all died came back without its screen, as on ColorOS when an app
   is swiped away: nothing in the new `:sentinel` was guarding.
 - The guardian could stop just as a job became active.

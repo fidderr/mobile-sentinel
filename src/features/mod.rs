@@ -100,7 +100,7 @@ pub mod scanner;
 /// System screen-pinning. Gated behind `screen_pin`.
 #[cfg(feature = "screen_pin")]
 pub mod screen_pin;
-/// Encrypted key/value storage. Gated behind `secure_storage`.
+/// Key/value storage private to the app, not encrypted. Gated behind `secure_storage`.
 #[cfg(feature = "secure_storage")]
 pub mod secure_storage;
 /// Accelerometer shake counter + step counter. Gated behind `sensors`.

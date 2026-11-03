@@ -484,7 +484,7 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "secure_storage",
-        description: "Encrypted key/value storage.",
+        description: "Key/value storage private to the app. Not encrypted.",
         permissions: NO_PERMS,
         features: NO_FEATURES,
         components: "",
@@ -502,11 +502,11 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "phone",
-        description: "Dial numbers / query call state.",
-        permissions: &[Permission::new("android.permission.CALL_PHONE")],
+        description: "Open the dialer / query call state.",
+        permissions: NO_PERMS,
         features: NO_FEATURES,
         components: "",
-        policy_sensitive: true,
+        policy_sensitive: false,
         kotlin_sources: &["SentinelPhonePrimitives.kt"],
     },
     Capability {
@@ -709,7 +709,7 @@ pub fn capability(id: &str) -> Option<&'static Capability> {
 /// [`CAPABILITIES`] — so the table is the single source of truth and there is
 /// no second hand-written list to keep in sync. Composite/building-block
 /// features that contribute no manifest capability of their own (e.g.
-/// `alarm-kit`, `recipes`, `firing`, `sound-library`, `jobs`, `state-store`)
+/// `alarm-kit`, `recipes`, `firing`, `sound-library`, `state-store`)
 /// have no row and therefore map to `None`; their constituent firing
 /// sub-features are listed explicitly by the consumer (or by the `firing`
 /// bundle, expanded via [`FEATURE_EDGES`]). Returns `None` for unknown /
@@ -1256,8 +1256,8 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_for_features_empty_is_husk() {
-        // No features → no capabilities (the husk: kernel only).
+    fn capabilities_for_features_empty_is_nothing() {
+        // No features → no capabilities: nothing but the kernel.
         let caps = capabilities_for_features::<&str>(&[]);
         assert!(caps.is_empty());
     }
@@ -1396,7 +1396,7 @@ mod tests {
     #[test]
     fn firing_definition_matches_shared_bundle() {
         // Cargo.toml's `firing = [...]` (parsed here) and `FIRING_BUNDLE_IDS`
-        // (the const build.rs + the registry share) describe the SAME 6
+        // (the const build.rs + the registry share) describe the SAME 7
         // surfaces. Cargo declares them kebab-case; the const is snake_case —
         // normalize before comparing. This is the drift guard between the two
         // remaining copies (Cargo.toml, which Cargo requires, and the const,

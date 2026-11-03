@@ -1,5 +1,5 @@
-//! Secure storage capability — encrypted key/value. Gated behind
-//! `secure_storage`. Sole entry point. The JNI calls into
+//! Key/value storage private to the app, not encrypted. Gated behind `secure_storage`.
+//! Sole entry point. The JNI calls into
 //! `com.mobilesentinel.SentinelSecureStoragePrimitives` live here.
 
 use crate::error::SentinelError;

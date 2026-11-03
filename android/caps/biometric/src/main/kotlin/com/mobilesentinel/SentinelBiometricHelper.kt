@@ -1,68 +1,71 @@
 package com.mobilesentinel
 
-import android.app.Activity
+import android.os.Looper
 import android.util.Log
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Kotlin helper for biometric authentication.
- * BiometricPrompt requires a FragmentActivity and must run on the main thread.
+ * Shows the system's BiometricPrompt, over the resumed FragmentActivity, and waits
+ * for its answer.
  */
 object SentinelBiometricHelper {
 
     private const val TAG = "MobileSentinel.Biometric"
 
+    /** Nobody answered by then: not authenticated. */
+    private const val TIMEOUT_SECONDS = 120L
+
     /**
-     * Shows the BiometricPrompt to authenticate the user.
-     * Must be called with a FragmentActivity context.
-     * Outcome is logged; there is no result callback into Rust — the
-     * universal-SDK biometric path treats a launched prompt as success
-     * and relies on the consumer's own UI flow for the final decision.
+     * Whether the user was recognised. Blocks until they answered, so not on the UI thread.
+     * False when there is no FragmentActivity on screen to show the prompt over.
      */
     @JvmStatic
-    fun authenticate(activity: Activity, reason: String) {
-        if (activity !is FragmentActivity) {
-            Log.e(TAG, "Activity is not a FragmentActivity, cannot show BiometricPrompt")
-            return
+    fun authenticate(reason: String): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            Log.e(TAG, "authenticate blocks: not on the UI thread")
+            return false
         }
-
-        val executor = ContextCompat.getMainExecutor(activity)
-
+        val activity = SentinelActivityTracker.currentResumedActivity as? FragmentActivity
+        if (activity == null) {
+            Log.w(TAG, "no resumed FragmentActivity to show the prompt over")
+            return false
+        }
+        val recognised = AtomicBoolean(false)
+        val answered = CountDownLatch(1)
         activity.runOnUiThread {
             try {
                 val callback = object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        super.onAuthenticationSucceeded(result)
-                        Log.i(TAG, "Biometric authentication succeeded")
+                        recognised.set(true)
+                        answered.countDown()
                     }
 
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                        super.onAuthenticationError(errorCode, errString)
-                        Log.w(TAG, "Biometric authentication error: $errString (code=$errorCode)")
+                        Log.w(TAG, "biometric error: $errString (code=$errorCode)")
+                        answered.countDown()
                     }
 
-                    override fun onAuthenticationFailed() {
-                        super.onAuthenticationFailed()
-                        Log.w(TAG, "Biometric authentication failed (not recognized)")
-                        // Prompt stays open for retry.
-                    }
+                    // onAuthenticationFailed: not recognised, and the prompt stays open for
+                    // another try.
                 }
-
-                val prompt = BiometricPrompt(activity, executor, callback)
-
-                val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle("Authentication Required")
-                    .setSubtitle(reason)
-                    .setNegativeButtonText("Cancel")
-                    .build()
-
-                prompt.authenticate(promptInfo)
-                Log.i(TAG, "BiometricPrompt shown")
+                val prompt = BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback)
+                prompt.authenticate(
+                    BiometricPrompt.PromptInfo.Builder()
+                        .setTitle(reason)
+                        .setNegativeButtonText(activity.getString(android.R.string.cancel))
+                        .build(),
+                )
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to show BiometricPrompt", e)
+                Log.e(TAG, "showing the prompt failed", e)
+                answered.countDown()
             }
         }
+        answered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        return recognised.get()
     }
 }

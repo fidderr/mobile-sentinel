@@ -1,9 +1,5 @@
 package com.mobilesentinel
 
-import android.app.Activity
-import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.biometric.BiometricManager
 
@@ -17,12 +13,6 @@ import androidx.biometric.BiometricManager
  *
  * Threading: every method is `@JvmStatic`, stateless, and never throws.
  * Each body returns a safe fallback on any failure (`false` / `0`).
- *
- * Context is obtained from [SentinelPrimitives.getAppContext], which returns
- * the *application* context — never an Activity. Because `BiometricPrompt`
- * requires a `FragmentActivity`, [authenticate] can only launch when that
- * context is itself an Activity; otherwise it logs and returns false, leaving
- * the host to call [SentinelBiometricHelper.authenticate] with a real Activity.
  */
 object SentinelBiometricsPrimitives {
     private const val TAG = "MobileSentinel.Biometrics"
@@ -69,40 +59,14 @@ object SentinelBiometricsPrimitives {
     }
 
     /**
-     * Launch the system biometric prompt.
+     * Show the system biometric prompt and wait for the answer.
      *
-     * `BiometricPrompt` requires a `FragmentActivity` and must run on the UI
-     * thread, so this delegates to [SentinelBiometricHelper.authenticate],
-     * posting the launch to the main looper. Only the *application* context is
-     * available here, so the prompt can be shown only when that context is in
-     * fact an Activity. When it is not, no Activity can be obtained from app
-     * context, so this logs and returns false — the host must call
-     * [SentinelBiometricHelper.authenticate] directly with a live Activity.
-     *
-     * @return true if the prompt launch was dispatched, false otherwise.
+     * @return true only if the user was recognised. Blocks, so not on the UI thread.
      */
     @JvmStatic
     fun authenticate(reason: String): Boolean {
         return try {
-            val context: Context = SentinelPrimitives.getAppContext() ?: return false
-            val activity = context as? Activity
-            if (activity == null) {
-                Log.w(
-                    TAG,
-                    "authenticate requires an Activity that cannot be obtained from app " +
-                        "context; the host must call SentinelBiometricHelper.authenticate " +
-                        "directly with a FragmentActivity",
-                )
-                return false
-            }
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    SentinelBiometricHelper.authenticate(activity, reason)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "authenticate dispatch failed: ${e.message}", e)
-                }
-            }
-            true
+            SentinelBiometricHelper.authenticate(reason)
         } catch (e: Throwable) {
             Log.w(TAG, "authenticate failed: ${e.message}", e)
             false
