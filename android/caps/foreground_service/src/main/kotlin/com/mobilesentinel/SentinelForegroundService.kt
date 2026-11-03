@@ -397,6 +397,11 @@ class SentinelForegroundService : Service() {
             .setOnlyAlertOnce(!fullScreen)
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+        // A banner would only cover the alarm's own screen, for some seconds. The channel is loud
+        // for when that screen is not there. The sound is not the notification's: it stays.
+        if (uiVisible && !backup && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setSilent(true)
+        }
 
         val activity = if (backup) {
             SentinelBackupActivity::class.java.name

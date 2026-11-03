@@ -372,6 +372,7 @@ fn fire_request(
         kiosk_hide_status_bar: runtime_cfg.kiosk_hide_status_bar,
         kiosk_hide_nav_bar: runtime_cfg.kiosk_hide_nav_bar,
         firing_full_screen: runtime_cfg.firing_full_screen,
+        fresh,
         fade_in_ms: if fresh {
             u32::from(alarm_ctx.fade_in_secs) * 1000
         } else {

@@ -53,3 +53,19 @@ pub(crate) fn is_activity_resumed(fqcn: &str) -> bool {
         .and_then(|v| v.z().ok())
     })
 }
+
+/// Whether any activity of this app is in front.
+#[cfg(all(target_os = "android", firing_enabled))]
+pub(crate) fn is_app_in_front() -> bool {
+    use self::jni::with_jni_class;
+
+    with_jni_class(
+        "com/mobilesentinel/SentinelActivityTracker",
+        false,
+        |env, class| {
+            env.call_static_method(class, "isAnyActivityResumed", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
+        },
+    )
+}

@@ -40,16 +40,25 @@ impl FiringSink for AndroidFiringSink {
         allow(unused_variables)
     )]
     fn start_firing(&self, req: &FireRequest) -> bool {
+        // Whether the UI is where it has to be already. For a ring that comes back that is
+        // anywhere in this app: closing what the user is in would be no help.
+        let ui_in_front = || {
+            if req.fresh {
+                req.activity_fqcn
+                    .as_deref()
+                    .is_some_and(crate::platform::android::is_activity_resumed)
+            } else {
+                crate::platform::android::is_app_in_front()
+            }
+        };
+
         // The ring first. When `foreground-service` is off there is no critical
         // surface to engage, so report success.
         #[cfg(feature = "foreground-service")]
         let ring_ok = {
             // The service leaves out the full-screen banner when the firing UI is
             // already on screen: it would only cover it.
-            let ui_visible = req
-                .activity_fqcn
-                .as_deref()
-                .is_some_and(crate::platform::android::is_activity_resumed);
+            let ui_visible = ui_in_front();
             let ok = serde_json::to_string(req)
                 .is_ok_and(|plan| jni::start_ring(&req.instance_id, &plan, ui_visible));
             if !ok {
@@ -89,7 +98,7 @@ impl FiringSink for AndroidFiringSink {
         #[cfg(feature = "full-screen-intent")]
         if req.firing_full_screen {
             if let Some(fqcn) = &req.activity_fqcn {
-                if !crate::platform::android::is_activity_resumed(fqcn) {
+                if !ui_in_front() {
                     let _ = jni::show_full_screen_intent(fqcn, true);
                 }
             }

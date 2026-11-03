@@ -67,6 +67,10 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
         return a.componentName.className == fqcn || a.javaClass.name == fqcn
     }
 
+    /** Whether any activity of this app is in front. */
+    @JvmStatic
+    fun isAnyActivityResumed(): Boolean = currentResumedActivity != null
+
     override fun onActivityResumed(activity: Activity) {
         currentResumedActivity = activity
         if (isMainActivity(activity)) {

@@ -21,6 +21,9 @@
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FireRequest {
     pub instance_id: String,
+    /// A new ring, not one coming back. A new one takes the screen. One that comes back leaves it
+    /// to whatever of this app the user is in, such as a scanner.
+    pub fresh: bool,
     /// Notification channel id for the firing FGS notification.
     pub channel_id: String,
     /// Notification channel display name (used on first-create only).
@@ -204,6 +207,7 @@ mod tests {
 
     fn sample_fire() -> FireRequest {
         FireRequest {
+            fresh: true,
             instance_id: "a".into(),
             channel_id: "c".into(),
             channel_name: "C".into(),

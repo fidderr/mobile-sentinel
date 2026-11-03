@@ -37,6 +37,10 @@ change.
   then stands still until something like a touch.
 - An exact alarm's broadcast goes through the foreground queue. In the background queue, up to
   Android 13, it waited its turn behind whatever else was going on: 13 seconds right after a boot.
+- No banner over the alarm's own screen: the ring's notification is silent while that screen is up,
+  on Android 12 and newer. The channel made it a heads-up all the same.
+- A ring that comes back (`AlarmKit::resume`) no longer takes the screen from whatever of the app
+  is in front, such as a scanner. A new ring still does.
 - `scanner`, `media_picker`, `camera`: what was scanned, picked or taken after a minute or two was
   lost, with the activity still open and the app no longer waiting. They wait 30 minutes, and 10
   for a photo.
