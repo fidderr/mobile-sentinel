@@ -25,6 +25,7 @@
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
 //! direct_boot = true                     # optional — files are device-encrypted, so alarms ring before the first unlock
+//! icon_background = "F7F7F7"              # optional — makes the icon adaptive, on this colour
 //! min_webview = 90                       # optional — older WebViews get the backup screen and a notice
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
@@ -120,7 +121,11 @@ fn main() {
     // Step 2: Copy icon + assets (if configured)
     println!("[2/3] Assets...");
     if let Some(icon) = &config.icon_path {
-        copy_icon(icon, &config.project_path);
+        copy_icon(
+            icon,
+            config.icon_background.as_deref(),
+            &config.project_path,
+        );
     }
     copy_assets(&config.asset_paths, &config.project_path);
 
@@ -252,6 +257,7 @@ struct Config {
     project_path: PathBuf,
     activity: String,
     icon_path: Option<PathBuf>,
+    icon_background: Option<String>,
     asset_paths: Vec<PathBuf>,
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
@@ -336,6 +342,7 @@ fn load_config() -> Config {
         project_path,
         activity,
         icon_path,
+        icon_background: toml.get("icon_background").cloned(),
         asset_paths,
         capabilities,
         default_screen_orientation,
@@ -710,7 +717,7 @@ fn detect_activity_from_manifest(project: &Path) -> Option<String> {
     None
 }
 
-fn copy_icon(icon_source: &Path, project_path: &Path) {
+fn copy_icon(icon_source: &Path, background: Option<&str>, project_path: &Path) {
     let res_path = project_path.join("app/src/main/res");
     let densities = [
         "mipmap-mdpi",
@@ -747,6 +754,29 @@ fn copy_icon(icon_source: &Path, project_path: &Path) {
     let _ = fs::remove_file(res_path.join("mipmap-anydpi-v26/ic_launcher_round.xml"));
     let _ = fs::remove_file(res_path.join("drawable/ic_launcher_background.xml"));
     let _ = fs::remove_file(res_path.join("drawable-v24/ic_launcher_foreground.xml"));
+
+    // With a background colour the launcher gets an adaptive icon, with the picture in
+    // the part every mask leaves visible. Without one, Android shrinks the picture into a
+    // box of its own. The picture needs a name of its own, or the XML points at itself.
+    if let Some(background) = background {
+        let adaptive_dir = res_path.join("mipmap-anydpi-v26");
+        let picture_dir = res_path.join("drawable-nodpi");
+        let _ = fs::create_dir_all(&adaptive_dir);
+        let _ = fs::create_dir_all(&picture_dir);
+        let _ = fs::copy(
+            icon_source,
+            picture_dir.join(format!("ic_launcher_picture.{ext}")),
+        );
+        let xml = format!(
+            r##"<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background><color android:color="#{background}" /></background>
+    <foreground><inset android:drawable="@drawable/ic_launcher_picture" android:inset="12%" /></foreground>
+</adaptive-icon>
+"##
+        );
+        let _ = fs::write(adaptive_dir.join("ic_launcher.xml"), xml);
+    }
 
     eprintln!("  Icon: {}", icon_source.display());
 }
