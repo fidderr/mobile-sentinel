@@ -28,17 +28,19 @@ object SentinelDisplayPrimitives {
 
     /**
      * Window brightness captured before the first override, so it can be
-     * restored later. `-1f` means "nothing saved" (and also doubles as the
-     * `BRIGHTNESS_OVERRIDE_NONE` sentinel value).
+     * restored later. `-1f` is the system's own brightness, `BRIGHTNESS_OVERRIDE_NONE`.
      */
     @Volatile
     private var savedBrightness: Float = -1f
+    /** Whether [savedBrightness] holds a value: the system's own is negative too. */
+    private var brightnessSaved = false
 
     /**
-     * Resolve the stored context as an [Activity], or null. Window-level
-     * operations require an Activity; the app context usually isn't one.
+     * The live UI Activity, or the stored context if that is one, or null.
+     * Window-level operations require an Activity; the app context usually isn't one.
      */
-    private fun activityOrNull(): Activity? = SentinelPrimitives.getAppContext() as? Activity
+    private fun activityOrNull(): Activity? =
+        SentinelActivityTracker.currentResumedActivity ?: SentinelPrimitives.getAppContext() as? Activity
 
     /**
      * Set the window brightness override. [level] is clamped to `0.0..1.0`.
@@ -61,11 +63,15 @@ object SentinelDisplayPrimitives {
                 try {
                     val lp = activity.window.attributes
                     // Capture the pre-override value once, before we clobber it.
-                    if (savedBrightness < 0f) {
+                    if (!brightnessSaved) {
                         savedBrightness = lp.screenBrightness
+                        brightnessSaved = true
                     }
-                    lp.screenBrightness = clamped
-                    activity.window.attributes = lp
+                    // Callers may repeat this, and a change of attributes costs a layout.
+                    if (lp.screenBrightness != clamped) {
+                        lp.screenBrightness = clamped
+                        activity.window.attributes = lp
+                    }
                 } catch (e: Throwable) {
                     Log.w(TAG, "setBrightness(UI): ${e.message}", e)
                 }
@@ -113,7 +119,7 @@ object SentinelDisplayPrimitives {
      * Restore the brightness captured by the first [setBrightness] call.
      * If a value was saved it is reapplied; otherwise the override is
      * cleared to `BRIGHTNESS_OVERRIDE_NONE` (-1f) to revert to the system
-     * brightness. [savedBrightness] is reset afterwards.
+     * brightness.
      *
      * @return true on success, false if no Activity context is available.
      */
@@ -125,21 +131,20 @@ object SentinelDisplayPrimitives {
             return false
         }
         return try {
-            val target = if (savedBrightness >= 0f) {
-                savedBrightness
-            } else {
-                WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            }
             activity.runOnUiThread {
                 try {
                     val lp = activity.window.attributes
-                    lp.screenBrightness = target
+                    lp.screenBrightness = if (brightnessSaved) {
+                        savedBrightness
+                    } else {
+                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    }
+                    brightnessSaved = false
                     activity.window.attributes = lp
                 } catch (e: Throwable) {
                     Log.w(TAG, "restoreBrightness(UI): ${e.message}", e)
                 }
             }
-            savedBrightness = -1f
             true
         } catch (e: Throwable) {
             Log.w(TAG, "restoreBrightness: ${e.message}", e)
