@@ -4,8 +4,6 @@
 //! the transition lock and reloads the Context before routing to the Recipe
 //! handler. Recipes never receive settings from any source other than the
 //! freshly-loaded Context.
-//!
-//! See `requirements.md §Requirement 5.5, 7.5` and `design.md §1.3`.
 
 use crate::recipes::context::{ContextStore, StoreError};
 use crate::recipes::recipe::RecipeError;

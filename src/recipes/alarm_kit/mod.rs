@@ -344,14 +344,6 @@ pub enum AlarmKitError {
 }
 
 impl AlarmKit {
-    /// One-time install. Wires the global AlarmClass runtime, registers
-    /// the AlarmClass Recipe (idempotent), and returns a handle.
-    ///
-    /// Calling `install` more than once with different stores is undefined
-    /// behaviour by design — the AlarmClass runtime is a singleton.
-    ///
-    /// Also persists a runtime manifest to disk so the `:sentinel` child
-    /// process can self-bootstrap when an alarm broadcast wakes it up.
     /// Install with what this platform rings with: on Android its firing sink and sound
     /// backend, and the context store in the app's files. Elsewhere, where nothing can
     /// ring, without those. `bundled_sounds` and `custom_sounds` are where the app keeps
@@ -368,8 +360,6 @@ impl AlarmKit {
         {
             let sink: Arc<dyn FiringSink> =
                 Arc::new(crate::platform::android::AndroidFiringSink::new());
-            // Process-wide, so that background tasks can reach it too.
-            crate::firing::install_firing_sink(sink.clone());
             let sounds = crate::SoundLibrary::new(
                 bundled_sounds,
                 custom_sounds,
@@ -394,6 +384,11 @@ impl AlarmKit {
         }
     }
 
+    /// One-time install. Wires the global AlarmClass runtime, registers
+    /// the AlarmClass Recipe (idempotent), and returns a handle.
+    ///
+    /// Calling `install` more than once with different stores is undefined
+    /// behaviour by design — the AlarmClass runtime is a singleton.
     pub fn install(config: AlarmKitConfig) -> Self {
         let runtime = alarm_class_runtime();
         runtime.set_store(config.store.clone());
@@ -429,13 +424,6 @@ impl AlarmKit {
         }
 
         kit
-    }
-
-    /// Construct a handle for an already-installed runtime. Use this
-    /// from background processes (`:sentinel`) where `install` was already
-    /// called by `Application.onCreate`.
-    pub fn handle(store: Arc<ContextStore>) -> Self {
-        Self { store }
     }
 
     /// Borrow the underlying ContextStore. Useful for advanced cases
@@ -773,7 +761,8 @@ impl AlarmKit {
         )
     }
 
-    /// Pause audio (e.g., during a telephony interruption).
+    /// Silence the ring while the user works on it. [`Self::resume`] brings it back, and
+    /// so does the app dying.
     pub fn pause(&self, id: &InstanceId) -> Result<(), AlarmKitError> {
         dispatch_trigger(&self.store, Trigger::Pause, id)?;
         Ok(())
@@ -824,6 +813,16 @@ impl AlarmKit {
             } => Some(next_fire_unix_ms),
             _ => None,
         })
+    }
+
+    /// When this alarm rings again, if it is snoozed right now (unix ms).
+    pub fn snoozed_until(&self, id: &InstanceId) -> Option<i64> {
+        match self.store.load(id).ok()?.state {
+            SessionState::Snoozed {
+                next_fire_unix_ms, ..
+            } => Some(next_fire_unix_ms),
+            _ => None,
+        }
     }
 
     /// Snapshot of the alarm the user should deal with now: the one that has
@@ -1177,16 +1176,6 @@ impl AlarmKit {
             zone
         }
     }
-
-    /// Compute next fire time for a given alarm instance from ContextStore.
-    /// Returns `None` if the instance is not in `Scheduled` state.
-    pub fn next_fire_time(&self, id: &InstanceId) -> Option<chrono::DateTime<chrono::Utc>> {
-        let record = self.store.load(id).ok()?;
-        if let SessionState::Scheduled { next_fire_unix_ms } = record.state {
-            return chrono::DateTime::from_timestamp_millis(next_fire_unix_ms);
-        }
-        None
-    }
 }
 
 #[cfg(test)]
@@ -1395,9 +1384,11 @@ mod tests {
         };
         kit.store().write(record).unwrap();
 
+        assert_eq!(kit.snoozed_until(&id), None);
         kit.snooze(&id).unwrap();
         let session_state = kit.store().load(&id).unwrap().state;
         assert!(matches!(session_state, SessionState::Snoozed { .. }));
+        assert!(kit.snoozed_until(&id).is_some());
     }
 
     #[test]

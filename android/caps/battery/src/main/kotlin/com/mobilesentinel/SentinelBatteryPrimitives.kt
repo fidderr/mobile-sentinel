@@ -12,7 +12,7 @@ import android.util.Log
  *
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
  * around an Android API — no orchestration logic. Reached from Rust via
- * `primitives_ext::battery_*`.
+ * `crate::features::battery`.
  *
  * Every method is `@JvmStatic`, wrapped in try/catch, logs via
  * [Log.w], never throws, and returns a safe fallback. The application

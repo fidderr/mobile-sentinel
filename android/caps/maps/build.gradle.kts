@@ -28,5 +28,4 @@ android {
 
 dependencies {
     implementation(project(":sentinel-core"))
-    implementation("androidx.core:core-ktx:1.12.0")
 }

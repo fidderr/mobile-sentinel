@@ -3,14 +3,13 @@ package com.mobilesentinel
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
-import android.os.Build
 import android.util.Log
 
 /**
  * Screen-pinning (lock task mode) primitives.
  *
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
- * around an Android API. Reached from Rust via `primitives_ext`.
+ * around an Android API. Reached from Rust via `crate::features::screen_pin`.
  *
  * Screen pinning requires an Activity (`startLockTask` / `stopLockTask`
  * are Activity methods). The application context returned by
@@ -91,12 +90,7 @@ object SentinelScreenPinPrimitives {
                 return false
             }
             val am = c.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
-            } else {
-                @Suppress("DEPRECATION")
-                am.isInLockTaskMode
-            }
+            am.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
         } catch (e: Throwable) {
             Log.w(TAG, "isPinned: ${e.message}")
             false

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -33,8 +34,8 @@ object SentinelJobGuardian {
     const val EXTRA_JOB_ID = SentinelActiveJobs.EXTRA_JOB_ID
 
     private val guarding = AtomicBoolean(false)
-    private var guardThread: Thread? = null
-    private val headsUpSent = mutableSetOf<String>()
+    /** From the poll loop, and from the alarm receiver on the main thread. */
+    private val headsUpSent = ConcurrentHashMap.newKeySet<String>()
 
     // All policy (how long between launches, how long a UI may be silent, how
     // far the allowance grows after a kill) comes from the job config that
@@ -64,25 +65,12 @@ object SentinelJobGuardian {
         }
         Log.i(TAG, "startGuarding: launching poll loop")
         val appContext = context.applicationContext
-        guardThread = Thread({
+        Thread({
             pollLoop(appContext)
         }, "SentinelJobGuardian").apply {
             isDaemon = true
             start()
         }
-    }
-
-    /**
-     * Stop the polling loop. Called when no active jobs remain or
-     * explicitly by the consumer.
-     */
-    @JvmStatic
-    fun stopGuarding() {
-        if (!guarding.getAndSet(false)) return
-        Log.i(TAG, "stopGuarding: signalling loop to stop")
-        guardThread?.interrupt()
-        guardThread = null
-        headsUpSent.clear()
     }
 
     /**
@@ -99,15 +87,19 @@ object SentinelJobGuardian {
     private fun pollLoop(context: Context) {
         Log.i(TAG, "pollLoop: started")
         try {
-            while (guarding.get()) {
+            while (true) {
                 val activeJobs = SentinelActiveJobs.list(context)
                 if (activeJobs.isEmpty()) {
                     Log.i(TAG, "pollLoop: no active jobs — stopping")
                     livenessKills = 0
                     uiFailures = 0
                     lastLaunchWallMs = 0L
+                    headsUpSent.clear()
                     guarding.set(false)
-                    break
+                    // A job that became active just now found this loop still running, and
+                    // left it to this loop.
+                    if (SentinelActiveJobs.list(context).isEmpty() || guarding.getAndSet(true)) return
+                    continue
                 }
 
                 val mainPid = SentinelRing.mainPid(context)
@@ -181,13 +173,9 @@ object SentinelJobGuardian {
                     .minOrNull() ?: 500L
                 Thread.sleep(interval)
             }
-        } catch (_: InterruptedException) {
-            Log.i(TAG, "pollLoop: interrupted")
         } catch (e: Throwable) {
             Log.e(TAG, "pollLoop: unexpected error", e)
-        } finally {
             guarding.set(false)
-            Log.i(TAG, "pollLoop: exited")
         }
     }
 

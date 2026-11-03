@@ -14,7 +14,7 @@ import java.io.File
  * Rust removes the marker. With one writer per file, the app saving a job while
  * it fires cannot lose the fire. Mirrors `ACTIVE_SUFFIX` in Rust (`features::jobs`).
  *
- * Lives in core because the alarm receiver, the guardian and the foreground
+ * In the `ring` module because the alarm receiver, the guardian and the foreground
  * service all need it and none of them depends on another.
  */
 object SentinelActiveJobs {

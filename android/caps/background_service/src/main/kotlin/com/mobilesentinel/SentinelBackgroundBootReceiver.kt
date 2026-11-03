@@ -6,7 +6,7 @@ import android.content.Intent
 import android.util.Log
 
 /** Starts the background service again after a reboot or an app update, if it was on. */
-class SentinelBootReceiver : BroadcastReceiver() {
+class SentinelBackgroundBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val prefs = context.getSharedPreferences("sentinel_background", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("enabled", false)) return

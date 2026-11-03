@@ -12,11 +12,11 @@ import java.net.URLEncoder
  *
  * This is recovery of OS state, not a decision: Rust decides which alarms
  * exist and when they ring, the arming primitives record exactly what they
- * were asked to arm, and [SentinelBootService] replays that record. Nothing
+ * were asked to arm, and [SentinelBootReceiver] replays that record. Nothing
  * here knows what an alarm *is* — only an id, a time and the plan to hand back —
  * and it does not read Rust's own files.
  *
- * One small file per alarm (`sentinel/armed/<id>.json`, the id URL-encoded),
+ * One small file per alarm (`sentinel/armed/<id>.armed`, the id URL-encoded),
  * so the MAIN process (arming) and `:sentinel` (forgetting an alarm that just
  * fired) never rewrite a shared file.
  */

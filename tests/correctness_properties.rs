@@ -1,5 +1,5 @@
 //! Top-level property tests proving the LoadContext-on-every-trigger
-//! invariant and the bug-class invariants from `requirements.md §22`.
+//! invariant and the kinds of bug this crate has had.
 //!
 //! These tests target the integration boundary (Recipe + ContextStore +
 //! dispatch) rather than individual unit modules — they are the
@@ -98,7 +98,7 @@ fn arb_alarm_class_context() -> impl Strategy<Value = AlarmClassContext> {
         )
 }
 
-// Property 7 (R7.10 / R22.7): ContextStore last-writer-wins.
+// ContextStore: the last writer wins.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
@@ -125,7 +125,7 @@ proptest! {
     }
 }
 
-// Property 1 (R5.5, R7.5): LoadContext invariant — every Trigger
+// LoadContext invariant — every Trigger
 // dispatched against a stale in-memory copy still reads the latest
 // Context from disk.
 proptest! {
@@ -175,7 +175,7 @@ proptest! {
 /// alongside the in-tree mod tests that also touch the registry.
 static SERIAL: Mutex<()> = Mutex::new(());
 
-/// Property 4 (R11.6, R22.4): Snooze count monotonicity through the
+/// Snooze count monotonicity through the
 /// dispatch boundary. Mutates Context only by issuing Snooze Triggers.
 #[test]
 fn snooze_count_strictly_monotonic_across_dispatch() {
@@ -249,7 +249,7 @@ fn snooze_count_strictly_monotonic_across_dispatch() {
     }
 }
 
-/// Property 3 (R22.2): scheduled X implies delivered X — for any
+/// Scheduled X implies delivered X — for any
 /// AlarmClass instance whose Context contains setting X at scheduling
 /// time, every subsequent Trigger reload sees X (the bug fix).
 #[test]

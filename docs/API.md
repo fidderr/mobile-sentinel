@@ -450,9 +450,6 @@ pub trait FiringSink: Send + Sync {
     fn cancel_exact_alarm(&self, alarm_id: &str);
     fn system_default_sound_uri(&self) -> String;
 }
-
-pub fn install_firing_sink(sink: std::sync::Arc<dyn FiringSink>);
-pub fn firing_sink() -> Option<std::sync::Arc<dyn FiringSink>>;
 ```
 
 Implementations: `AndroidFiringSink` (JNI; `mobile_sentinel::AndroidFiringSink`,
@@ -622,7 +619,6 @@ pub struct AlarmKitConfig {
 let kit = AlarmKit::install_on_platform(bundled_sounds, custom_sounds, alarm_class_config);
 
 let kit = AlarmKit::install(config);          // the same with your own parts
-let kit = AlarmKit::handle(store);            // handle for an already-installed runtime (e.g. :sentinel)
 ```
 
 `AlarmClassConfig` — the app-specific firing wiring AlarmKit hands the sink:
@@ -695,7 +691,7 @@ kit.pause(&id) -> Result<(), AlarmKitError>                      // quiet audio 
 kit.resume(&id) -> Result<(), AlarmKitError>                     // full re-engage (alias: reengage)
 kit.reengage(&id) -> Result<(), AlarmKitError>                   // re-engage firing surface (MAIN restart)
 kit.handle_job_heads_up(job_id: &str)                            // sentinel heads-up landing pad
-kit.on_startup(&[(String, AlarmSpec)])                           // end rings a reboot interrupted, rearm (a snooze in progress is kept), process jobs, reengage firing -> StartupReport { ended_by_reboot }
+kit.on_startup(&[(String, AlarmSpec)])                           // end rings a reboot interrupted, rearm (a snooze in progress is kept), process jobs, reengage firing -> StartupReport { ended_by_reboot, missed, finished, ring_ends }
 ```
 
 ### Inspection
@@ -704,7 +700,7 @@ kit.on_startup(&[(String, AlarmSpec)])                           // end rings a 
 kit.list() -> Result<Vec<(InstanceId, AlarmSpec)>, AlarmKitError>
 kit.get(&id) -> Result<AlarmSpec, AlarmKitError>
 kit.next_fire(&id) -> Result<Option<i64>, AlarmKitError>         // unix ms, Scheduled/Snoozed only
-kit.next_fire_time(&id) -> Option<DateTime<Utc>>                 // Scheduled only
+kit.snoozed_until(&id) -> Option<i64>                            // unix ms, if it is snoozed right now
 kit.current_session() -> Result<Option<AlarmKitSession>, AlarmKitError>
 kit.required_permissions() -> Vec<&'static str>
 kit.store() -> &Arc<ContextStore>

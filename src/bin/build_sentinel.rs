@@ -858,11 +858,6 @@ fn copy_dir_recursive(src: &Path, dest_base: &Path, root: &Path, copied: &mut Ve
 }
 
 fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
-    let ms_build = project_path.join("mobile-sentinel/build");
-    if ms_build.exists() {
-        let _ = fs::remove_dir_all(&ms_build);
-    }
-
     let gradlew = if cfg!(windows) {
         project_path.join("gradlew.bat")
     } else {

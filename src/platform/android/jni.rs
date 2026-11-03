@@ -81,14 +81,6 @@ fn load_app_class(env: &mut JNIEnv, name: &str) -> Option<jni::objects::GlobalRe
     }
 }
 
-/// [`load_app_class`] for a caller without a `JNIEnv` at hand.
-#[cfg(feature = "sensors")]
-pub(crate) fn load_app_class_global(name: &str) -> Option<jni::objects::GlobalRef> {
-    let vm = java_vm()?;
-    let mut env = vm.attach_current_thread_permanently().ok()?;
-    load_app_class(&mut env, name)
-}
-
 /// Borrow the cached JavaVM.
 fn java_vm() -> Option<jni::JavaVM> {
     let vm = JAVA_VM.get()?;

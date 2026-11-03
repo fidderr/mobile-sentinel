@@ -1,10 +1,8 @@
 //! One-liner initialization for mobile-sentinel.
 //!
 //! Sets up logging and crash-loop mitigation. Platform capabilities are
-//! reached through their feature-gated modules; the firing surface is
-//! reached through the [`crate::FiringSink`] installed via
-//! [`crate::install_firing_sink`] (on Android the consumer constructs
-//! `AndroidFiringSink`). There is no central backend container.
+//! reached through their feature-gated modules, and the firing surface through
+//! AlarmKit. There is no central backend container.
 
 /// Configuration for mobile-sentinel initialization.
 #[derive(Debug, Clone)]

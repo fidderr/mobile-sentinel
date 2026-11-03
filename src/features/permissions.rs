@@ -33,7 +33,8 @@ pub fn status(permission: &str) -> PermissionState {
 pub fn request(permission: &str) -> PermissionState {
     #[cfg(target_os = "android")]
     {
-        // Kotlin returns 0 = granted, 1 = denied (no activity), 2 = denied.
+        // Kotlin returns 0 = granted, 1 = not (yet): the dialog may be up, the answer
+        // comes later.
         match android::request_runtime_permission(permission) {
             0 => PermissionState::Granted,
             _ => PermissionState::Denied,

@@ -51,7 +51,6 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     @Volatile var blockRecents: Boolean = true
     @Volatile var blockVolume: Boolean = true
     @Volatile var relaunchDebounceMs: Long = 200
-    @Volatile var pendingDismissKeyguard: Boolean = false
     /** Whether to hide the status bar (clock/battery) while kiosk-firing. */
     @Volatile var hideStatusBar: Boolean = true
     /** Whether to hide the navigation bar while kiosk-firing. */
@@ -80,56 +79,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         java.util.WeakHashMap<Activity, Boolean>()
     )
 
-    /**
- * Cross-process file published when the target activity is resumed.
- * Read by the `:sentinel`-process watchdog to skip redundant re-dispatches
- * while the firing UI is already visible.
- * Must be a plain file (NOT SharedPreferences) because SharedPreferences
- * caches per-process and does not pick up writes from another process
- * without a forced reload — a plain file read always reflects the most
- * recent write on disk.
- */
-    private const val TARGET_RESUMED_FILE = "mobile_sentinel_target_resumed"
-
     /** Cross-process kiosk binding state, owned by this module. */
     private const val KIOSK_STATE_FILE = "mobile_sentinel_kiosk_state"
-
-    /**
- * True when the target activity has been resumed and not yet paused.
- * Backed by a plain file so `:sentinel`-process watchdog code can read
- * it without SharedPreferences caching. On every main-process
- * resume/pause we synchronously touch this file.
- */
-    @JvmStatic
-    fun isTargetResumed(context: Context): Boolean {
-        return try {
-            java.io.File(SentinelStorage.filesDir(context), TARGET_RESUMED_FILE).exists()
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun writeTargetResumed(activity: Activity, resumed: Boolean) {
-        try {
-            val file = java.io.File(SentinelStorage.filesDir(activity), TARGET_RESUMED_FILE)
-            if (resumed) {
-                file.writeText("1")
-            } else if (file.exists()) {
-                file.delete()
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "writeTargetResumed($resumed) failed: ${e.message}")
-        }
-    }
-
-    private fun clearTargetResumed(context: Context) {
-        try {
-            val file = java.io.File(SentinelStorage.filesDir(context), TARGET_RESUMED_FILE)
-            if (file.exists()) file.delete()
-        } catch (e: Throwable) {
-            Log.w(TAG, "clearTargetResumed failed: ${e.message}")
-        }
-    }
 
     // ---- Cross-process kiosk-state file (owned here) ------------------------
 
@@ -189,10 +140,10 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     private val backCallbacks: MutableMap<Int, OnBackInvokedCallback> = mutableMapOf()
 
     /**
- * Attach to the host `Application`. Called exactly once, from
- * [SentinelKioskInitializer.onCreate] (which runs during
- * `Application.onCreate` via the zero-arg `ContentProvider` hook).
- */
+     * Attach to the host `Application`. Called exactly once, from
+     * [SentinelKioskInitializer.onCreate] (which runs during
+     * `Application.onCreate` via the zero-arg `ContentProvider` hook).
+     */
     fun attach(application: Application) {
         if (appContext != null) {
             Log.w(TAG, "attach() called again — ignoring (already attached)")
@@ -204,10 +155,10 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     }
 
     /**
- * Enable activity lock with the given policy. Called from Rust via JNI
- * ([SentinelKioskPrimitives.enableKioskMode]). Every behavioral choice is a
- * parameter — the controller hardcodes none.
- */
+     * Enable activity lock with the given policy. Called from Rust via JNI
+     * ([SentinelKioskPrimitives.enableKioskMode]). Every behavioral choice is a
+     * parameter — the controller hardcodes none.
+     */
     @JvmStatic
     fun enable(
         activityFqcn: String,
@@ -245,11 +196,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     fun disable() {
         enabled = false
         lastRelaunchAtMs = 0L
-        pendingDismissKeyguard = false
-        appContext?.let {
-            clearTargetResumed(it)
-            clearKioskStateFile(it)
-        }
+        appContext?.let { clearKioskStateFile(it) }
         currentResumedActivity?.let { a ->
             a.runOnUiThread {
                 try {
@@ -270,17 +217,13 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         Log.i(TAG, "disabled")
     }
 
-    /** Exposed for testing. */
-    @JvmStatic
-    fun isActive(): Boolean = enabled
-
     /**
- * Cross-process kiosk auto-engage. Rust's `enableKioskMode` writes the
- * active binding to a plain file on disk (NOT SharedPreferences, which
- * caches per-process). On every activity-lifecycle callback in MAIN we
- * re-read that file and bind kiosk if it indicates an active session.
- * Idempotent — when already enabled or the file is absent this is a no-op.
- */
+     * Cross-process kiosk auto-engage. Rust's `enableKioskMode` writes the
+     * active binding to a plain file on disk (NOT SharedPreferences, which
+     * caches per-process). On every activity-lifecycle callback in MAIN we
+     * re-read that file and bind kiosk if it indicates an active session.
+     * Idempotent — when already enabled or the file is absent this is a no-op.
+     */
     private fun maybeAutoEngageFromPrefs(activity: Activity) {
         if (enabled) return
         try {
@@ -302,23 +245,16 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     }
 
     /**
- * Called by the ActivityLifecycleCallbacks when the target activity is
- * leaving the foreground. Relaunches the target from this same process,
- * throttled by `relaunchDebounceMs`.
- *
- * For Back-key dismissals the OnBackInvokedCallback consumes the event
- * before the activity can finish, so this path is never reached. For
- * Home / overview the activity is paused but not finishing, so the
- * relaunch is a clean REORDER_TO_FRONT.
- *
- * For swipe-up-from-recents `isFinishing` is true and the main process
- * is mid-EGL-teardown. A `startActivity` call from inside that dying
- * process triggers `pthread_mutex_lock called on a destroyed mutex` in
- * libEGL and counts as a crash; three within a short window blocks
- * further launches. We skip the in-process relaunch in that case and
- * let `:sentinel`'s watchdog ticks resurrect the activity from a clean
- * external broadcast.
- */
+     * Called by the ActivityLifecycleCallbacks when the target activity is
+     * leaving the foreground. Relaunches the target from this same process,
+     * throttled by `relaunchDebounceMs`.
+     *
+     * For Back-key dismissals the OnBackInvokedCallback consumes the event
+     * before the activity can finish, so this path is never reached. For
+     * Home / overview the activity is paused but not finishing, so the
+     * relaunch is a clean REORDER_TO_FRONT. One that is finishing anyway has
+     * no use for the throttle.
+     */
     private fun onActivityLeaving(activity: Activity) {
         if (!enabled) return
 
@@ -359,10 +295,10 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         SentinelRing.noteActivity(ctx)
         val intent = Intent().apply {
             component = ComponentName(ctx.packageName, targetActivityFqcn)
- // NO CLEAR_TOP — it destroys the existing instance, and with our
- // periodic watchdog resurrection that would kill the activity on
- // every tick. Use REORDER_TO_FRONT + SINGLE_TOP to bring the
- // existing instance forward without destroying it.
+            // NO CLEAR_TOP — it destroys the existing instance, and with our
+            // periodic watchdog resurrection that would kill the activity on
+            // every tick. Use REORDER_TO_FRONT + SINGLE_TOP to bring the
+            // existing instance forward without destroying it.
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -375,7 +311,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         }
     }
 
- // ---- Application.ActivityLifecycleCallbacks -------------------------------
+    // ---- Application.ActivityLifecycleCallbacks -------------------------------
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
         // Cross-process kiosk auto-engage. Rust's `enableKioskMode` writes a
@@ -391,9 +327,9 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             internalActivities.add(activity)
         }
 
- // Register back-consumption as early as possible — activityCreated
- // fires before the first predictive-back gesture can be delivered,
- // so we beat the OS to the dispatcher.
+        // Register back-consumption as early as possible — activityCreated
+        // fires before the first predictive-back gesture can be delivered,
+        // so we beat the OS to the dispatcher.
         if (!enabled) return
         if (!isTargetActivity(activity)) return
         if (blockBack || blockVolume) installKeyGuard(activity)
@@ -446,13 +382,9 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             }
         }
 
- // Track foreground status so the watchdog can skip redundant re-dispatches.
- // Written to a plain file so the `:sentinel` process can read it.
-        writeTargetResumed(activity, true)
-
- // Exclude from Recents so the user cannot swipe the task away.
- // This is how Alarmy prevents swipe-to-dismiss: the task simply
- // doesn't appear in the recents list while the alarm is firing.
+        // Exclude from Recents so the user cannot swipe the task away.
+        // This is how Alarmy prevents swipe-to-dismiss: the task simply
+        // doesn't appear in the recents list while the alarm is firing.
         try {
             val am = activity.getSystemService(android.app.ActivityManager::class.java)
             am?.appTasks?.firstOrNull()?.setExcludeFromRecents(true)
@@ -468,7 +400,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
                 val window = activity.window
                 val controller = window.insetsController
                 if (hideStatusBar || hideNavBar) {
-                    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+                    window.setDecorFitsSystemWindows(false)
                     var mask = 0
                     if (hideStatusBar) mask = mask or android.view.WindowInsets.Type.statusBars()
                     if (hideNavBar) mask = mask or android.view.WindowInsets.Type.navigationBars()
@@ -480,7 +412,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
                             or android.view.WindowInsets.Type.navigationBars()) and mask.inv()
                     if (showMask != 0) controller?.show(showMask)
                 } else {
-                    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+                    window.setDecorFitsSystemWindows(true)
                     controller?.show(
                         android.view.WindowInsets.Type.statusBars()
                                 or android.view.WindowInsets.Type.navigationBars()
@@ -508,8 +440,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             Log.w(TAG, "immersive mode failed: ${e.message}")
         }
 
- // Runtime assertion — the manifest attributes may not engage if the
- // activity reaches top via some OEM paths.
+        // Runtime assertion — the manifest attributes may not engage if the
+        // activity reaches top via some OEM paths.
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 activity.setShowWhenLocked(true)
@@ -527,36 +459,19 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             Log.w(TAG, "keeping the alarm on screen failed: ${e.message}")
         }
 
- // Drain pending keyguard dismiss request.
-        if (pendingDismissKeyguard && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            try {
-                val km = activity.getSystemService(android.app.KeyguardManager::class.java)
-                km?.requestDismissKeyguard(activity, null)
-                pendingDismissKeyguard = false
-                Log.i(TAG, "requestDismissKeyguard dispatched")
-            } catch (e: Exception) {
-                Log.w(TAG, "requestDismissKeyguard failed: ${e.message}")
-            }
-        }
-
- // Register a high-priority OnBackInvokedCallback to consume Back.
- // onActivityCreated registers the same callback with the same key,
- // so this call is idempotent (registerBackCallback checks the map
- // and returns early when already registered).
+        // Register a high-priority OnBackInvokedCallback to consume Back.
+        // onActivityCreated registers the same callback with the same key,
+        // so this call is idempotent (registerBackCallback checks the map
+        // and returns early when already registered).
         if (blockBack || blockVolume) installKeyGuard(activity)
         if (blockBack && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerBackCallback(activity)
         }
     }
 
-    override fun onActivityPaused(activity: Activity) {
-        if (!enabled) return
-        if (!isTargetActivity(activity)) return
-        writeTargetResumed(activity, false)
-        // Don't call onActivityLeaving here — wait for onStopped where
-        // the started activity count is accurate (new activity's onStarted
-        // has already fired by then).
-    }
+    // Not onActivityLeaving yet: in onStopped the started activity count is accurate (the
+    // new activity's onStarted has fired by then).
+    override fun onActivityPaused(activity: Activity) {}
 
     override fun onActivityStopped(activity: Activity) {
         startedActivities.remove(activity.componentName.className)
@@ -564,10 +479,6 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
         val isTarget = isTargetActivity(activity)
         val isInternalActivity = activity.packageName == appContext?.packageName && !isTarget
-
-        if (isTarget) {
-            writeTargetResumed(activity, false)
-        }
 
         // Internal activity stopped (scanner closed). If target isn't visible,
         // user navigated away — relaunch IMMEDIATELY (bypass suppress).
@@ -594,20 +505,21 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityDestroyed(activity: Activity) {
         internalActivities.remove(activity)
+        if (currentResumedActivity === activity) currentResumedActivity = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             unregisterBackCallback(activity)
         }
     }
 
- // ---- Key handling: legacy KEYCODE_BACK (all API levels), volume keys -------
- //
- // The OnBackInvokedCallback below only sees Back when the system routes it
- // through predictive back. Some OEMs (seen on ColorOS: "predictive settings
- // is disabled") ignore the app's opt-in and deliver Back the legacy way — a
- // KEYCODE_BACK key event that ends in Activity.onBackPressed → finish. That
- // finish destroyed the alarm activity mid-ring. Wrapping the window callback
- // swallows that key event while the lock is on, and the volume keys as well;
- // the check is live, so the wrapper is inert once the kiosk is disabled.
+    // ---- Key handling: legacy KEYCODE_BACK (all API levels), volume keys -------
+    //
+    // The OnBackInvokedCallback below only sees Back when the system routes it
+    // through predictive back. Some OEMs (seen on ColorOS: "predictive settings
+    // is disabled") ignore the app's opt-in and deliver Back the legacy way — a
+    // KEYCODE_BACK key event that ends in Activity.onBackPressed → finish. That
+    // finish destroyed the alarm activity mid-ring. Wrapping the window callback
+    // swallows that key event while the lock is on, and the volume keys as well;
+    // the check is live, so the wrapper is inert once the kiosk is disabled.
 
     private class KeyGuard(
         private val base: android.view.Window.Callback,
@@ -652,7 +564,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         }
     }
 
- // ---- Back-key handling (API 33+) -----------------------------------------
+    // ---- Back-key handling (API 33+) -----------------------------------------
 
     @android.annotation.TargetApi(Build.VERSION_CODES.TIRAMISU)
     private fun registerBackCallback(activity: Activity) {

@@ -18,7 +18,7 @@
 
         <!-- Brings the service back after a reboot or an app update. -->
         <receiver
-            android:name="com.mobilesentinel.SentinelBootReceiver"
+            android:name="com.mobilesentinel.SentinelBackgroundBootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

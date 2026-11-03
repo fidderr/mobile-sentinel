@@ -30,5 +30,4 @@ dependencies {
     implementation(project(":sentinel-core"))
     // Dismiss-guard delegates to screen pinning at the Kotlin layer.
     implementation(project(":sentinel-screen_pin"))
-    implementation("androidx.core:core-ktx:1.12.0")
 }

@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Handle-based audio playback for UI sound PREVIEW.
  *
  * This is intentionally distinct from the firing-alarm playback surface
- * ([SentinelFiringAudioPrimitives.playSound]), which owns a single primary
+ * ([SentinelFiringAudioPrimitives.play]), which owns a single primary
  * player and is driven by the AlarmKit state machine. Preview playback is a
  * separate concern: a consumer (e.g. a sound-picker screen) plays a candidate sound,
  * receives an opaque `Long` handle, and later stops that specific handle.
@@ -46,16 +46,19 @@ object SentinelAudioPreviewPrimitives {
      * @param uri     `file://` / `content://` URI, an absolute file path
      *                (starting with `/`), or any other parseable URI string.
      * @param looping whether the preview should loop until [stop] is called.
+     * @param asAlarm play on the alarm stream, at the alarm volume, instead of as media.
      * @return a handle id (> 0) on success, or 0 on any failure.
      */
     @JvmStatic
-    fun play(uri: String, looping: Boolean): Long {
+    fun play(uri: String, looping: Boolean, asAlarm: Boolean): Long {
         SentinelPrimitives.getAppContext() ?: return 0L
         var player: MediaPlayer? = null
         return try {
             val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(if (asAlarm) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA)
+                .setContentType(
+                    if (asAlarm) AudioAttributes.CONTENT_TYPE_SONIFICATION else AudioAttributes.CONTENT_TYPE_MUSIC,
+                )
                 .build()
             val mp = MediaPlayer()
             player = mp

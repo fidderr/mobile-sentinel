@@ -89,7 +89,7 @@ object SentinelReminders {
             PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE)
         }
         val notification = Notification.Builder(context, CHANNEL)
-            .setSmallIcon(context.applicationInfo.icon)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle(intent.getStringExtra(EXTRA_TITLE))
             .setContentText(intent.getStringExtra(EXTRA_BODY))
             .setContentIntent(open)

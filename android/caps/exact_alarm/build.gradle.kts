@@ -36,5 +36,4 @@ dependencies {
     implementation(project(":sentinel-core"))
     implementation(project(":sentinel-ring"))
     implementation(project(":sentinel-jobs"))
-    implementation("androidx.core:core-ktx:1.12.0")
 }

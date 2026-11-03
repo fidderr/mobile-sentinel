@@ -258,7 +258,7 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         id: "sensors",
-        description: "Accelerometer shake counter + hardware step counter (ACTIVITY_RECOGNITION + high-rate sensors).",
+        description: "Accelerometer shake counter + hardware step counter (ACTIVITY_RECOGNITION).",
         permissions: &[
             Permission::new("android.permission.ACTIVITY_RECOGNITION"),
         ],
@@ -329,8 +329,9 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &[
             "SentinelBackground.kt",
             "SentinelBackgroundService.kt",
-            "SentinelBootReceiver.kt",
+            "SentinelBackgroundBootReceiver.kt",
             "SentinelOpenActivity.kt",
+            "SentinelLinkActivity.kt",
             "SentinelBackgroundInit.kt",
         ],
     },

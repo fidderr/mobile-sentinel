@@ -32,6 +32,8 @@ jobs:
           - scanner
           - camera
           - haptics
+          - home_widget
+          - ring
           - audio
           - overlay
           - permissions

@@ -15,12 +15,12 @@ object SentinelBiometricHelper {
     private const val TAG = "MobileSentinel.Biometric"
 
     /**
- * Shows the BiometricPrompt to authenticate the user.
- * Must be called with a FragmentActivity context.
- * Outcome is logged; there is no result callback into Rust — the
- * universal-SDK biometric path treats a launched prompt as success
- * and relies on the consumer's own UI flow for the final decision.
- */
+     * Shows the BiometricPrompt to authenticate the user.
+     * Must be called with a FragmentActivity context.
+     * Outcome is logged; there is no result callback into Rust — the
+     * universal-SDK biometric path treats a launched prompt as success
+     * and relies on the consumer's own UI flow for the final decision.
+     */
     @JvmStatic
     fun authenticate(activity: Activity, reason: String) {
         if (activity !is FragmentActivity) {
@@ -46,7 +46,7 @@ object SentinelBiometricHelper {
                     override fun onAuthenticationFailed() {
                         super.onAuthenticationFailed()
                         Log.w(TAG, "Biometric authentication failed (not recognized)")
- // Prompt stays open for retry.
+                        // Prompt stays open for retry.
                     }
                 }
 

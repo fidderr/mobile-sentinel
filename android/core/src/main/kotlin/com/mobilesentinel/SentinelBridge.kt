@@ -22,21 +22,21 @@ object SentinelBridge {
     private const val TAG = "MobileSentinel.Bridge"
 
     /**
- * Name of the native shared library to load. Defaults to `"main"` which
- * is the convention used by Dioxus and most Rust mobile frameworks.
- * Consumers using a different library name (e.g. via cargo-ndk) can set
- * this before the first JNI call:
- * ```kotlin
- * SentinelBridge.nativeLibraryName = "myapp"
- * ```
- */
+     * Name of the native shared library to load. Defaults to `"main"` which
+     * is the convention used by Dioxus and most Rust mobile frameworks.
+     * Consumers using a different library name (e.g. via cargo-ndk) can set
+     * this before the first JNI call:
+     * ```kotlin
+     * SentinelBridge.nativeLibraryName = "myapp"
+     * ```
+     */
     @JvmStatic
     var nativeLibraryName: String = "main"
 
     init {
         try {
- // Load the native library that contains our JNI functions.
- // The library name is configurable — defaults to "main" (libmain.so).
+            // Load the native library that contains our JNI functions.
+            // The library name is configurable — defaults to "main" (libmain.so).
             System.loadLibrary(nativeLibraryName)
             Log.i(TAG, "SentinelBridge: native library '$nativeLibraryName' loaded successfully")
         } catch (e: UnsatisfiedLinkError) {
@@ -47,8 +47,8 @@ object SentinelBridge {
     }
 
     /**
- * Called on boot completed. Dispatches to Rust's boot_completed callback.
- */
+     * Called on boot completed. Dispatches to Rust's boot_completed callback.
+     */
     @JvmStatic
     fun onBootCompleted() {
         try {
@@ -58,14 +58,14 @@ object SentinelBridge {
         }
     }
 
- // --- Sensor callbacks ---
+    // --- Sensor callbacks ---
 
     @JvmStatic
     fun onAccelerometerData(x: Double, y: Double, z: Double) {
         try {
             nativeOnAccelerometerData(x, y, z)
         } catch (e: UnsatisfiedLinkError) {
- // Expected during init — sensors may fire before native lib loads
+            // Expected during init — sensors may fire before native lib loads
         }
     }
 
@@ -74,7 +74,7 @@ object SentinelBridge {
         try {
             nativeOnStepCount(steps)
         } catch (e: UnsatisfiedLinkError) {
- // Expected during init
+            // Expected during init
         }
     }
 
@@ -91,7 +91,7 @@ object SentinelBridge {
         }
     }
 
- // --- Private native method declarations (each has a Rust export) ---
+    // --- Private native method declarations (each has a Rust export) ---
 
     @JvmStatic
     private external fun nativeOnBootCompleted()

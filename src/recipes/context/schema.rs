@@ -9,7 +9,7 @@
 //!
 //! 1. Define a `<Recipe>Context` struct with all configurable settings.
 //! 2. Add a variant to [`RecipeContext`] tagged with the recipe identifier.
-//! 3. The Recipe's `context_schema_name()` must match the variant tag.
+//! 3. The Recipe's `recipe_type()` must match the variant tag.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +22,7 @@ pub use crate::recipes::snooze::{EscalationPolicy, SnoozePolicy};
 
 /// The lifecycle state of a Recipe instance, persisted alongside the Context.
 ///
-/// Mirrors the canonical state machine in `requirements.md`. Each variant
-/// carries enough timestamp/counter state to reconstruct a session after
+/// Each variant carries enough timestamp/counter state to reconstruct a session after
 /// process death or reboot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -238,7 +237,7 @@ pub struct ChallengeSpec {
 
 /// Persisted envelope for a Recipe instance.
 ///
-/// One JSON file per instance under `context/<package>/<instance_id>.json`.
+/// One JSON file per instance under `sentinel/context/<instance_id>.json`.
 /// Atomic writes (write-temp + rename) plus a per-id mutex guarantee that
 /// readers observe either the pre-write or post-write Context, never a
 /// torn read.

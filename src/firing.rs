@@ -11,10 +11,6 @@
 //! Two implementations: `AndroidFiringSink` (JNI, in `platform::android`)
 //! and [`MockFiringSink`] (records calls, for recipe tests).
 
-use std::sync::Arc;
-
-use once_cell::sync::OnceCell;
-
 /// Everything the recipe engine needs to fire an alarm. Built by the recipe
 /// from a freshly-loaded Context.
 ///
@@ -135,24 +131,6 @@ pub trait FiringSink: Send + Sync {
     /// The platform's system-default alarm sound URI (fallback when a
     /// Recipe has no resolved sound).
     fn system_default_sound_uri(&self) -> String;
-}
-
-// ---------------------------------------------------------------------------
-// Process-wide installed FiringSink
-// ---------------------------------------------------------------------------
-
-static SINK: OnceCell<Arc<dyn FiringSink>> = OnceCell::new();
-
-/// Install the process-wide [`FiringSink`]. Called once on app start (on
-/// Android with `AndroidFiringSink`).
-pub fn install_firing_sink(sink: Arc<dyn FiringSink>) {
-    let _ = SINK.set(sink);
-}
-
-/// Borrow the installed [`FiringSink`], if any. `None` on host builds that
-/// have not installed one.
-pub fn firing_sink() -> Option<Arc<dyn FiringSink>> {
-    SINK.get().cloned()
 }
 
 // ---------------------------------------------------------------------------

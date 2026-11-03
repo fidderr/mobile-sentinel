@@ -3,7 +3,6 @@ package com.mobilesentinel
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Intent
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -48,13 +47,13 @@ class SentinelAccessibilityService : AccessibilityService() {
         private const val TAG = "SentinelAccess"
 
         /**
- * Package names whose window appearance we treat as an escape
- * attempt while kiosk is engaged. Covers the Settings app, the
- * Android system UI (power menu, quick settings, Recents), and
- * the default launcher on AOSP / Pixel builds. OEMs with custom
- * launchers (Samsung OneUI, etc.) still resolve to the host's
- * `packageManager.getLaunchIntentForPackage(...)` fallback.
- */
+         * Package names whose window appearance we treat as an escape
+         * attempt while kiosk is engaged. Covers the Settings app, the
+         * Android system UI (power menu, quick settings, Recents), and
+         * the default launcher on AOSP / Pixel builds. OEMs with custom
+         * launchers (Samsung OneUI, etc.) still resolve to the host's
+         * `packageManager.getLaunchIntentForPackage(...)` fallback.
+         */
         private val ESCAPE_PACKAGES: Set<String> = setOf(
             "com.android.settings",
             "com.android.systemui",
@@ -79,16 +78,16 @@ class SentinelAccessibilityService : AccessibilityService() {
         val e = event ?: return
         if (e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
- // Kiosk gate — we ONLY act when the host has explicitly engaged
- // the activity lock. Otherwise the service is a passive observer
- // and consumes zero battery beyond the system's normal event
- // dispatch.
+        // Kiosk gate — we ONLY act when the host has explicitly engaged
+        // the activity lock. Otherwise the service is a passive observer
+        // and consumes zero battery beyond the system's normal event
+        // dispatch.
         if (!SentinelKioskController.enabled) return
 
         val pkg = e.packageName?.toString().orEmpty()
         val targetPkg = applicationContext.packageName
 
- // Our own windows are allowed — including the firing screen.
+        // Our own windows are allowed — including the firing screen.
         if (pkg == targetPkg) return
 
         if (pkg in ESCAPE_PACKAGES) {
@@ -98,15 +97,15 @@ class SentinelAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
- // Nothing to clean up — we don't hold any long-running state.
+        // Nothing to clean up — we don't hold any long-running state.
     }
 
     /**
- * Relaunch the activity registered with [SentinelKioskController].
- * Throttled by [RELAUNCH_DEBOUNCE_MS] to avoid feedback loops with
- * the system UI (which emits several window-state-changed events
- * during a single navigation).
- */
+     * Relaunch the activity registered with [SentinelKioskController].
+     * Throttled by [RELAUNCH_DEBOUNCE_MS] to avoid feedback loops with
+     * the system UI (which emits several window-state-changed events
+     * during a single navigation).
+     */
     private fun relaunchTarget() {
         val fqcn = SentinelKioskController.targetActivityFqcn
         if (fqcn.isBlank()) {
@@ -120,14 +119,11 @@ class SentinelAccessibilityService : AccessibilityService() {
         }
         lastRelaunchAtMs = now
 
- // On API 23+ we can also close the system dialogs (power menu,
- // quick settings) to remove the user's view of the escape path
- // immediately. Silent failure if the OEM doesn't honour it.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                performGlobalAction(GLOBAL_ACTION_HOME)
-            } catch (_: Exception) {
-            }
+        // Also close the system dialogs (power menu, quick settings) to remove the user's
+        // view of the escape path immediately. Silent failure if the OEM doesn't honour it.
+        try {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+        } catch (_: Exception) {
         }
 
         val ctx = applicationContext

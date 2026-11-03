@@ -28,7 +28,7 @@ import java.net.URLEncoder
  * Rust removes the marker when the alarm is dismissed or snoozed, so even a
  * lost stop command cannot leave a sound nobody can end.
  *
- * Lives in core because the alarm receiver, the ring service and the firing
+ * A module of its own because the alarm receiver, the ring service and the firing
  * sink all need it and none of them depends on another.
  */
 object SentinelRing {

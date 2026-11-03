@@ -1,13 +1,9 @@
-//! Property 5 enforcement test — `mobile-sentinel` is generic.
-//! **Property 5: Preservation** — The crate MUST NOT contain alarm-specific
-//! or AlarmFree-specific strings anywhere in its published surface.
-//! AlarmFree supplies all app-specific values (activity FQCN, channel IDs, and
-//! notification content) via config structs; the crate defaults stay app-neutral.
-//! This test walks every `.rs`, `.kt`, `.xml`, `.json` file under
-//! `crates/mobile-sentinel/` and fails if any file contains a forbidden
-//! substring outside of an explicit whitelist.
-//! **Validates: Requirements 22.1, 22.3, 22.4, 25.2**
-//! _Properties: P5, P15_
+//! `mobile-sentinel` is generic: the crate must not contain anything specific to an app that
+//! uses it. Those apps supply their values (activity name, channel ids, notification texts)
+//! through config structs, and the crate's defaults stay neutral.
+//!
+//! This walks every `.rs`, `.kt`, `.xml` and `.json` file of the crate and fails if one
+//! contains a forbidden substring outside of an explicit whitelist.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +12,7 @@ use std::path::{Path, PathBuf};
 /// These are consumer-app-specific identifiers. Generic platform concepts
 /// (e.g. `ScheduleAlarm` as an Action variant, `Trigger::Fire`) are NOT
 /// forbidden — they are part of the universal orchestration vocabulary.
-/// `kiosk` is NOT forbidden (Req 22.3).
+/// `kiosk` is NOT forbidden.
 const FORBIDDEN: &[&str] = &[
     "alarmfree",
     "AlarmFree",
@@ -57,12 +53,12 @@ const EXCLUDE_PATH_SEGMENTS: &[&str] = &[
 /// legitimate platform constants such as `"usage":"alarm"` (Android
 /// `AudioAttributes.USAGE_ALARM`) and `"source":"system:default-alarm"`.
 /// These are vendor strings, not consumer-app vocabulary, so they do not
-/// violate Req 22's intent.
+/// make the crate app-specific.
 const EXEMPT_PATH_SEGMENTS: &[&str] = &[];
 
 /// (file relative path, line pattern): permitted exceptions where the
 /// forbidden substring appears in a way that doesn't violate the intent
-/// of Property 5.
+/// of this rule.
 /// Empty by default — ALL occurrences of a forbidden substring are
 /// violations unless explicitly whitelisted here.
 const WHITELIST: &[(&str, &str)] = &[];
@@ -171,7 +167,7 @@ fn mobile_sentinel_is_generic() {
 
     assert!(
         violations.is_empty(),
-        "Property 5 violated — mobile-sentinel contains app-specific strings:\n{}",
+        "mobile-sentinel contains app-specific strings:\n{}",
         violations.join("\n"),
     );
 }

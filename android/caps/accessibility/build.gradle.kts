@@ -31,5 +31,4 @@ dependencies {
     // Accessibility is the kiosk ultra-protection enforcer — it reads
     // SentinelKioskController, which lives in the kiosk module.
     implementation(project(":sentinel-kiosk"))
-    implementation("androidx.core:core-ktx:1.12.0")
 }

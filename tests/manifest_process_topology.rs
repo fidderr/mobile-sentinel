@@ -1,12 +1,9 @@
 //! Manifest process-topology test.
 //!
-//! Asserts the correct process assignment for each component:
-//! - `:sentinel` process: alarm receiver, time-change receiver, job guardian
-//! - MAIN process (default): foreground service, boot service, kiosk init
-//!
-//! The architecture is:
-//! - `:sentinel` = job guardian only (polls files, restarts MAIN)
-//! - MAIN = all logic (audio, kiosk, FGS, Rust state machine)
+//! Asserts the process each component runs in:
+//! - `:sentinel`: the alarm and boot receivers, the job guardian and the ring service. It has
+//!   no UI framework, so nothing that ends the UI can stop the sound, and it runs no Rust.
+//! - MAIN: the UI, the Rust state machine, the kiosk.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -128,18 +128,18 @@ object SentinelSensorHelper {
         }
 
         // Try to register — may fail if permission not yet granted
-        var registered = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_FASTEST)
+        var registered = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_UI)
         if (!registered) {
             Log.w(TAG, "Step counter registration failed — retrying in 2s (permission may be pending)")
             // Retry after delay (permission dialog may be showing)
             Thread {
                 Thread.sleep(2000)
-                val retryRegistered = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_FASTEST)
+                val retryRegistered = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_UI)
                 Log.i(TAG, "Step counter retry: registered=$retryRegistered")
                 if (!retryRegistered) {
                     // One more retry after 5s
                     Thread.sleep(5000)
-                    val finalRetry = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_FASTEST)
+                    val finalRetry = sm.registerListener(stepListener, sensor, SensorManager.SENSOR_DELAY_UI)
                     Log.i(TAG, "Step counter final retry: registered=$finalRetry")
                 }
             }.start()

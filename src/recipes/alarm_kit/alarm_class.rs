@@ -1191,7 +1191,7 @@ mod tests {
 
     #[test]
     fn metadata_flow_property_scheduled_settings_observed_at_fire_time() {
-        // The property from Requirement 22.2: settings present in the
+        // Settings present in the
         // Context at scheduling time MUST be present at fire time.
         let _g = lock_and_clear();
         register_recipe(AlarmClass::new()).unwrap();
@@ -1227,7 +1227,7 @@ mod tests {
 
     #[test]
     fn snooze_count_monotonicity_property() {
-        // Requirement 11.6 / 22.4 — snooze count strictly monotonic.
+        // The snooze count goes up strictly.
         let _g = lock_and_clear();
         register_recipe(AlarmClass::new()).unwrap();
         let dir = TempDir::new().unwrap();
@@ -1269,7 +1269,7 @@ mod tests {
 
     #[test]
     fn fire_idempotency_property() {
-        // Requirement 22.1 — Fire twice must produce the same Context state.
+        // Fire twice must produce the same Context state.
         let _g = lock_and_clear();
         register_recipe(AlarmClass::new()).unwrap();
         let dir = TempDir::new().unwrap();

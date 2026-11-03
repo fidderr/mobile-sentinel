@@ -12,7 +12,7 @@ import android.util.Log
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
  * around an Android telephony API — no orchestration logic, no state
  * machines, no Recipe-specific behavior. Reached from Rust via
- * `primitives_ext::phone_*`.
+ * `crate::features::phone`.
  *
  * The application context is obtained from [SentinelPrimitives.getAppContext]
  * so these helpers work without an Activity reference (e.g. when called

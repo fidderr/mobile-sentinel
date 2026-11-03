@@ -18,9 +18,19 @@ use crate::types::PlaybackHandle;
 
 /// Play audio from a file path / URI, returning a handle for later stop.
 pub fn play(uri: &str, looping: bool) -> Result<PlaybackHandle, SentinelError> {
+    play_on(uri, looping, false)
+}
+
+/// [`play`] on the alarm stream: at the volume an alarm has, and also with the media
+/// volume at zero. For trying out an alarm's sound.
+pub fn play_as_alarm(uri: &str, looping: bool) -> Result<PlaybackHandle, SentinelError> {
+    play_on(uri, looping, true)
+}
+
+fn play_on(uri: &str, looping: bool, as_alarm: bool) -> Result<PlaybackHandle, SentinelError> {
     #[cfg(target_os = "android")]
     {
-        let id = android::audio_play(uri, looping);
+        let id = android::audio_play(uri, looping, as_alarm);
         if id > 0 {
             Ok(PlaybackHandle::from_id(id as u64))
         } else {
@@ -29,7 +39,7 @@ pub fn play(uri: &str, looping: bool) -> Result<PlaybackHandle, SentinelError> {
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (uri, looping);
+        let _ = (uri, looping, as_alarm);
         Err(SentinelError::unavailable("audio::play"))
     }
 }
@@ -77,14 +87,18 @@ mod android {
     const AUDIO_PREVIEW: &str = "com/mobilesentinel/SentinelAudioPreviewPrimitives";
 
     /// Returns a playback handle id (>0) or 0 on failure.
-    pub(super) fn audio_play(uri: &str, looping: bool) -> i64 {
+    pub(super) fn audio_play(uri: &str, looping: bool, as_alarm: bool) -> i64 {
         with_jni_class(AUDIO_PREVIEW, 0i64, |env, class| {
             let s = jni_str(env, uri)?;
             env.call_static_method(
                 class,
                 "play",
-                "(Ljava/lang/String;Z)J",
-                &[JValue::Object(&s.into()), JValue::Bool(looping as u8)],
+                "(Ljava/lang/String;ZZ)J",
+                &[
+                    JValue::Object(&s.into()),
+                    JValue::Bool(looping as u8),
+                    JValue::Bool(as_alarm as u8),
+                ],
             )
             .ok()
             .and_then(|v| v.j().ok())

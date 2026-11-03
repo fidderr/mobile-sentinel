@@ -17,10 +17,27 @@ change.
   `core` for a module of its own, so an app without alarms does not carry it.
   `build_sentinel` takes out Material, which the Dioxus template adds and nothing here
   uses, and has a release drop unused resources. An adaptive icon stores its picture once.
-  A permission that stops below the app's `minSdk` stays out of its manifest.
+  A permission that stops below the app's `minSdk` stays out of its manifest. Only the
+  modules that use androidx depend on it.
+- `health`: the maker's "auto-start" cannot be read, so it is no longer guessed from the
+  phone's brand: `boot_signal_missed` says the phone restarted and the signal never came.
+- `sensors`: the step counter no longer asks for the fastest rate.
+
+### Removed
+
+- `install_firing_sink` and `firing_sink`: nothing read what they set. Pass a sink to
+  `AlarmKit::install`.
+- `AlarmKit::handle` and `AlarmKit::next_fire_time`: `AlarmKit::next_fire` has it.
+- `tokio`, `futures-core` and `futures-channel`, which nothing used.
 
 ### Fixed
 
+- A ring whose processes all died came back without its screen, as on ColorOS when an app
+  is swiped away: nothing in the new `:sentinel` was guarding.
+- The guardian could stop just as a job became active.
+- `background_service` and `exact_alarm` had a class of the same name, so an app could not
+  have both.
+- A reminder's notification icon was the app's icon, which shows as a blob in the status bar.
 - `display`: brightness and keep-screen-on did nothing, since the app context stopped
   being an Activity. A repeated call also saved the override as the original.
 - `build_sentinel`: Gradle output of an app's build no longer lands inside this crate.
@@ -40,14 +57,16 @@ change.
 - `AlarmKit::install_on_platform`: installs what the platform rings with, so an app
   need not name the Android sink, the sound backend or where the context store lives.
 - `AlarmSpec::sound_delay_secs`: vibrate first, then the sound.
+- `audio::play_as_alarm`: try out a sound the way the alarm will play it.
+- `AlarmKit::snoozed_until`: when a snoozed alarm rings again.
 - `home_widget` capability: a home-screen widget with two lines the app sets.
 - `icon_background` in `sentinel.toml`: an adaptive launcher icon from a picture.
 - `ring_limit_secs` (per alarm, default 30 minutes, `None` = until dealt with): the
   ring service stops an alarm nobody responds to. It counts from the ring's start,
   a touch on the alarm screen, leaving it, the app coming back, or
   `AlarmKit::note_activity`, and a guardian kill of a frozen UI does not count. Rust
-  then ends the alarm past the challenge gate; `StartupReport::ended_by_limit` and
-  `AlarmKit::take_ended_by_limit` tell the consumer.
+  then ends the alarm past the challenge gate; `StartupReport::ring_ends` and
+  `AlarmKit::take_ring_ends` tell the consumer.
 - `AlarmKit::on_startup` now returns a `StartupReport` and ends rings a reboot
   interrupted (past the challenge gate); a snooze still in the future is kept
   and re-armed. An unchanged alarm is no longer reset to Idle on startup, and

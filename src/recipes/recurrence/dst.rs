@@ -1,7 +1,7 @@
 //! DST resolution rules for the Recurrence Engine.
 //!
 //! When a computed local time falls inside a Daylight-Saving-Time gap or
-//! overlap, we follow these documented rules (see Requirement 8.3 / 8.4):
+//! overlap, we follow these rules:
 //!
 //! - **Spring-forward gap** (the local time does not exist): advance to the
 //!   first valid instant after the gap. The alarm fires slightly late but

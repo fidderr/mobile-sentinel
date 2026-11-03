@@ -12,7 +12,7 @@ import android.util.Log
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
  * around Android's [CameraManager] — no orchestration logic, no state
  * machines, no Recipe-specific behavior. Exposes only steady-on control
- * (no strobe). Reached from Rust via `primitives_ext::torch_*`.
+ * (no strobe). Reached from Rust via `crate::features::torch`.
  *
  * Threading: every method is `@JvmStatic` and stateless apart from the
  * lazily-resolved [torchCameraId] cache. JNI callers are responsible for

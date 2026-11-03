@@ -62,16 +62,4 @@ android {
         }
     }
 
-    testOptions {
-        unitTests.isIncludeAndroidResources = false
-        unitTests.isReturnDefaultValues = true
-    }
-}
-
-dependencies {
-    // Core Kotlin uses NotificationCompat etc.
-    implementation("androidx.core:core-ktx:1.12.0")
-
-    // JUnit 4 for JVM unit tests under src/test/kotlin.
-    testImplementation("junit:junit:4.13.2")
 }

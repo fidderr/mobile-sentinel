@@ -28,9 +28,9 @@ pub enum Trigger {
     Edit,
     /// Arm a new OS-level wake.
     Schedule,
-    /// Audio pause (e.g., phone call started).
+    /// Silence the ring while the user works on it.
     Pause,
-    /// Audio resume (e.g., phone call ended).
+    /// Bring the ring back: after a pause, or when the app restarted while it rang.
     Resume,
 }
 

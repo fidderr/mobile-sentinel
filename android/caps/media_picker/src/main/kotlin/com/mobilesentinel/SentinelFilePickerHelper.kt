@@ -105,19 +105,19 @@ object SentinelFilePickerHelper {
     private val pickResult = AtomicReference<Uri?>(null)
 
     /**
- * Launch the file picker and block until a result is available.
- * MUST be called from a background thread (not the UI thread).
- * @param activity The current activity (used for context and launching)
- * @param mimeType MIME type filter (e.g. "audio/star", "image/star")
- * @param timeoutSeconds Maximum time to wait for pick result
- * @return The full internal file path of the copied file, or empty string if cancelled/timeout
- */
+     * Launch the file picker and block until a result is available.
+     * MUST be called from a background thread (not the UI thread).
+     * @param activity The current activity (used for context and launching)
+     * @param mimeType MIME type filter (e.g. "audio/star", "image/star")
+     * @param timeoutSeconds Maximum time to wait for pick result
+     * @return The full internal file path of the copied file, or empty string if cancelled/timeout
+     */
     @JvmStatic
     fun pickFileBlocking(activity: Activity, mimeType: String, timeoutSeconds: Long = 120): String {
         pickResult.set(null)
         pickLatch = CountDownLatch(1)
 
- // Launch the transparent picker activity with the MIME type
+        // Launch the transparent picker activity with the MIME type
         val intent = Intent(activity, SentinelFilePickerActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
             putExtra(SentinelFilePickerActivity.EXTRA_MIME_TYPE, mimeType)
@@ -125,7 +125,7 @@ object SentinelFilePickerHelper {
         activity.startActivity(intent)
         Log.i(TAG, "File picker launched (mimeType=$mimeType)")
 
- // Block until result or timeout
+        // Block until result or timeout
         val completed = pickLatch?.await(timeoutSeconds, TimeUnit.SECONDS) ?: false
         if (!completed) {
             Log.w(TAG, "File picker timed out after ${timeoutSeconds}s")
@@ -134,7 +134,7 @@ object SentinelFilePickerHelper {
 
         val uri = pickResult.get() ?: return ""
 
- // Copy the selected file to internal storage
+        // Copy the selected file to internal storage
         return try {
             copyToInternal(activity, uri)
         } catch (e: Exception) {
@@ -217,8 +217,8 @@ object SentinelFilePickerHelper {
     }
 
     /**
- * Called by SentinelFilePickerActivity when the user picks or cancels.
- */
+     * Called by SentinelFilePickerActivity when the user picks or cancels.
+     */
     @JvmStatic
     fun deliverResult(uri: Uri?) {
         pickResult.set(uri)
@@ -231,14 +231,14 @@ object SentinelFilePickerHelper {
     }
 
     /**
- * Copy a content:// URI to the app's internal import directory.
- * Returns the full path to the copied file.
- */
+     * Copy a content:// URI to the app's internal import directory.
+     * Returns the full path to the copied file.
+     */
     private fun copyToInternal(activity: Activity, uri: Uri): String {
         val importDir = File(activity.filesDir, IMPORT_DIR)
         importDir.mkdirs()
 
- // Determine extension from MIME type using Android's MimeTypeMap
+        // Determine extension from MIME type using Android's MimeTypeMap
         val mimeType = activity.contentResolver.getType(uri)
         val ext = if (mimeType != null) {
             MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
@@ -262,8 +262,8 @@ object SentinelFilePickerHelper {
     }
 
     /**
- * Try to extract a file extension from the URI's last path segment.
- */
+     * Try to extract a file extension from the URI's last path segment.
+     */
     private fun extractExtensionFromUri(uri: Uri): String? {
         val path = uri.lastPathSegment ?: return null
         val dotIdx = path.lastIndexOf('.')

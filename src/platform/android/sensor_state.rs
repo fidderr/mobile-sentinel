@@ -40,63 +40,40 @@ pub fn get_step_count() -> i32 {
     STATE.step_count.load(Ordering::Relaxed)
 }
 
+/// Call a method of the Kotlin helper that takes nothing.
+#[cfg(target_os = "android")]
+fn call_helper(method: &str, signature: &str) {
+    let called = crate::platform::android::jni::with_jni_class(
+        "com/mobilesentinel/SentinelSensorHelper",
+        false,
+        |env, class| {
+            let result = env.call_static_method(class, method, signature, &[]);
+            if result.is_err() {
+                let _ = env.exception_clear();
+            }
+            Some(result.is_ok())
+        },
+    );
+    if called {
+        log::info!("[sensor_state] {method}");
+    } else {
+        log::error!("[sensor_state] {method} failed");
+    }
+}
+
 /// Start the accelerometer for shake detection.
-/// Calls the Kotlin SentinelSensorHelper.startAccelerometer() via JNI.
 #[cfg(target_os = "android")]
 pub fn start_accelerometer() {
-    use crate::platform::android::jni::load_app_class_global;
-
     STATE.shake_count.store(0, Ordering::Relaxed);
     STATE.accel_active.store(true, Ordering::Relaxed);
-
-    let helper_ref = match load_app_class_global("com/mobilesentinel/SentinelSensorHelper") {
-        Some(r) => r,
-        None => {
-            log::error!("[sensor_state] Failed to load SentinelSensorHelper");
-            return;
-        }
-    };
-
-    let (vm, _activity) = match crate::platform::android::context::get_activity() {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let cls = unsafe { jni::objects::JClass::from_raw(helper_ref.as_raw()) };
-    let _ = env.call_static_method(&cls, "startAccelerometer", "()Z", &[]);
-    let _ = env.exception_clear();
-    log::info!("[sensor_state] Accelerometer started for shake detection");
+    call_helper("startAccelerometer", "()Z");
 }
 
 /// Stop the accelerometer.
 #[cfg(target_os = "android")]
 pub fn stop_accelerometer() {
     STATE.accel_active.store(false, Ordering::Relaxed);
-
-    let helper_ref = match crate::platform::android::jni::load_app_class_global(
-        "com/mobilesentinel/SentinelSensorHelper",
-    ) {
-        Some(r) => r,
-        None => return,
-    };
-
-    let (vm, _activity) = match crate::platform::android::context::get_activity() {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let cls = unsafe { jni::objects::JClass::from_raw(helper_ref.as_raw()) };
-    let _ = env.call_static_method(&cls, "stopAccelerometer", "()V", &[]);
-    let _ = env.exception_clear();
-    log::info!("[sensor_state] Accelerometer stopped");
+    call_helper("stopAccelerometer", "()V");
 }
 
 /// Start the step counter.
@@ -105,57 +82,14 @@ pub fn stop_accelerometer() {
 pub fn start_step_counter() {
     STATE.step_count.store(0, Ordering::Relaxed);
     STATE.steps_active.store(true, Ordering::Relaxed);
-
-    let helper_ref = match crate::platform::android::jni::load_app_class_global(
-        "com/mobilesentinel/SentinelSensorHelper",
-    ) {
-        Some(r) => r,
-        None => {
-            log::error!("[sensor_state] Failed to load SentinelSensorHelper");
-            return;
-        }
-    };
-
-    let (vm, _activity) = match crate::platform::android::context::get_activity() {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let cls = unsafe { jni::objects::JClass::from_raw(helper_ref.as_raw()) };
-    let _ = env.call_static_method(&cls, "startStepCounter", "()Z", &[]);
-    let _ = env.exception_clear();
-    log::info!("[sensor_state] Step counter started");
+    call_helper("startStepCounter", "()Z");
 }
 
 /// Stop the step counter.
 #[cfg(target_os = "android")]
 pub fn stop_step_counter() {
     STATE.steps_active.store(false, Ordering::Relaxed);
-
-    let helper_ref = match crate::platform::android::jni::load_app_class_global(
-        "com/mobilesentinel/SentinelSensorHelper",
-    ) {
-        Some(r) => r,
-        None => return,
-    };
-
-    let (vm, _activity) = match crate::platform::android::context::get_activity() {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let cls = unsafe { jni::objects::JClass::from_raw(helper_ref.as_raw()) };
-    let _ = env.call_static_method(&cls, "stopStepCounter", "()V", &[]);
-    let _ = env.exception_clear();
-    log::info!("[sensor_state] Step counter stopped");
+    call_helper("stopStepCounter", "()V");
 }
 
 // No-op stubs for non-Android

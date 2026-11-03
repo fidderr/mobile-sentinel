@@ -10,7 +10,7 @@ import android.util.Log
  *
  * Rust calls INTO these functions via JNI. Each method is a thin wrapper
  * around Android's [ClipboardManager] — no orchestration logic, no state.
- * Reached from Rust via `primitives_ext::clipboard_*`.
+ * Reached from Rust via `crate::features::clipboard`.
  *
  * Every method is total: it wraps its body in try/catch, logs failures,
  * and returns a safe fallback. None of them ever throw.

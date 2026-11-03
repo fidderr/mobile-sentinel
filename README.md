@@ -113,7 +113,7 @@ the single, compile-enforced source of truth.
 
 ```toml
 [dependencies]
-mobile-sentinel = { path = "../crates/mobile-sentinel", features = [
+mobile-sentinel = { path = "../mobile-sentinel", features = [
     "alarm-kit", "scanner", "haptics", "audio",
 ] }
 ```
@@ -165,7 +165,7 @@ Declare exactly the capabilities you call — nothing more.
 
 ```toml
 [dependencies]
-mobile-sentinel = { path = "../crates/mobile-sentinel", features = [
+mobile-sentinel = { path = "../mobile-sentinel", features = [
     "alarm-kit", "scanner", "haptics", "audio", "overlay", "permissions",
     "sensors", "foregrounding", "media_picker",
 ] }
@@ -285,7 +285,8 @@ no god-object:
 ```rust
 pub trait FiringSink: Send + Sync {
     fn start_firing(&self, req: &FireRequest) -> bool;   // engage the whole firing surface
-    fn stop_firing(&self, instance_id: &str);            // tear it down (idempotent)
+    fn stop_firing(&self, instance_id: &str);            // end this alarm's ring (idempotent)
+    fn release_takeover(&self);                          // nothing rings any more: give the screen back
     fn pause_audio(&self);                               // quiet audio only
     fn schedule_exact_alarm(&self, req: &ExactAlarmRequest) -> bool;
     fn cancel_exact_alarm(&self, alarm_id: &str);        // idempotent
@@ -294,8 +295,8 @@ pub trait FiringSink: Send + Sync {
 ```
 
 Two implementations ship: `AndroidFiringSink` (JNI, on device) and
-`MockFiringSink` (records every call, for engine tests). Install the process-wide
-sink once with `install_firing_sink(Arc::new(...))`.
+`MockFiringSink` (records every call, for engine tests). `AlarmKit::install_on_platform`
+wires up the Android one; `AlarmKit::install` takes your own.
 
 > **Pause vs. Resume.** `pause_audio` only quiets the sound. Bringing the alarm
 > back is a *full re-engage* via `start_firing` — there is no `resume_audio`. In

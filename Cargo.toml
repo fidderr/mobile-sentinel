@@ -166,9 +166,6 @@ recipes = ["state-store"]
 alarm-kit = ["recipes", "firing", "sound-library", "jobs"]
 
 [dependencies]
-tokio = { version = "1", features = ["sync"] }
-futures-core = "0.3"
-futures-channel = "0.3"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -195,9 +192,6 @@ hound = { version = "3.5", optional = true }
 [dev-dependencies]
 tempfile = "3"
 proptest = "1"
-tokio = { version = "1", features = ["rt", "macros", "time"] }
-futures = "0.3"
-rand = "0.8"
 
 # Integration test exercising the Recipe + ContextStore + dispatch boundary;
 # only compiles when the alarm-kit subsystem is enabled.

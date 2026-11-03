@@ -2,10 +2,7 @@
 //!
 //! Used by every Recipe that has a [`crate::recipes::context::schema::ScheduleSpec`].
 //! Pure function: same `(now, schedule, zone)` always produces the same
-//! `next_fire` (verified by property test).
-//!
-//! See `requirements.md §Requirement 8` for the DST resolution rules and
-//! `design.md §8 Recurrence Engine`.
+//! `next_fire` (verified by property test). [`dst`] has the rules for daylight saving.
 
 pub mod dst;
 pub mod engine;

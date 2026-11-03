@@ -17,8 +17,8 @@
 //! contributes nothing to the manifest, Kotlin, Gradle deps, or native `.so`.
 //!
 //! The only injectable platform interface is the small [`FiringSink`] trait
-//! (six methods) that the Recipe engine drives; on Android it is
-//! implemented by `AndroidFiringSink` and in tests by a recorder.
+//! that the Recipe engine drives; on Android it is implemented by
+//! `AndroidFiringSink` and in tests by a recorder.
 //!
 //! On top of those capabilities it ships the Recipe framework (AlarmKit
 //! and friends), a ContextStore for durable per-instance state, a generic
@@ -26,7 +26,6 @@
 //! Engine, and a Sound Library.
 
 pub mod build;
-/// Recipe Context schema + durable ContextStore. Part of the alarm-kit
 pub mod error;
 /// Consumer-facing capabilities, each gated behind its own Cargo feature.
 /// Grouped under `features/`; re-exported at the crate root below so
@@ -195,12 +194,9 @@ pub use recipes::{
 };
 
 // FiringSink — the small injectable firing interface the recipe engine uses.
-// Firing types + install/accessor. Foundational (top-level `firing` module);
-// compiles when any firing sub-feature is on.
+// Foundational (top-level `firing` module); compiles when any firing sub-feature is on.
 #[cfg(firing_enabled)]
-pub use firing::{
-    firing_sink, install_firing_sink, ExactAlarmRequest, FireRequest, FiringSink, MockFiringSink,
-};
+pub use firing::{ExactAlarmRequest, FireRequest, FiringSink, MockFiringSink};
 
 // Capability data types — the structured values capability modules
 // (permissions, biometric, network, location, maps, contacts, calendar)

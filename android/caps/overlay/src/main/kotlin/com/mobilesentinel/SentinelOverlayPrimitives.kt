@@ -2,7 +2,6 @@ package com.mobilesentinel
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import android.util.Log
 
@@ -23,7 +22,7 @@ object SentinelOverlayPrimitives {
     fun isGranted(): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
         return try {
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(c)
+            Settings.canDrawOverlays(c)
         } catch (e: Throwable) {
             Log.w(TAG, "isGranted: ${e.message}")
             false
@@ -35,7 +34,7 @@ object SentinelOverlayPrimitives {
     fun request(): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(c)) {
+            if (!Settings.canDrawOverlays(c)) {
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:${c.packageName}"),
