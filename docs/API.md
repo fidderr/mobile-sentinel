@@ -69,6 +69,7 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `scanner` | `scanner` | `scan() -> Result<String>`, `is_available() -> bool` | `CAMERA`; bundles ZXing + `SentinelScannerActivity`. Blocks until scan/cancel. |
 | `camera` | `camera` | `capture_photo() -> Result<String>`, `is_available() -> bool` | none — delegates to the system camera (`ACTION_IMAGE_CAPTURE`) + `FileProvider`; returns saved JPEG path |
 | `haptics` | `haptics` | `vibrate(Duration)`, `vibrate_pattern(&[u64])`, `cancel()`, `has_vibrator() -> bool` | `VIBRATE` |
+| `home_widget` | `home_widget` | `set_text(title, detail)`, `can_add() -> bool`, `add() -> bool` | Home-screen widget with two lines the app sets; tapping it opens the app. No permissions, no periodic updates |
 | `audio` | `audio` | `play(uri: &str, looping: bool) -> Result<PlaybackHandle>`, `stop(&PlaybackHandle) -> Result<()>`, `set_volume(f32) -> Result<()>` | none — non-firing preview audio |
 | `overlay` | `overlay` | `is_granted() -> bool`, `request()` | `SYSTEM_ALERT_WINDOW` |
 | `permissions` | `permissions` | `status(&str) -> PermissionState`, `request(&str) -> PermissionState`, `open_app_settings()` | none |
@@ -616,7 +617,11 @@ pub struct AlarmKitConfig {
     pub alarm_class_config: AlarmClassConfig,
 }
 
-let kit = AlarmKit::install(config);          // singleton runtime; registers AlarmClass
+// What the platform rings with: the Android sink and sound backend, and the context
+// store in the app's files. All an app normally needs.
+let kit = AlarmKit::install_on_platform(bundled_sounds, custom_sounds, alarm_class_config);
+
+let kit = AlarmKit::install(config);          // the same with your own parts
 let kit = AlarmKit::handle(store);            // handle for an already-installed runtime (e.g. :sentinel)
 ```
 
@@ -641,6 +646,14 @@ pub struct AlarmClassConfig {
     pub vibration_pattern: Vec<i64>,     // app-default waveform (alternating wait/vibrate ms)
     pub min_volume_percent: u8,          // raise the alarm stream to at least this % while ringing, restore after (0 = leave alone)
 }
+```
+
+Alarms have to be armed again with no app open: after a boot, an app update, a clock or
+time zone change. The app says what runs then, once, anywhere in its crate:
+
+```rust
+fn on_wake() { /* set up, and arm what has to ring. No Activity here. */ }
+mobile_sentinel::wake_hook!(on_wake);
 ```
 
 ### AlarmSpec

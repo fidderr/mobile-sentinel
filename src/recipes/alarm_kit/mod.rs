@@ -352,6 +352,48 @@ impl AlarmKit {
     ///
     /// Also persists a runtime manifest to disk so the `:sentinel` child
     /// process can self-bootstrap when an alarm broadcast wakes it up.
+    /// Install with what this platform rings with: on Android its firing sink and sound
+    /// backend, and the context store in the app's files. Elsewhere, where nothing can
+    /// ring, without those. `bundled_sounds` and `custom_sounds` are where the app keeps
+    /// its sounds. Use [`AlarmKit::install`] to supply the parts yourself.
+    pub fn install_on_platform(
+        bundled_sounds: std::path::PathBuf,
+        custom_sounds: std::path::PathBuf,
+        alarm_class_config: AlarmClassConfig,
+    ) -> Self {
+        let store = Arc::new(ContextStore::new(
+            crate::app_files_dir().join("sentinel/context"),
+        ));
+        #[cfg(target_os = "android")]
+        {
+            let sink: Arc<dyn FiringSink> =
+                Arc::new(crate::platform::android::AndroidFiringSink::new());
+            // Process-wide, so that background tasks can reach it too.
+            crate::firing::install_firing_sink(sink.clone());
+            let sounds = crate::SoundLibrary::new(
+                bundled_sounds,
+                custom_sounds,
+                crate::platform::android::AndroidSoundBackend,
+            );
+            Self::install(AlarmKitConfig {
+                store,
+                sink: Some(sink),
+                sound_resolver: Some(Arc::new(sounds)),
+                alarm_class_config,
+            })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (bundled_sounds, custom_sounds);
+            Self::install(AlarmKitConfig {
+                store,
+                sink: None,
+                sound_resolver: None,
+                alarm_class_config,
+            })
+        }
+    }
+
     pub fn install(config: AlarmKitConfig) -> Self {
         let runtime = alarm_class_runtime();
         runtime.set_store(config.store.clone());

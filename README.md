@@ -215,17 +215,17 @@ On host (non-Android) builds these return
 ### 4. Or take the whole alarm backend
 
 ```rust
-use mobile_sentinel::{AlarmKit, AlarmKitConfig, AlarmSpec, ContextStore, app_files_dir};
-use std::sync::Arc;
+use mobile_sentinel::{AlarmKit, AlarmSpec};
 
-let store = Arc::new(ContextStore::new(app_files_dir().join("sentinel/context")));
-
-let kit = AlarmKit::install(AlarmKitConfig {
-    store,
-    sink: firing_sink,            // AndroidFiringSink on device, None on host
-    sound_resolver,               // a SoundLibrary, or None
+let kit = AlarmKit::install_on_platform(
+    bundled_sounds,               // where your sounds are
+    custom_sounds,
     alarm_class_config,           // your channel ids, activity FQCN, kiosk knobs
-});
+);
+
+// What runs when the app is woken with no UI: after a boot, an update, a clock change.
+fn on_wake() { /* set up, and arm what has to ring */ }
+mobile_sentinel::wake_hook!(on_wake);
 
 let id = kit.create(AlarmSpec { /* schedule, sound, snooze, … */ ..Default::default() })?;
 kit.snooze(&id)?;
@@ -353,6 +353,7 @@ project into a wired, trimmed APK. It reads a small `sentinel.toml`:
 ```toml
 [android]
 activity = "dev.dioxus.main.MainActivity"   # required (or pass --activity)
+icon_background = "F7F7F7"                  # optional — makes the icon adaptive, on this colour
 icon = "path/to/icon.webp"                  # optional — copied to all mipmap densities
 assets = ["path/to/sounds"]                 # optional — copied into APK assets/
 screen_orientation = "portrait"             # optional — default lock for main activity (see display capability for runtime per-screen overrides)

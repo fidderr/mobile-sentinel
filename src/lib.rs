@@ -240,3 +240,35 @@ pub use build::helper::{
 
 // Capability registry — declarative manifest assembly for build_sentinel.
 pub use build::registry::{assemble, capability, Capability, ManifestInjection, CAPABILITIES};
+
+/// Says what runs when the app is started or woken without its UI: a boot, an app update,
+/// the clock or time zone changing, or an alarm going off with the process down. There is
+/// no Activity then, and it can come more than once.
+///
+/// ```ignore
+/// fn on_wake() { /* set up, and arm what has to ring */ }
+/// mobile_sentinel::wake_hook!(on_wake);
+/// ```
+///
+/// Android looks for a native function by name in the library it loaded, so this has to
+/// expand in the app's own crate: the SDK cannot know the handler before the first call.
+#[macro_export]
+macro_rules! wake_hook {
+    ($handler:path) => {
+        #[no_mangle]
+        pub extern "system" fn Java_com_mobilesentinel_SentinelRearm_nativeRearm(
+            _env: *mut ::std::ffi::c_void,
+            _class: *mut ::std::ffi::c_void,
+        ) {
+            $crate::run_wake_hook($handler);
+        }
+    };
+}
+
+/// For [`wake_hook!`]: a panic must not cross into the JVM.
+#[doc(hidden)]
+pub fn run_wake_hook(handler: fn()) {
+    if std::panic::catch_unwind(handler).is_err() {
+        log::error!("[MobileSentinel] the wake hook panicked");
+    }
+}

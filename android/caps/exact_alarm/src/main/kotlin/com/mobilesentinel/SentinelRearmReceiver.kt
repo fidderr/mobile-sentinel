@@ -43,7 +43,7 @@ class SentinelRearmReceiver : BroadcastReceiver() {
     }
 }
 
-/** The hook: `Java_com_mobilesentinel_SentinelRearm_nativeRearm(env, class)`. */
+/** What an app sets with `mobile_sentinel::wake_hook!`. */
 object SentinelRearm {
     @JvmStatic
     external fun nativeRearm()
