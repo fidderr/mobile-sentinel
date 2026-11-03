@@ -91,7 +91,7 @@ The layering is strictly one-way, top to bottom:
     jobs)
       │
       ▼
-   FiringSink seam               6 methods the engine drives
+   FiringSink seam               what the engine drives
       │
       ▼
    Kotlin (:sentinel-core + per-capability Gradle modules) over JNI
@@ -103,8 +103,7 @@ AlarmKit and get a finished alarm backend.
 
 **The floor (the "husk").** With *no* features you get only the
 `:sentinel-core` kernel — a context holder, an activity tracker, and the JNI
-bridge. Nothing is callable. `apps/husk` exists only to prove this floor stays
-empty.
+bridge. Nothing is callable.
 
 ## How feature gating works
 
@@ -338,10 +337,11 @@ Two Android processes share the filesystem as their IPC channel:
 
 - **MAIN** owns the UI + Rust logic + AlarmKit/recipes + the `FiringSink` (which
   calls Kotlin) + every capability.
-- **`:sentinel`** is a dumb job guardian. It polls `<files>/sentinel/jobs/*.json`
-  and, for each active job, starts MAIN if it's dead or sends a heads-up
-  broadcast if it's alive. It knows nothing about alarms — only "some jobs need
-  MAIN alive."
+- **`:sentinel`** has no UI framework and runs no Rust, so nothing that ends the UI
+  can touch it. The alarm receiver and the ring service run here: an alarm plays from
+  a plan Rust wrote when it armed it, before MAIN is up. So does the job guardian. It
+  polls `<files>/sentinel/jobs/`, and for each active job starts MAIN if it's dead or
+  sends a heads-up broadcast if it's alive.
 
 Kotlin executes; Rust decides. The state machine writes `SessionState` to the
 `ContextStore`; both processes read the same files. That's the whole contract.
@@ -378,8 +378,8 @@ Flags:
 
 ## Platform support
 
-Android is the real target (`aarch64-linux-android`, compileSdk 34, minSdk
-24/26). Every capability also has a **host fallback** so the crate builds and
+Android is the real target (`aarch64-linux-android`, modules at compileSdk 34,
+minSdk 24; what an app runs on is its own `minSdk`). Every capability also has a **host fallback** so the crate builds and
 tests on desktop: capability functions return
 `SentinelError::PlatformUnsupported` or a safe default (`false`, `0`, `None`).
 This is what lets the recurrence engine, snooze policy, state store, recipe
