@@ -11,6 +11,20 @@ change.
 
 ## [Unreleased]
 
+### Changed
+
+- An app gets what it asked for, also in its bundle. `ring`: what a ring is made of left
+  `core` for a module of its own, so an app without alarms does not carry it.
+  `build_sentinel` takes out Material, which the Dioxus template adds and nothing here
+  uses, and has a release drop unused resources. An adaptive icon stores its picture once.
+  A permission that stops below the app's `minSdk` stays out of its manifest.
+
+### Fixed
+
+- `display`: brightness and keep-screen-on did nothing, since the app context stopped
+  being an Activity. A repeated call also saved the override as the original.
+- `build_sentinel`: Gradle output of an app's build no longer lands inside this crate.
+
 ### Added
 
 - `health::report` and `health::open_settings`: what the phone allows for alarms to
@@ -21,8 +35,13 @@ change.
   when the UI keeps failing (`JobConfig::ui_failures_before_backup`); see
   `AlarmClassConfig::backup_holds`.
 - `SentinelRearmReceiver`: alarms are armed again with no app open on a boot, an app
-  update, a clock or time zone change, through a `nativeRearm` hook the app
-  implements. `AlarmKit::on_wake` is the startup for that case.
+  update, a clock or time zone change, through what the app says with
+  `mobile_sentinel::wake_hook!`. `AlarmKit::on_wake` is the startup for that case.
+- `AlarmKit::install_on_platform`: installs what the platform rings with, so an app
+  need not name the Android sink, the sound backend or where the context store lives.
+- `AlarmSpec::sound_delay_secs`: vibrate first, then the sound.
+- `home_widget` capability: a home-screen widget with two lines the app sets.
+- `icon_background` in `sentinel.toml`: an adaptive launcher icon from a picture.
 - `ring_limit_secs` (per alarm, default 30 minutes, `None` = until dealt with): the
   ring service stops an alarm nobody responds to. It counts from the ring's start,
   a touch on the alarm screen, leaving it, the app coming back, or

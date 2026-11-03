@@ -344,6 +344,16 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &["SentinelHapticPrimitives.kt"],
     },
     Capability {
+        id: "ring",
+        description: "What a ring is made of: its plan, saved state, and what the phone allows. \
+                      Every firing capability needs it, nothing else does.",
+        permissions: NO_PERMS,
+        features: NO_FEATURES,
+        components: "",
+        policy_sensitive: false,
+        kotlin_sources: &["SentinelRing.kt", "SentinelActiveJobs.kt", "SentinelHealth.kt"],
+    },
+    Capability {
         id: "home_widget",
         description: "Home-screen widget with text the app sets; tapping it opens the app.",
         permissions: NO_PERMS,
@@ -1205,8 +1215,7 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_for_features_matches_alarmfree_declared_set() {
-        // The exact feature list alarmfree declares in its Cargo.toml.
+    fn capabilities_for_features_follows_the_declared_features() {
         let caps = capabilities_for_features(&[
             "alarm-kit",
             "scanner",
@@ -1399,9 +1408,12 @@ mod tests {
             from_cargo, from_const,
             "Cargo.toml `firing` members and FIRING_BUNDLE_IDS must match"
         );
-        // And resolving the `firing` feature must expand to exactly those ids.
+        // And resolving the `firing` feature must expand to exactly those ids, plus
+        // what they are all made of.
+        let mut expected = from_const;
+        expected.insert("ring".to_string());
         let got: BTreeSet<String> = capabilities_for_features(&["firing"]).into_iter().collect();
-        assert_eq!(got, from_const, "firing must expand to exactly its bundle");
+        assert_eq!(got, expected, "firing must expand to exactly its bundle");
     }
 
     #[test]

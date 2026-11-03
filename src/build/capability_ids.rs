@@ -27,6 +27,7 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "camera",
     "haptics",
     "home_widget",
+    "ring",
     "audio",
     "overlay",
     "permissions",

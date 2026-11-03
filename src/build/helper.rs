@@ -237,9 +237,57 @@ fn add_modules_to_settings(project_path: &Path, sentinel_path: &str, modules: &[
     }
 }
 
+/// An app gets what it asked for. The Dioxus template asks for more: Material, which
+/// nothing here uses and which brings ConstraintLayout and RecyclerView along. And a
+/// release keeps every resource, also of what R8 removed.
+fn trim_app_build(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        if line.contains("com.google.android.material:material") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        if line.trim() == "isMinifyEnabled = true" && !content.contains("isShrinkResources") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push_str(indent);
+            out.push_str("isShrinkResources = true\n");
+        }
+    }
+    out
+}
+
+/// The oldest Android the app runs on, as the generated project says.
+fn app_min_sdk(project_path: &Path) -> Option<u32> {
+    let content = fs::read_to_string(project_path.join("app/build.gradle.kts")).ok()?;
+    content.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("minSdk")?
+            .trim()
+            .strip_prefix('=')?
+            .trim()
+            .parse()
+            .ok()
+    })
+}
+
+/// A permission that stops at an Android version older than the app runs on is never
+/// used, so it stays out of the manifest.
+fn applies_from(line: &str, min_sdk: Option<u32>) -> bool {
+    let max_sdk = line
+        .split("android:maxSdkVersion=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|value| value.parse::<u32>().ok());
+    match (max_sdk, min_sdk) {
+        (Some(max), Some(min)) => max >= min,
+        _ => true,
+    }
+}
+
 /// Add `implementation(project(...))` for `:sentinel-core` + each enabled
-/// capability module to the app module's `build.gradle.kts`. Idempotent via
-/// the marker block.
+/// capability module to the app module's `build.gradle.kts`, and take out what nobody
+/// asked for. Idempotent via the marker block.
 fn add_module_dependencies(project_path: &Path, modules: &[&str]) {
     let build_path = project_path.join("app/build.gradle.kts");
     let content = match fs::read_to_string(&build_path) {
@@ -247,7 +295,7 @@ fn add_module_dependencies(project_path: &Path, modules: &[&str]) {
         Err(_) => return,
     };
 
-    let stripped = strip_marker_block(&content, GRADLE_MARKER);
+    let stripped = trim_app_build(&strip_marker_block(&content, GRADLE_MARKER));
 
     let mut deps = String::new();
     deps.push_str(&format!("    // {}\n", GRADLE_MARKER));
@@ -527,6 +575,12 @@ fn set_default_screen_orientation(project_path: &Path, activity_fqcn: &str, orie
 /// runs do not accumulate duplicate entries. When `injection` is empty
 /// this still strips any stale block, leaving a clean baseline manifest.
 fn inject_capabilities(project_path: &Path, injection: &ManifestInjection) {
+    let min_sdk = app_min_sdk(project_path);
+    let mut injection = injection.clone();
+    injection
+        .manifest_lines
+        .retain(|line| applies_from(line, min_sdk));
+    let injection = &injection;
     let manifest_path = project_path.join("app/src/main/AndroidManifest.xml");
     let content = match fs::read_to_string(&manifest_path) {
         Ok(c) => c,
@@ -586,7 +640,11 @@ fn render_manifest_block(injection: &ManifestInjection) -> String {
     if injection.manifest_lines.is_empty() {
         return String::new();
     }
-    let mut block = format!("    {}\n", INJECTION_MARKER);
+    let mut block = format!(
+        "    {}
+",
+        INJECTION_MARKER
+    );
     for line in &injection.manifest_lines {
         block.push_str(line);
         block.push('\n');
@@ -632,6 +690,44 @@ fn splice_injection(stripped: &str, injection: &ManifestInjection) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_app_gets_no_material_and_a_release_keeps_no_unused_resources() {
+        let gradle = concat!(
+            "android {\n",
+            "    buildTypes {\n",
+            "        getByName(\"debug\") {\n",
+            "            isMinifyEnabled = false\n",
+            "        }\n",
+            "        getByName(\"release\") {\n",
+            "            isMinifyEnabled = true\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+            "dependencies {\n",
+            "    implementation(\"androidx.appcompat:appcompat:1.7.1\")\n",
+            "    implementation(\"com.google.android.material:material:1.13.0\")\n",
+            "}\n",
+        );
+        let trimmed = trim_app_build(gradle);
+        assert!(!trimmed.contains("material"));
+        assert!(trimmed.contains("appcompat"));
+        assert!(trimmed.contains(
+            "            isMinifyEnabled = true\n            isShrinkResources = true\n"
+        ));
+        assert_eq!(trimmed.matches("isShrinkResources").count(), 1);
+        assert_eq!(trim_app_build(&trimmed), trimmed, "the same when run again");
+    }
+
+    #[test]
+    fn a_permission_for_older_android_than_the_app_runs_on_stays_out() {
+        let old = r#"    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />"#;
+        let plain = r#"    <uses-permission android:name="android.permission.VIBRATE" />"#;
+        assert!(!applies_from(old, Some(31)));
+        assert!(applies_from(old, Some(26)));
+        assert!(applies_from(old, None));
+        assert!(applies_from(plain, Some(31)));
+    }
     use crate::build::registry::assemble;
 
     const BASELINE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -786,7 +882,7 @@ mod tests {
         let baseline = r#"<?xml version="1.0"?>
 <manifest>
     <application>
-        <activity android:name="dev.dioxus.main.MainActivity"
+        <activity android:name="com.example.MainActivity"
             android:configChanges="orientation|screenLayout|screenSize"
             android:exported="true"
             android:launchMode="singleInstance">
@@ -796,7 +892,7 @@ mod tests {
         fs::write(&manifest_path, baseline).unwrap();
 
         // Inject portrait (pass the fake *project* root)
-        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "portrait");
+        set_default_screen_orientation(&base, "com.example.MainActivity", "portrait");
         let after = fs::read_to_string(&manifest_path).unwrap();
         assert!(
             after.contains(r#"android:screenOrientation="portrait""#),
@@ -806,7 +902,7 @@ mod tests {
         assert!(after.contains("configChanges")); // other attrs survive
 
         // Re-inject different value (landscape) — should overwrite, not duplicate
-        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "landscape");
+        set_default_screen_orientation(&base, "com.example.MainActivity", "landscape");
         let after2 = fs::read_to_string(&manifest_path).unwrap();
         assert!(after2.contains(r#"android:screenOrientation="landscape""#));
         assert!(!after2.contains(r#"="portrait""#));
@@ -815,7 +911,7 @@ mod tests {
 
         // Calling with same is no-op (no change)
         let before_same = fs::read_to_string(&manifest_path).unwrap();
-        set_default_screen_orientation(&base, "dev.dioxus.main.MainActivity", "landscape");
+        set_default_screen_orientation(&base, "com.example.MainActivity", "landscape");
         let after_same = fs::read_to_string(&manifest_path).unwrap();
         assert_eq!(before_same, after_same);
 

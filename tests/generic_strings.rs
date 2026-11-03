@@ -23,6 +23,8 @@ const FORBIDDEN: &[&str] = &[
     "dev.dioxus.main",
     "dev.dioxus",
     "com.example.Alarmfree",
+    "whatsmine",
+    "WhatsMine",
 ];
 
 /// File-path suffixes treated as source-of-truth.
@@ -37,8 +39,9 @@ const EXCLUDE_PATH_SEGMENTS: &[&str] = &[
     // absolute project path, which legitimately contains the consumer's
     // workspace name). Covers the per-module split: the centralized
     // android/builds/ output dir, plus any stray module-local build dir.
+    // Not plain "/build/": that would skip the source in src/build/.
     "/builds/",
-    "/build/",
+    "/android/ci-check/build/",
     "/android/.gradle/",
     "/.gradle/",
     "/node_modules/",

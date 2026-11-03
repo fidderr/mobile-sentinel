@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 
 /**
- * What clicking a link of the app's own scheme (`whatsmine://add/...`) opens.
+ * What clicking a link of the app's own scheme (`myapp://add/...`) opens.
  * Like [SentinelOpenActivity] it has no screen: it remembers the link as an
  * open request ("link:<uri>"), brings the app to the front and finishes. The
  * app then asks for the request with `takeOpenRequest`.

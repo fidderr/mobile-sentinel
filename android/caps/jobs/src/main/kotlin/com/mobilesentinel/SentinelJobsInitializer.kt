@@ -31,6 +31,9 @@ class SentinelJobsInitializer : ContentProvider() {
         val ctx = context ?: return false
         val app = ctx.applicationContext as? Application ?: return false
 
+        // A ring that ended without its service (force-stop) left the volume up.
+        SentinelRing.restoreVolumeIfIdle(app)
+
         try {
             val filter = IntentFilter(SentinelJobGuardian.ACTION_JOB_HEADS_UP)
             val receiver = object : BroadcastReceiver() {

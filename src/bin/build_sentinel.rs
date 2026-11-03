@@ -624,10 +624,14 @@ fn sentinel_build_root(project_path: &Path) -> PathBuf {
     project_path.join("sentinel-build")
 }
 
-/// The `-PsentinelBuildRoot=<abs dir>` Gradle argument. Uses forward slashes
-/// so the value is valid in Gradle on Windows.
+/// The `-PsentinelBuildRoot=<abs dir>` Gradle argument. Absolute, because each module
+/// would resolve a relative one against itself: inside this crate, where a build must
+/// not write. Uses forward slashes so the value is valid in Gradle on Windows.
 fn sentinel_build_root_arg(project_path: &Path) -> String {
     let root = sentinel_build_root(project_path);
+    let root = std::env::current_dir()
+        .map(|dir| dir.join(&root))
+        .unwrap_or(root);
     let s = root.to_string_lossy().replace('\\', "/");
     format!("-PsentinelBuildRoot={s}")
 }
@@ -723,17 +727,20 @@ fn copy_icon(icon_source: &Path, background: Option<&str>, project_path: &Path) 
 
     for dir in &densities {
         let target_dir = res_path.join(dir);
-        let _ = fs::create_dir_all(&target_dir);
-        let _ = fs::copy(icon_source, target_dir.join(&target_name));
-        // Remove conflicting other format
-        if ext == "webp" {
-            let _ = fs::remove_file(target_dir.join("ic_launcher.png"));
-        } else {
-            let _ = fs::remove_file(target_dir.join("ic_launcher.webp"));
+        // What the template or an earlier build left, including round variants.
+        for name in [
+            "ic_launcher.png",
+            "ic_launcher.webp",
+            "ic_launcher_round.png",
+            "ic_launcher_round.webp",
+        ] {
+            let _ = fs::remove_file(target_dir.join(name));
         }
-        // Remove round variants that might conflict
-        let _ = fs::remove_file(target_dir.join("ic_launcher_round.png"));
-        let _ = fs::remove_file(target_dir.join("ic_launcher_round.webp"));
+        // An adaptive icon needs the picture once, not per density.
+        if background.is_none() {
+            let _ = fs::create_dir_all(&target_dir);
+            let _ = fs::copy(icon_source, target_dir.join(&target_name));
+        }
     }
 
     // Remove adaptive icon XML that overrides our raster icon
@@ -741,6 +748,7 @@ fn copy_icon(icon_source: &Path, background: Option<&str>, project_path: &Path) 
     let _ = fs::remove_file(res_path.join("mipmap-anydpi-v26/ic_launcher_round.xml"));
     let _ = fs::remove_file(res_path.join("drawable/ic_launcher_background.xml"));
     let _ = fs::remove_file(res_path.join("drawable-v24/ic_launcher_foreground.xml"));
+    let _ = fs::remove_file(res_path.join("mipmap/ic_launcher.xml"));
 
     // With a background colour the launcher gets an adaptive icon, with the picture in
     // the part every mask leaves visible. Without one, Android shrinks the picture into a
@@ -763,6 +771,15 @@ fn copy_icon(icon_source: &Path, background: Option<&str>, project_path: &Path) 
 "##
         );
         let _ = fs::write(adaptive_dir.join("ic_launcher.xml"), xml);
+        // Older than Android 8, the plain picture.
+        let plain_dir = res_path.join("mipmap");
+        let _ = fs::create_dir_all(&plain_dir);
+        let _ = fs::write(
+            plain_dir.join("ic_launcher.xml"),
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_launcher_picture" />
+"#,
+        );
     }
 
     eprintln!("  Icon: {}", icon_source.display());

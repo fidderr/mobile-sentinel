@@ -30,6 +30,7 @@ android {
 
 dependencies {
     implementation(project(":sentinel-core"))
+    implementation(project(":sentinel-ring"))
     implementation(project(":sentinel-firing_audio"))
     implementation(project(":sentinel-firing_vibration"))
     implementation("androidx.core:core-ktx:1.12.0")

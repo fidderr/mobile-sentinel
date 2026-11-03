@@ -42,6 +42,8 @@ camera = []
 haptics = []
 # Home-screen widget with text the app sets.
 home_widget = []
+# What a ring is made of. Comes with what needs it, nothing else does.
+ring = []
 # Non-firing audio preview (play/stop/volume of arbitrary URIs).
 audio = []
 # Draw-over-apps overlay permission (SYSTEM_ALERT_WINDOW).
@@ -117,7 +119,7 @@ state-store = []
 # Bundled/custom/system sound resolution (backend + import/enumerate/resolve).
 sound-library = []
 # Cross-process job guardian persistence (:sentinel resurrection).
-jobs = []
+jobs = ["ring"]
 # Firing surface — the injectable FiringSink the recipe engine drives.
 # Split into granular sub-features so a consumer composes only the firing
 # surfaces it needs (a silent timer needs foreground-service but no
@@ -133,13 +135,13 @@ firing-audio = ["foreground-service"]
 firing-vibration = ["foreground-service"]
 # The ring service in :sentinel, which plays an alarm's sound and vibration
 # (FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS).
-foreground-service = []
+foreground-service = ["ring"]
 # OS exact-alarm scheduling (SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM).
-exact-alarm = []
+exact-alarm = ["ring"]
 # Kiosk / lock-task takeover while firing (no extra permission).
-kiosk = []
+kiosk = ["ring"]
 # Full-screen intent over the lock screen while firing (USE_FULL_SCREEN_INTENT).
-full-screen-intent = []
+full-screen-intent = ["ring"]
 # Convenience bundle: the complete firing surface composed by alarm-kit.
 firing = [
     "wake-lock",
