@@ -32,6 +32,12 @@ change.
 
 ### Fixed
 
+- `keep_event_loop_awake`, for an app to call from its UI's thread. tao on Android loses a wake
+  that comes in together with a window event, as when another Activity closes, and a Dioxus UI
+  then stands still until something like a touch.
+- `scanner`: cancelling said so twice, the second time when the activity was destroyed. A scan
+  started within that moment ended at once, and what it scanned was lost. From Android 13 on Back
+  said so only then, which could leave the app waiting for seconds. It says so once, at finishing.
 - `display::safe_area_insets` also says how far the keyboard covers the content
   (`keyboard`): an edge-to-edge window does not shrink for it.
 - `screen_pin`: `pin` and `unpin` looked for an Activity in the application context, which

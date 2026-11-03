@@ -798,6 +798,11 @@ pub fn app_files_dir() -> std::path::PathBuf;
 // The device's language as a two-letter code ("nl"), empty when unknown.
 pub fn device_language() -> String;
 
+// Call from a UI's thread, for a Dioxus app the root component. tao on Android loses a wake that
+// comes in together with a window event, and then every task of the UI stands still until
+// something like a touch. This wakes the loop twice a second. Elsewhere it does nothing.
+pub fn keep_event_loop_awake();
+
 // Extract bundled APK assets to the filesystem (idempotent — skips existing).
 pub struct AssetExtractor { /* … */ }
 impl AssetExtractor {

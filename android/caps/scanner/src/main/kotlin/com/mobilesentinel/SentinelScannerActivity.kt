@@ -156,8 +156,7 @@ class SentinelScannerActivity : Activity() {
                 override fun barcodeResult(result: BarcodeResult) {
                     val content = result.text ?: ""
                     Log.i(TAG, "Scanned: ${content.take(50)}")
-                    scanResult = content
-                    writeResultFile(content)
+                    deliver(content)
                     finish()
                 }
             })
@@ -195,10 +194,7 @@ class SentinelScannerActivity : Activity() {
             layoutParams = FrameLayout.LayoutParams(
                 dp(48), dp(48), Gravity.TOP or Gravity.START
             ).apply { setMargins(dp(16), dp(16), 0, 0) }
-            setOnClickListener {
-                writeResultFile("")
-                finish()
-            }
+            setOnClickListener { finish() }
         }
         root.addView(cancel)
 
@@ -351,6 +347,16 @@ class SentinelScannerActivity : Activity() {
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
+    /**
+     * Say how it ended, once. This activity is destroyed a while after it finishes, when a next
+     * scan can have started: a second "nothing" would end that one, and what it scans is lost.
+     */
+    private fun deliver(content: String) {
+        if (scanResult != null) return
+        scanResult = content
+        writeResultFile(content)
+    }
+
     private fun writeResultFile(content: String) {
         try {
             java.io.File(filesDir, RESULT_FILE).writeText(content)
@@ -386,7 +392,10 @@ class SentinelScannerActivity : Activity() {
         }
     }
 
+    // However it ends. From Android 13 on Back does not come through onBackPressed, and being
+    // destroyed can take seconds: the host would still be waiting.
     override fun finish() {
+        deliver("")
         returnToHost()
         super.finish()
     }
@@ -407,16 +416,6 @@ class SentinelScannerActivity : Activity() {
         barcodeView?.pause()
         // Safety net: if the activity is destroyed without a scan, write an
         // empty result so the Rust poll loop doesn't hang to its timeout.
-        if (scanResult == null) {
-            writeResultFile("")
-        }
-    }
-
-    @Deprecated("Uses legacy onBackPressed for broad SDK support; behavior is intentional.")
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        // User cancelled — write empty file so the poll returns promptly.
-        writeResultFile("")
-        super.onBackPressed()
+        deliver("")
     }
 }

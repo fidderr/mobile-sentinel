@@ -211,7 +211,7 @@ pub use sink_types::{
 pub use recipes::Trigger;
 
 // Utility types re-exports.
-pub use utilities::{app_files_dir, device_language, AssetExtractor};
+pub use utilities::{app_files_dir, device_language, keep_event_loop_awake, AssetExtractor};
 
 // Sensor access (accelerometer shake detection + step counter) is exposed
 // through the feature-gated `sensors` module (see `mod sensors`), not as
