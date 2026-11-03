@@ -21,6 +21,9 @@ object SentinelExactAlarmPrimitives {
             val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val intent = Intent(c, SentinelAlarmReceiver::class.java).apply {
                 action = SentinelAlarmReceiver.ACTION
+                // Not behind what else is going on: up to Android 13 the background queue goes
+                // one receiver at a time, and each of them can take a minute.
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                 putExtra(SentinelAlarmReceiver.EXTRA_INSTANCE_ID, id)
                 if (!metadataJson.isNullOrBlank()) {
                     putExtra(SentinelAlarmReceiver.EXTRA_METADATA_JSON, metadataJson)

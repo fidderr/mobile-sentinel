@@ -398,6 +398,7 @@ object SentinelRing {
     private fun watchdogIntent(context: Context, flags: Int): PendingIntent? {
         val intent = Intent(ALARM_ACTION).apply {
             component = ComponentName(context.packageName, RECEIVER)
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             putExtra(ALARM_EXTRA_ID, WATCHDOG_ID)
         }
         return PendingIntent.getBroadcast(
