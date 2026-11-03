@@ -71,7 +71,6 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
         currentResumedActivity = activity
         if (isMainActivity(activity)) {
             writeMainResumed(activity, true)
-            SentinelWebViewCheck.tellIfTooOld(activity)
         }
     }
 

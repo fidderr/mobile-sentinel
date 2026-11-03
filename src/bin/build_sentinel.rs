@@ -26,7 +26,6 @@
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
 //! direct_boot = true                     # optional — files are device-encrypted, so alarms ring before the first unlock
 //! icon_background = "F7F7F7"              # optional — makes the icon adaptive, on this colour
-//! min_webview = 90                       # optional — older WebViews get the backup screen and a notice
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -95,14 +94,6 @@ fn main() {
             "com.mobilesentinel.direct_boot",
             "true",
             "  Direct boot: files are device-encrypted",
-        );
-    }
-    if let Some(version) = config.min_webview {
-        inject_meta_data(
-            &config.project_path,
-            "com.mobilesentinel.min_webview",
-            &version.to_string(),
-            "  Too old a WebView is detected",
         );
     }
 
@@ -231,8 +222,6 @@ fn inject_link_scheme(project_path: &Path, scheme: &str) {
 /// build without this stay behind: the app starts empty once. Android ignores the
 /// manifest's own attribute for this outside system apps, so the library does it
 /// (`SentinelStorage`) and this tells it to.
-///
-/// `min_webview` works the same way: `SentinelWebViewCheck` reads it.
 fn inject_meta_data(project_path: &Path, name: &str, value: &str, done: &str) {
     let meta = format!("<meta-data android:name=\"{name}\" android:value=\"{value}\" />");
     let path = project_path.join("app/src/main/AndroidManifest.xml");
@@ -263,7 +252,6 @@ struct Config {
     default_screen_orientation: Option<String>,
     link_scheme: Option<String>,
     direct_boot: bool,
-    min_webview: Option<u32>,
     release: bool,
     bundle_aab: bool,
 }
@@ -348,7 +336,6 @@ fn load_config() -> Config {
         default_screen_orientation,
         link_scheme,
         direct_boot: toml.get("direct_boot").is_some_and(|v| v == "true"),
-        min_webview: toml.get("min_webview").and_then(|v| v.parse().ok()),
         release,
         bundle_aab,
     }
