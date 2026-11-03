@@ -77,6 +77,9 @@ pub struct FireRequest {
     pub firing_full_screen: bool,
     /// Fade the sound in over this many milliseconds (0 = full volume at once).
     pub fade_in_ms: u32,
+    /// Only vibrate for this many milliseconds, then start the sound (0 = at once).
+    /// Needs `vibrate`: a ring is never silent to start with.
+    pub sound_delay_ms: u32,
     /// Raise the alarm stream volume to at least this percentage while the
     /// sound plays, then restore it (0 = leave the volume alone).
     pub min_volume_percent: u8,
@@ -248,6 +251,7 @@ mod tests {
             kiosk_hide_nav_bar: true,
             firing_full_screen: true,
             fade_in_ms: 0,
+            sound_delay_ms: 0,
             min_volume_percent: 0,
             ring_limit_secs: Some(1800),
             late_ring_window_ms: 0,

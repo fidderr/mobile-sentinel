@@ -377,6 +377,11 @@ fn fire_request(
         } else {
             0
         },
+        sound_delay_ms: if fresh && alarm_ctx.vibration_enabled {
+            u32::from(alarm_ctx.sound_delay_secs) * 1000
+        } else {
+            0
+        },
         min_volume_percent: alarm_ctx
             .min_volume_percent
             .unwrap_or(runtime_cfg.min_volume_percent),
@@ -894,6 +899,7 @@ mod tests {
             fade_in_secs: 0,
             ring_limit_secs: None,
             min_volume_percent: None,
+            sound_delay_secs: 0,
             first_fired_unix_ms: None,
         }
     }

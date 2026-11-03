@@ -67,6 +67,9 @@ pub struct AlarmSpec {
     /// The alarm volume while this alarm rings is at least this percentage. `None`
     /// → the consumer's `AlarmClassConfig::min_volume_percent`.
     pub min_volume_percent: Option<u8>,
+    /// Only vibrate this many seconds before the sound starts (0 = at once). Has no
+    /// effect on an alarm that does not vibrate.
+    pub sound_delay_secs: u16,
 }
 
 impl Default for AlarmSpec {
@@ -94,6 +97,7 @@ impl Default for AlarmSpec {
             fade_in_secs: 0,
             ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
             min_volume_percent: None,
+            sound_delay_secs: 0,
         }
     }
 }
@@ -117,6 +121,7 @@ impl AlarmSpec {
             fade_in_secs: self.fade_in_secs,
             ring_limit_secs: self.ring_limit_secs,
             min_volume_percent: self.min_volume_percent,
+            sound_delay_secs: self.sound_delay_secs,
             first_fired_unix_ms: None,
         }
     }
@@ -139,6 +144,7 @@ impl AlarmSpec {
             fade_in_secs: ctx.fade_in_secs,
             ring_limit_secs: ctx.ring_limit_secs,
             min_volume_percent: ctx.min_volume_percent,
+            sound_delay_secs: ctx.sound_delay_secs,
         }
     }
 }
@@ -2048,11 +2054,13 @@ mod tests {
         let (kit, sink) = install_kit(dir.path());
         let mut spec = weekday_spec();
         spec.fade_in_secs = 15;
+        spec.sound_delay_secs = 20;
 
         kit.create(spec).unwrap();
 
         // Read by the ring service in Kotlin, which runs without any Rust.
         let plan = plan_of(&sink.last_schedule().unwrap());
+        assert_eq!(plan["sound_delay_ms"], 20_000);
         assert_eq!(plan["title"], "Wake");
         assert_eq!(plan["sound_uri"], "test://sound");
         assert_eq!(plan["fade_in_ms"], 15_000);

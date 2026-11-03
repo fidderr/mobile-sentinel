@@ -152,6 +152,9 @@ pub struct AlarmClassContext {
     /// of the consumer's general minimum.
     #[serde(default)]
     pub min_volume_percent: Option<u8>,
+    /// Only vibrate this many seconds before the sound starts.
+    #[serde(default)]
+    pub sound_delay_secs: u16,
     /// When this session first rang (unix ms), across its snoozes. Cleared when the
     /// session ends.
     #[serde(default)]
@@ -409,6 +412,7 @@ mod tests {
             fade_in_secs: 0,
             ring_limit_secs: Some(DEFAULT_RING_LIMIT_SECS),
             min_volume_percent: None,
+            sound_delay_secs: 0,
             first_fired_unix_ms: None,
         }
     }

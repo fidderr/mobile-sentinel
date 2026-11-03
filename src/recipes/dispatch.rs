@@ -102,6 +102,7 @@ mod tests {
             fade_in_secs: 0,
             ring_limit_secs: None,
             min_volume_percent: None,
+            sound_delay_secs: 0,
             first_fired_unix_ms: None,
         })
     }

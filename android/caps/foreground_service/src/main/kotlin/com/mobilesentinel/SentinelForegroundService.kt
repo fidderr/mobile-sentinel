@@ -47,6 +47,9 @@ class SentinelForegroundService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val ringing = LinkedHashMap<String, SentinelRing.Ringing>()
 
+    /** The sound of a ring that vibrates first, until its time comes. */
+    private var soundLater: Runnable? = null
+
     /** The ring whose sound and vibration are on. */
     private var owner: String? = null
     private var paused = false
@@ -280,6 +283,7 @@ class SentinelForegroundService : Service() {
     // ---- Sound and vibration ------------------------------------------------
 
     private fun startOutputs(ring: SentinelRing.Ringing, fade: Boolean) {
+        cancelSoundLater()
         owner = ring.id
         val plan = ring.plan
         SentinelRing.holdVolume(this, plan.optInt("min_volume_percent", 0))
@@ -289,23 +293,41 @@ class SentinelForegroundService : Service() {
         val pattern = vibrationPattern(plan)
         val vibrating = plan.optBoolean("vibrate", !plan.has("sound_uri"))
         if (sounds.isNotEmpty()) {
-            SentinelFiringAudioPrimitives.play(
-                sounds,
-                plan.optString("audio_usage", "alarm"),
-                plan.optString("audio_content_type", "sonification"),
-                plan.optBoolean("looping", true),
-                fadeInMs,
-            ) {
-                // No sound at all could be played: never ring silently.
-                SentinelRing.logTiming(this, "no_sound", ring.id)
-                if (!vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
+            val playSound = Runnable {
+                soundLater = null
+                SentinelFiringAudioPrimitives.play(
+                    sounds,
+                    plan.optString("audio_usage", "alarm"),
+                    plan.optString("audio_content_type", "sonification"),
+                    plan.optBoolean("looping", true),
+                    fadeInMs,
+                ) {
+                    // No sound at all could be played: never ring silently.
+                    SentinelRing.logTiming(this, "no_sound", ring.id)
+                    if (!vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
+                }
+                SentinelRing.logTiming(this, "sound", ring.id)
             }
-            SentinelRing.logTiming(this, "sound", ring.id)
+            // Only at the very start: a ring that comes back after anything else
+            // has waited long enough.
+            val delayMs = if (fade && vibrating) plan.optLong("sound_delay_ms", 0) else 0L
+            if (delayMs > 0) {
+                soundLater = playSound
+                handler.postDelayed(playSound, delayMs)
+            } else {
+                playSound.run()
+            }
         }
         if (vibrating) SentinelFiringVibrationPrimitives.startVibration(pattern)
     }
 
+    private fun cancelSoundLater() {
+        soundLater?.let { handler.removeCallbacks(it) }
+        soundLater = null
+    }
+
     private fun stopOutputs() {
+        cancelSoundLater()
         SentinelFiringAudioPrimitives.stop()
         SentinelFiringVibrationPrimitives.stopVibration()
     }
