@@ -110,6 +110,8 @@ pub use features::file_system;
 pub use features::foregrounding;
 #[cfg(feature = "haptics")]
 pub use features::haptics;
+#[cfg(feature = "home_widget")]
+pub use features::home_widget;
 #[cfg(feature = "location")]
 pub use features::location;
 #[cfg(feature = "maps")]

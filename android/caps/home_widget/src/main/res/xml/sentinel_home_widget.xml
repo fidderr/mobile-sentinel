@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No periodic updates: the app updates it when something changes, so it costs no battery. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/sentinel_home_widget"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:previewLayout="@layout/sentinel_home_widget"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

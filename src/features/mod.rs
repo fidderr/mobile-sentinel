@@ -64,6 +64,9 @@ pub mod foregrounding;
 /// Vibration / haptics. Gated behind `haptics`.
 #[cfg(feature = "haptics")]
 pub mod haptics;
+/// Home-screen widget. Gated behind `home_widget`.
+#[cfg(feature = "home_widget")]
+pub mod home_widget;
 /// Current device location. Gated behind `location`.
 #[cfg(feature = "location")]
 pub mod location;

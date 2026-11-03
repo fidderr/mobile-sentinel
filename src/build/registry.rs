@@ -344,6 +344,26 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &["SentinelHapticPrimitives.kt"],
     },
     Capability {
+        id: "home_widget",
+        description: "Home-screen widget with text the app sets; tapping it opens the app.",
+        permissions: NO_PERMS,
+        features: NO_FEATURES,
+        // In MAIN, as what is drawn comes from there anyway. The ring has nothing to do
+        // with it, so it stays out of :sentinel.
+        components: r#"        <receiver
+            android:name="com.mobilesentinel.SentinelHomeWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sentinel_home_widget" />
+        </receiver>"#,
+        policy_sensitive: false,
+        kotlin_sources: &["SentinelHomeWidget.kt"],
+    },
+    Capability {
         id: "permissions",
         description: "Runtime permission status/request + app-settings deep link.",
         permissions: NO_PERMS,

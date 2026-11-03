@@ -40,6 +40,8 @@ scanner = []
 camera = []
 # Vibration / haptics.
 haptics = []
+# Home-screen widget with text the app sets.
+home_widget = []
 # Non-firing audio preview (play/stop/volume of arbitrary URIs).
 audio = []
 # Draw-over-apps overlay permission (SYSTEM_ALERT_WINDOW).

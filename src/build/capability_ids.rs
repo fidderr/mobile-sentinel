@@ -26,6 +26,7 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "scanner",
     "camera",
     "haptics",
+    "home_widget",
     "audio",
     "overlay",
     "permissions",
