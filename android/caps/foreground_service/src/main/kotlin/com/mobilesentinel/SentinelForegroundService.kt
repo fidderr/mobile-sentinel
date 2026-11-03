@@ -29,7 +29,14 @@ class SentinelForegroundService : Service() {
 
     companion object {
         private const val TAG = "MobileSentinel.Service"
+        /**
+         * Two ids, in turn whenever the notification gains or loses its full-screen intent. The
+         * system only acts on a full-screen intent of a notification it sees for the first time:
+         * an update under the same id becomes a banner at most, and would leave a screen that
+         * went dark during the ring dark. `startForeground` under a new id takes the old one down.
+         */
         private const val NOTIFICATION_ID = 9001
+        private const val OTHER_NOTIFICATION_ID = 9002
         private const val TICK_MS = 1_000L
         private const val WATCHDOG_EVERY_TICKS = 2
         private const val CPU_RENEW_EVERY_TICKS = 60
@@ -41,6 +48,12 @@ class SentinelForegroundService : Service() {
         private const val DEFAULT_SOUND = "system://default-alarm"
         private const val SILENT_SOUND = "silent://"
         private const val QUIET_CHANNEL_SUFFIX = "_quiet"
+        /**
+         * Ticks the app's screen may be away before the notification is loud again, with its
+         * full-screen intent: longer than Home takes to be undone, and than a dialog in front
+         * of it stays. Shorter than it takes to fall asleep with the screen turned off.
+         */
+        private const val UI_AWAY_TICKS = 2
         private val DEFAULT_VIBRATION = longArrayOf(0, 400, 200, 400)
     }
 
@@ -54,10 +67,12 @@ class SentinelForegroundService : Service() {
     private var owner: String? = null
     private var paused = false
     private var uiVisible = false
+    private var uiAwayTicks = 0
     private var postedFullScreen = false
     private var postedBackup = false
     private var postedQuiet = false
     private var postedOwner: String? = null
+    private var notificationId = NOTIFICATION_ID
     private var backupLaunched = false
     private var commandSeen = false
     private var ticking = false
@@ -101,7 +116,7 @@ class SentinelForegroundService : Service() {
 
     private fun ring(id: String, visible: Boolean) {
         reload()
-        uiVisible = visible || SentinelRing.mainOnScreen(this)
+        uiVisible = visible || SentinelRing.appOnScreen(this)
         val first = owner == null && id in ringing
         if (first) {
             owner = id
@@ -150,7 +165,7 @@ class SentinelForegroundService : Service() {
     private fun resumeSaved() {
         commandSeen = true
         reload()
-        uiVisible = SentinelRing.mainOnScreen(this)
+        uiVisible = SentinelRing.appOnScreen(this)
         if (owner == null) {
             // Killed during a pause: what asked for it is still there, and still brings the sound
             // back. Should it die as well, the tick does.
@@ -250,9 +265,31 @@ class SentinelForegroundService : Service() {
                 }
                 SentinelFiringAudioPrimitives.checkPlayback()
             }
+            followTheScreen()
             if (ticks % WATCHDOG_EVERY_TICKS == 0) SentinelRing.armWatchdog(this@SentinelForegroundService)
             if (ticks % CPU_RENEW_EVERY_TICKS == 0) SentinelRing.holdCpu(this@SentinelForegroundService, CPU_HOLD_MS)
             handler.postDelayed(this, TICK_MS)
+        }
+    }
+
+    /**
+     * The notification is quiet while a screen of the app is up, its own or a scanner's, and
+     * loud with its full-screen intent when that has been away for a while: the screen turned
+     * off by hand, the app killed where nothing else may start it, a stop that nothing undid.
+     * The full-screen intent then turns the screen on and brings the app's screen back: there is
+     * no way out of a ring, and no way to sleep through one with a dark screen either.
+     */
+    private fun followTheScreen() {
+        if (SentinelRing.appOnScreen(this)) {
+            uiAwayTicks = 0
+            if (!uiVisible) {
+                uiVisible = true
+                showForeground()
+            }
+        } else if (uiVisible && ++uiAwayTicks >= UI_AWAY_TICKS) {
+            Log.i(TAG, "the app's screen has been away for ${uiAwayTicks}s")
+            uiVisible = false
+            showForeground()
         }
     }
 
@@ -376,7 +413,10 @@ class SentinelForegroundService : Service() {
             return
         }
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(plan, fullScreen, backup, quiet))
+            if (postedOwner != null && fullScreen && !postedFullScreen) {
+                notificationId = if (notificationId == NOTIFICATION_ID) OTHER_NOTIFICATION_ID else NOTIFICATION_ID
+            }
+            startForeground(notificationId, buildNotification(plan, fullScreen, backup, quiet))
             postedOwner = owner
             postedFullScreen = fullScreen
             postedBackup = backup

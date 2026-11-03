@@ -198,6 +198,9 @@ object SentinelJobGuardian {
         try {
             val marker = File(SentinelStorage.filesDir(context), MAIN_RESUMED_FILE)
             if (!marker.exists()) return false
+            // With the screen off a page does not draw, and so does not answer: not frozen.
+            val power = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            if (power != null && !power.isInteractive) return false
             val parts = marker.readText().trim().split(' ')
             if (parts.size != 2 || parts[0].toIntOrNull() != mainPid) return false
             val resumedAt = parts[1].toLongOrNull() ?: return false

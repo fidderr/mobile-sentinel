@@ -42,7 +42,17 @@ change.
 - A ring that comes back (`AlarmKit::resume`) no longer takes the screen from whatever of the app
   is in front, such as a scanner. A new ring still does.
 - Kiosk: Recents on a recent launcher got past the lock, because the activity stays resumed behind it
-  and only loses the window focus. The activity is brought back for that too.
+  and only loses the window focus. The activity is brought back for that too, after 1.5 s: a slow
+  device's turn of the screen takes the focus for longer than that check first allowed.
+- The screen turned off during a ring stopped the alarm's activity, the kiosk brought it back, and
+  it sat resumed on a dark screen where its page could not answer: the guardian took that for a
+  frozen UI, and two such kills would have handed over to the backup screen. The kiosk leaves a
+  target that went with the screen where it is, the guardian does not judge a UI with the screen
+  off, and the ring service follows the screen: its notification is quiet while the app's screen is
+  up, and loud with its full-screen intent once that has been away for two seconds, which turns the
+  screen back on. That also brings the app back after a kill where nothing else may start it. The
+  loud notification goes out under a new id: the system only acts on the full-screen intent of a
+  notification it sees for the first time, and an update under the old id would have been a banner.
 - The ring service killed during a pause stays quiet as long as the process that asked for the pause
   lives. It came back loud, with nothing to quiet it again.
 - `display::set_system_bar_color()`, for the bars an app does not draw under up to Android 14.

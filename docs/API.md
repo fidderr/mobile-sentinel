@@ -339,7 +339,7 @@ pub struct JobConfig {
     pub start_main_delay_ms: u64,      // default 0
     pub heads_up_delay_ms: u64,        // default 200
     pub auto_remove_on_complete: bool, // default true
-    pub ui_liveness_timeout_ms: u64,   // 0 = off (default). Restart MAIN if its UI sends no `jobs::ui_heartbeat()` for this long while the main activity is on screen
+    pub ui_liveness_timeout_ms: u64,   // 0 = off (default). Restart MAIN if its UI sends no `jobs::ui_heartbeat()` for this long while the main activity is on screen and the screen is on
     pub ui_liveness_backoff_cap: u32,  // default 4: each kill doubles the allowed silence, up to this multiple
     pub min_launch_interval_ms: u64,   // default 3000: never launch MAIN more often than this
     pub ui_failures_before_backup: u32, // 0 = off (default). After this many UI restarts the native backup screen takes over

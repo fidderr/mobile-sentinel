@@ -324,11 +324,14 @@ object SentinelRing {
         return 0
     }
 
-    /** Whether MAIN's main activity is on screen right now. */
+    /**
+     * Whether a screen of the app is up right now: its main activity, a scanner, a picker. The
+     * marker is MAIN's, and one left behind by a killed MAIN names a pid that is no longer its.
+     */
     @JvmStatic
-    fun mainOnScreen(context: Context): Boolean {
+    fun appOnScreen(context: Context): Boolean {
         return try {
-            val file = File(SentinelStorage.filesDir(context), SentinelActivityTracker.MAIN_RESUMED_FILE)
+            val file = File(SentinelStorage.filesDir(context), SentinelActivityTracker.APP_RESUMED_FILE)
             if (!file.exists()) return false
             val pid = file.readText().trim().substringBefore(' ').toIntOrNull() ?: return false
             pid != 0 && pid == mainPid(context)

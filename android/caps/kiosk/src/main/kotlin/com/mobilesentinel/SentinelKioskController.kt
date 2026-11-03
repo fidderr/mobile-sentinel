@@ -45,8 +45,11 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
     /** Cleared again in [disable]. */
     private const val KEEP_AWAKE_FLAGS = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
 
-    /** Long enough for what does get paused, a dialog or the scanner, to have been paused. */
-    private const val NO_FOCUS_RELAUNCH_MS = 600L
+    /**
+     * Long enough for what does get paused, a dialog or the scanner, to have been paused, and
+     * for a turn of the screen on a slow device, which takes the focus away while it draws.
+     */
+    private const val NO_FOCUS_RELAUNCH_MS = 1_500L
 
     @Volatile var enabled: Boolean = false
     @Volatile var targetActivityFqcn: String = ""
@@ -300,11 +303,20 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         noFocusCheck = null
         if (hasFocus || !enabled || !(blockHome || blockRecents)) return
         noFocusCheck = Runnable {
-            if (enabled && SentinelActivityTracker.isActivityResumed(targetActivityFqcn)) {
+            if (enabled && screenOn(activity) && !activity.hasWindowFocus() &&
+                SentinelActivityTracker.isActivityResumed(targetActivityFqcn)
+            ) {
                 Log.i(TAG, "target on screen without the focus")
                 onActivityLeaving(activity)
             }
         }.also { handler.postDelayed(it, NO_FOCUS_RELAUNCH_MS) }
+    }
+
+    /** Whether the screen is on. A target that went with the screen was not left. */
+    private fun screenOn(ctx: Context): Boolean = try {
+        (ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isInteractive ?: true
+    } catch (_: Throwable) {
+        true
     }
 
     private fun relaunchTarget() {
@@ -516,6 +528,14 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
 
         // Target activity stopped — normal relaunch flow
         if (isTarget && (blockRecents || blockHome)) {
+            // The screen going off stops it as well. It stays on top for when the screen comes
+            // back, and the ring service turns that on. Brought back now, it would sit resumed on a
+            // dark screen with a page that does not draw, and so does not answer: that reads as
+            // frozen, and ends in the backup screen for nothing.
+            if (!screenOn(activity)) {
+                Log.i(TAG, "target stopped with the screen off: it stays where it is")
+                return
+            }
             onActivityLeaving(activity)
         }
     }

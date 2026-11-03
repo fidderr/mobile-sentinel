@@ -73,16 +73,18 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityResumed(activity: Activity) {
         currentResumedActivity = activity
+        writeResumed(activity, APP_RESUMED_FILE, true)
         if (isMainActivity(activity)) {
-            writeMainResumed(activity, true)
+            writeResumed(activity, MAIN_RESUMED_FILE, true)
         }
     }
 
     override fun onActivityPaused(activity: Activity) {
         if (currentResumedActivity === activity) {
             currentResumedActivity = null
+            writeResumed(activity, APP_RESUMED_FILE, false)
         }
-        if (isMainActivity(activity)) writeMainResumed(activity, false)
+        if (isMainActivity(activity)) writeResumed(activity, MAIN_RESUMED_FILE, false)
     }
 
     /**
@@ -93,15 +95,21 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
      */
     const val MAIN_RESUMED_FILE = "mobile_sentinel_main_resumed"
 
+    /**
+     * The same for any activity of the app: a scanner or a picker in front is the app's
+     * screen too, and nothing should be put over it or shown about it.
+     */
+    const val APP_RESUMED_FILE = "mobile_sentinel_app_resumed"
+
     private fun isMainActivity(activity: Activity): Boolean {
         val launcher = activity.packageManager
             .getLaunchIntentForPackage(activity.packageName)?.component?.className
         return launcher != null && activity.componentName.className == launcher
     }
 
-    private fun writeMainResumed(activity: Activity, resumed: Boolean) {
+    private fun writeResumed(activity: Activity, name: String, resumed: Boolean) {
         try {
-            val file = java.io.File(SentinelStorage.filesDir(activity), MAIN_RESUMED_FILE)
+            val file = java.io.File(SentinelStorage.filesDir(activity), name)
             if (resumed) {
                 // "<pid> <resume time ms>": a marker left behind by a killed
                 // process names a pid that is no longer MAIN's.
@@ -110,7 +118,7 @@ object SentinelActivityTracker : Application.ActivityLifecycleCallbacks {
                 file.delete()
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "writeMainResumed($resumed) failed: ${e.message}")
+            Log.w(TAG, "writeResumed($name, $resumed) failed: ${e.message}")
         }
     }
 
