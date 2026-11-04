@@ -11,6 +11,15 @@ change.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-04
+
+### Fixed
+
+- `build_sentinel` without `--app` read the capabilities of a release build from the debug
+  profile's record, which is whatever the last debug build enabled, possibly weeks old. A
+  release from the published crate then lacked modules (`ring`, and with it the build) or
+  shipped without ones the app had since added. It reads the record of the profile it builds.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added

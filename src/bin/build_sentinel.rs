@@ -375,11 +375,13 @@ fn load_config() -> Config {
 /// So we scope tightly to the `.so` `dx build` actually produced:
 ///   1. Only Android target-triple dirs (name contains `android`, e.g.
 ///      `aarch64-linux-android`) — excludes host `debug`/`release`/`doc`.
-///   2. WITHIN those, only the `android-dev` profile dir — the profile `dx`
-///      compiles under. This is the key fix: a stray
+///   2. WITHIN those, only the profile dir `dx` compiles under: `android-dev`
+///      for a debug build, `android-release` for a release one. A stray
 ///      `cargo build --target aarch64-linux-android --features ...` writes to
 ///      the SAME triple but under the `debug` profile, and unioning/picking
-///      across profiles would read that polluted feature set.
+///      across profiles would read that polluted feature set. Reading the
+///      debug record for a release build is as wrong: it is whatever the last
+///      debug build enabled, possibly weeks old.
 ///   3. Among the remaining files, pick the SINGLE most-recently-modified one
 ///      — the `.so` from the `dx build` that just ran. No union.
 ///
@@ -391,9 +393,11 @@ fn read_feature_capabilities() -> Vec<String> {
         return Vec::new();
     }
 
-    // Collect candidate files under each Android target-triple's `android-dev`
-    // profile dir (the profile `dx build` uses). Falls back to scanning the
-    // whole triple only if no `android-dev` dir exists (older dx layouts).
+    // Collect candidate files under each Android target-triple's profile dir
+    // for this build (`android-dev` or `android-release`, as `dx build` names
+    // them). Falls back to scanning the whole triple only if that dir does not
+    // exist (older dx layouts).
+    let profile_dir = dx_profile_dir(parse_release_cli());
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = fs::read_dir(target) {
         for entry in entries.flatten() {
@@ -407,7 +411,7 @@ fn read_feature_capabilities() -> Vec<String> {
             if !is_android_triple {
                 continue;
             }
-            let dx_profile = path.join("android-dev");
+            let dx_profile = path.join(profile_dir);
             if dx_profile.is_dir() {
                 collect_capability_files(&dx_profile, &mut candidates, 0);
             } else {
@@ -437,6 +441,15 @@ fn read_feature_capabilities() -> Vec<String> {
     found.sort();
     found.dedup();
     found
+}
+
+/// The profile directory `dx build` compiles under, inside the target triple's.
+fn dx_profile_dir(is_release: bool) -> &'static str {
+    if is_release {
+        "android-release"
+    } else {
+        "android-dev"
+    }
 }
 
 /// Recursively collect paths to `enabled_capabilities.txt` (depth-limited to
