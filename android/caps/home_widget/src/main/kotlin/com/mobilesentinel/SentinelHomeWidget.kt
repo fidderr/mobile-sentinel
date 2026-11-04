@@ -5,7 +5,6 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import android.widget.RemoteViews
 import com.mobilesentinel.home_widget.R
@@ -79,7 +78,6 @@ object SentinelHomeWidgetPrimitives {
     @JvmStatic
     fun canAdd(): Boolean {
         val context = SentinelPrimitives.getAppContext() ?: return false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         return try {
             AppWidgetManager.getInstance(context)?.isRequestPinAppWidgetSupported == true
         } catch (e: Throwable) {
@@ -91,7 +89,6 @@ object SentinelHomeWidgetPrimitives {
     @JvmStatic
     fun add(): Boolean {
         val context = SentinelPrimitives.getAppContext() ?: return false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         return try {
             AppWidgetManager.getInstance(context)
                 ?.requestPinAppWidget(ComponentName(context, SentinelHomeWidget::class.java), null, null) == true

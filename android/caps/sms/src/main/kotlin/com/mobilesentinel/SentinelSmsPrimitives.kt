@@ -2,7 +2,6 @@ package com.mobilesentinel
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
 import android.telephony.SmsManager
 import android.util.Log
 
@@ -69,13 +68,11 @@ object SentinelSmsPrimitives {
      * deprecated [SmsManager.getDefault]. Returns null if neither works.
      */
     private fun resolveSmsManager(context: Context): SmsManager? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val manager = context.getSystemService(SmsManager::class.java)
-                if (manager != null) return manager
-            } catch (e: Throwable) {
-                Log.w(TAG, "getSystemService(SmsManager) failed: ${e.message}", e)
-            }
+        try {
+            val manager = context.getSystemService(SmsManager::class.java)
+            if (manager != null) return manager
+        } catch (e: Throwable) {
+            Log.w(TAG, "getSystemService(SmsManager) failed: ${e.message}", e)
         }
         return try {
             @Suppress("DEPRECATION")

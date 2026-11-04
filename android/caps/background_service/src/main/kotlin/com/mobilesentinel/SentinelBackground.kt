@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -143,7 +142,6 @@ object SentinelBackground {
     }
 
     private fun ensureChannel(c: Context, id: String, name: String, importance: Int, configure: (NotificationChannel) -> Unit = {}) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = NotificationChannel(id, name, importance)
         configure(ch)

@@ -39,13 +39,10 @@ object SentinelFiringVibrationPrimitives {
                     VibrationEffect.createWaveform(pattern, 0),
                     VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
                 )
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            } else {
                 val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0), attrs)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(pattern, 0)
             }
             true
         } catch (e: Throwable) {
@@ -69,13 +66,8 @@ object SentinelFiringVibrationPrimitives {
 
     private fun vibrator(context: Context): Vibrator? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                manager?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
+            val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            manager?.defaultVibrator
         } catch (e: Throwable) {
             Log.w(TAG, "vibrator(): ${e.message}", e)
             null

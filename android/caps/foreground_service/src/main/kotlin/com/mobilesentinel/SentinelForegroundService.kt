@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.ComponentName
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -430,7 +429,6 @@ class SentinelForegroundService : Service() {
     }
 
     private fun ensureChannel(plan: JSONObject, channelId: String, quiet: Boolean) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         val name = plan.optString("channel_name", "").ifEmpty { "Alarms" }
         val importance = if (quiet) {
@@ -454,12 +452,7 @@ class SentinelForegroundService : Service() {
         val loudChannel = plan.optString("channel_id", "").ifEmpty { FALLBACK_CHANNEL }
         val channelId = if (quiet) loudChannel + QUIET_CHANNEL_SUFFIX else loudChannel
         ensureChannel(plan, channelId, quiet)
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, channelId)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this).setPriority(Notification.PRIORITY_MAX)
-        }
+        val builder = Notification.Builder(this, channelId)
         builder.setContentTitle(plan.optString("title", "").ifEmpty { "Alarm" })
             .setContentText(plan.optString("body", ""))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)

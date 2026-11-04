@@ -9,6 +9,10 @@ Pre-1.0, on-disk formats (StateStore / ContextStore JSON, job files) ship as a
 single clean migration — no back-compat shims. Uninstall/reinstall on a format
 change.
 
+## Unreleased
+
+- Android 12 (API 31) is the floor now: every module has minSdk 31 and the code for older versions is gone.
+
 ## [Unreleased]
 
 ## [0.3.1] - 2026-11-04
