@@ -21,7 +21,9 @@ change.
   modules that use androidx depend on it.
 - `health`: the maker's "auto-start" cannot be read, so it is no longer guessed from the
   phone's brand: `boot_signal_missed` says the phone restarted and the signal never came.
-- `sensors`: the step counter no longer asks for the fastest rate.
+- `sensors`: a step shows as it is taken. The step detector reports each one at once; the
+  step counter, which hardware batches by seconds, runs beside it so none is lost, and the
+  higher count is what `step_count` says. Neither asks for the fastest rate any more.
 
 ### Removed
 

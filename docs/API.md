@@ -169,7 +169,7 @@ reset_shake_count();
 stop_accelerometer();
 
 start_step_counter();
-let steps = step_count();   // Sensor.TYPE_STEP_COUNTER where supported
+let steps = step_count();   // the step detector as steps happen, the step counter behind it
 ```
 
 The accelerometer thresholds the motion-only magnitude (gravity subtracted) with
