@@ -11,80 +11,7 @@ change.
 
 ## [Unreleased]
 
-### Changed
-
-- An app gets what it asked for, also in its bundle. `ring`: what a ring is made of left
-  `core` for a module of its own, so an app without alarms does not carry it.
-  `build_sentinel` takes out Material, which the Dioxus template adds and nothing here
-  uses, and has a release drop unused resources. An adaptive icon stores its picture once.
-  A permission that stops below the app's `minSdk` stays out of its manifest. Only the
-  modules that use androidx depend on it.
-- `health`: the maker's "auto-start" cannot be read, so it is no longer guessed from the
-  phone's brand: `boot_signal_missed` says the phone restarted and the signal never came.
-- `sensors`: a step shows as it is taken. The step detector reports each one at once; the
-  step counter, which hardware batches by seconds, runs beside it so none is lost, and the
-  higher count is what `step_count` says. Neither asks for the fastest rate any more.
-
-### Removed
-
-- `install_firing_sink` and `firing_sink`: nothing read what they set. Pass a sink to
-  `AlarmKit::install`.
-- `AlarmKit::handle` and `AlarmKit::next_fire_time`: `AlarmKit::next_fire` has it.
-- `tokio`, `futures-core` and `futures-channel`, which nothing used.
-
-### Fixed
-
-- `keep_event_loop_awake`, for an app to call from its UI's thread. tao on Android loses a wake
-  that comes in together with a window event, as when another Activity closes, and a Dioxus UI
-  then stands still until something like a touch.
-- An exact alarm's broadcast goes through the foreground queue. In the background queue, up to
-  Android 13, it waited its turn behind whatever else was going on: 13 seconds right after a boot.
-- No banner over the alarm's own screen: the ring's notification does not alert while that screen is
-  up. The channel made it a heads-up all the same.
-- A ring that comes back (`AlarmKit::resume`) no longer takes the screen from whatever of the app
-  is in front, such as a scanner. A new ring still does.
-- Kiosk: Recents on a recent launcher got past the lock, because the activity stays resumed behind it
-  and only loses the window focus. The activity is brought back for that too, after 1.5 s: a slow
-  device's turn of the screen takes the focus for longer than that check first allowed.
-- The screen turned off during a ring stopped the alarm's activity, the kiosk brought it back, and
-  it sat resumed on a dark screen where its page could not answer: the guardian took that for a
-  frozen UI, and two such kills would have handed over to the backup screen. The kiosk leaves a
-  target that went with the screen where it is, the guardian does not judge a UI with the screen
-  off, and the ring service follows the screen: its notification is quiet while the app's screen is
-  up, and loud with its full-screen intent once that has been away for two seconds, which turns the
-  screen back on. That also brings the app back after a kill where nothing else may start it. The
-  loud notification goes out under a new id: the system only acts on the full-screen intent of a
-  notification it sees for the first time, and an update under the old id would have been a banner.
-- The ring service killed during a pause stays quiet as long as the process that asked for the pause
-  lives. It came back loud, with nothing to quiet it again.
-- `display::set_system_bar_color()`, for the bars an app does not draw under up to Android 14.
-- `scanner` no longer asks for the lock screen to go away. On a phone with a PIN that put the PIN
-  prompt over the camera.
-- `scanner`, `media_picker`, `camera`: what was scanned, picked or taken after a minute or two was
-  lost, with the activity still open and the app no longer waiting. They wait 30 minutes, and 10
-  for a photo.
-- `scanner`: cancelling said so twice, the second time when the activity was destroyed. A scan
-  started within that moment ended at once, and what it scanned was lost. From Android 13 on Back
-  said so only then, which could leave the app waiting for seconds. It says so once, at finishing.
-- `display::safe_area_insets` also says how far the keyboard covers the content
-  (`keyboard`): an edge-to-edge window does not shrink for it.
-- `screen_pin`: `pin` and `unpin` looked for an Activity in the application context, which
-  never is one, so they could not work. They use the resumed Activity.
-- `biometric`: `authenticate` had the same problem, and would have called a prompt on screen
-  a success. It waits for the answer now, and is `Ok` only if the user was recognised.
-- `phone`: opening the dialer needs no `CALL_PHONE`, so it is gone, and with it the Play
-  review. `is_in_call` reads the audio mode, as the call state wants a permission from
-  Android 12 on.
-- `secure_storage` is private to the app but not encrypted, whatever the docs said.
-- A ring whose processes all died came back without its screen, as on ColorOS when an app
-  is swiped away: nothing in the new `:sentinel` was guarding.
-- The guardian could stop just as a job became active.
-- `background_service` and `exact_alarm` had a class of the same name, so an app could not
-  have both.
-- A reminder's notification icon was the app's icon, which shows as a blob in the status bar.
-- `display`: brightness and keep-screen-on did nothing, since the app context stopped
-  being an Activity. A repeated call also saved the override as the original.
-- `build_sentinel`: Gradle output of an app's build no longer lands inside this crate.
+## [0.3.0] - 2026-11-04
 
 ### Added
 
@@ -150,6 +77,19 @@ change.
 
 ### Changed
 
+- An app gets what it asked for, also in its bundle. `ring`: what a ring is made of left
+  `core` for a module of its own, so an app without alarms does not carry it.
+  `build_sentinel` takes out Material, which the Dioxus template adds and nothing here
+  uses, and has a release drop unused resources. An adaptive icon stores its picture once.
+  A permission that stops below the app's `minSdk` stays out of its manifest. Only the
+  modules that use androidx depend on it.
+- `health`: the maker's "auto-start" cannot be read, so it is no longer guessed from the
+  phone's brand: `boot_signal_missed` says the phone restarted and the signal never came.
+- `sensors`: a step shows as it is taken. The step detector reports each one at once; the
+  step counter, which hardware batches by seconds, runs beside it so none is lost, and the
+  higher count is what `step_count` says. Neither asks for the fastest rate any more.
+
+
 - **An alarm rings from `:sentinel`, before any Rust runs.** Rust resolves a plan
   when it arms an alarm (a serialized `FireRequest`, carried by
   `ExactAlarmRequest::metadata_json`) and the alarm receiver starts the ring
@@ -178,7 +118,67 @@ change.
 - Firing keeps the next occurrence armed, so a recurring alarm survives a reboot
   mid-ring without the app being opened.
 
+### Removed
+
+- `install_firing_sink` and `firing_sink`: nothing read what they set. Pass a sink to
+  `AlarmKit::install`.
+- `AlarmKit::handle` and `AlarmKit::next_fire_time`: `AlarmKit::next_fire` has it.
+- `tokio`, `futures-core` and `futures-channel`, which nothing used.
+
 ### Fixed
+
+- `keep_event_loop_awake`, for an app to call from its UI's thread. tao on Android loses a wake
+  that comes in together with a window event, as when another Activity closes, and a Dioxus UI
+  then stands still until something like a touch.
+- An exact alarm's broadcast goes through the foreground queue. In the background queue, up to
+  Android 13, it waited its turn behind whatever else was going on: 13 seconds right after a boot.
+- No banner over the alarm's own screen: the ring's notification does not alert while that screen is
+  up. The channel made it a heads-up all the same.
+- A ring that comes back (`AlarmKit::resume`) no longer takes the screen from whatever of the app
+  is in front, such as a scanner. A new ring still does.
+- Kiosk: Recents on a recent launcher got past the lock, because the activity stays resumed behind it
+  and only loses the window focus. The activity is brought back for that too, after 1.5 s: a slow
+  device's turn of the screen takes the focus for longer than that check first allowed.
+- The screen turned off during a ring stopped the alarm's activity, the kiosk brought it back, and
+  it sat resumed on a dark screen where its page could not answer: the guardian took that for a
+  frozen UI, and two such kills would have handed over to the backup screen. The kiosk leaves a
+  target that went with the screen where it is, the guardian does not judge a UI with the screen
+  off, and the ring service follows the screen: its notification is quiet while the app's screen is
+  up, and loud with its full-screen intent once that has been away for two seconds, which turns the
+  screen back on. That also brings the app back after a kill where nothing else may start it. The
+  loud notification goes out under a new id: the system only acts on the full-screen intent of a
+  notification it sees for the first time, and an update under the old id would have been a banner.
+- The ring service killed during a pause stays quiet as long as the process that asked for the pause
+  lives. It came back loud, with nothing to quiet it again.
+- `display::set_system_bar_color()`, for the bars an app does not draw under up to Android 14.
+- `scanner` no longer asks for the lock screen to go away. On a phone with a PIN that put the PIN
+  prompt over the camera.
+- `scanner`, `media_picker`, `camera`: what was scanned, picked or taken after a minute or two was
+  lost, with the activity still open and the app no longer waiting. They wait 30 minutes, and 10
+  for a photo.
+- `scanner`: cancelling said so twice, the second time when the activity was destroyed. A scan
+  started within that moment ended at once, and what it scanned was lost. From Android 13 on Back
+  said so only then, which could leave the app waiting for seconds. It says so once, at finishing.
+- `display::safe_area_insets` also says how far the keyboard covers the content
+  (`keyboard`): an edge-to-edge window does not shrink for it.
+- `screen_pin`: `pin` and `unpin` looked for an Activity in the application context, which
+  never is one, so they could not work. They use the resumed Activity.
+- `biometric`: `authenticate` had the same problem, and would have called a prompt on screen
+  a success. It waits for the answer now, and is `Ok` only if the user was recognised.
+- `phone`: opening the dialer needs no `CALL_PHONE`, so it is gone, and with it the Play
+  review. `is_in_call` reads the audio mode, as the call state wants a permission from
+  Android 12 on.
+- `secure_storage` is private to the app but not encrypted, whatever the docs said.
+- A ring whose processes all died came back without its screen, as on ColorOS when an app
+  is swiped away: nothing in the new `:sentinel` was guarding.
+- The guardian could stop just as a job became active.
+- `background_service` and `exact_alarm` had a class of the same name, so an app could not
+  have both.
+- A reminder's notification icon was the app's icon, which shows as a blob in the status bar.
+- `display`: brightness and keep-screen-on did nothing, since the app context stopped
+  being an Activity. A repeated call also saved the override as the original.
+- `build_sentinel`: Gradle output of an app's build no longer lands inside this crate.
+
 
 - Dismissing one of two ringing alarms silenced the other and released the lock.
 - A sound that cannot be played no longer means silence: `fallback_sound_uris` and
@@ -218,6 +218,8 @@ change.
   `on_startup` engages a firing alarm once instead of twice.
 
 ## [0.2.2] - 2026-10-16
+
+Never published to crates.io: what it lists ships in 0.3.0.
 
 Media capabilities for messenger-style apps, and the first Windows backends.
 Purely additive: no existing function, feature or manifest output changes
