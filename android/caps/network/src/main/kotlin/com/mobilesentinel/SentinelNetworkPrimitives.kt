@@ -2,6 +2,7 @@ package com.mobilesentinel
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.util.Log
 
@@ -22,8 +23,7 @@ import android.util.Log
  * [Log.w], and returns a safe default (`false` / `0`). These methods never
  * throw — JNI callers can rely on that.
  *
- * Note: on-change (NetworkCallback) registration is handled separately and is
- * intentionally not implemented here.
+ * [watch] tells Rust when the default network changes and when the radio is awake anyway.
  */
 object SentinelNetworkPrimitives {
     private const val TAG = "MobileSentinel.Network"
@@ -74,4 +74,65 @@ object SentinelNetworkPrimitives {
             0
         }
     }
+
+    @Volatile
+    private var watching = false
+
+    private fun kind(caps: NetworkCapabilities?): Int = when {
+        caps == null -> 0
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 1
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 2
+        else -> 3
+    }
+
+    /**
+     * From now on [nativeOnChange] hears of every change of the default network, and
+     * [nativeOnRadioActive] when the radio went active for any app: a cheap moment to use it.
+     */
+    @JvmStatic
+    fun watch(): Boolean {
+        return try {
+            synchronized(this) {
+                if (watching) return true
+                val ctx = SentinelPrimitives.getAppContext() ?: return false
+                val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    ?: return false
+                cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                    override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                        tell(kind(caps), !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+                    }
+
+                    override fun onLost(network: Network) {
+                        tell(0, false)
+                    }
+                })
+                cm.addDefaultNetworkActiveListener {
+                    try {
+                        nativeOnRadioActive()
+                    } catch (e: UnsatisfiedLinkError) {
+                        Log.w(TAG, "nativeOnRadioActive not linked: ${e.message}")
+                    }
+                }
+                watching = true
+                true
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "watch: ${e.message}", e)
+            false
+        }
+    }
+
+    private fun tell(kind: Int, metered: Boolean) {
+        try {
+            nativeOnChange(kind, metered)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "nativeOnChange not linked: ${e.message}")
+        }
+    }
+
+    @JvmStatic
+    private external fun nativeOnChange(kind: Int, metered: Boolean)
+
+    @JvmStatic
+    private external fun nativeOnRadioActive()
 }

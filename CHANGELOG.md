@@ -9,11 +9,10 @@ Pre-1.0, on-disk formats (StateStore / ContextStore JSON, job files) ship as a
 single clean migration — no back-compat shims. Uninstall/reinstall on a format
 change.
 
-## Unreleased
+## [Unreleased]
 
 - Android 12 (API 31) is the floor now: every module has minSdk 31 and the code for older versions is gone.
-
-## [Unreleased]
+- `network::on_change`, `network::on_radio_active`, `battery::power_state`, `battery::on_power_change`, `background_service::wake_in` and `on_wake`: what a messenger needs to let the radio rest.
 
 ## [0.3.1] - 2026-11-04
 

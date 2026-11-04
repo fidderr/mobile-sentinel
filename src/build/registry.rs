@@ -322,6 +322,8 @@ pub const CAPABILITIES: &[Capability] = &[
             Permission::new("android.permission.POST_NOTIFICATIONS"),
             Permission::new("android.permission.RECEIVE_BOOT_COMPLETED"),
             Permission::new("android.permission.USE_FULL_SCREEN_INTENT"),
+            // A short one for each wake-up the app asked for, so it can use it.
+            Permission::new("android.permission.WAKE_LOCK"),
         ],
         features: NO_FEATURES,
         components: "",
