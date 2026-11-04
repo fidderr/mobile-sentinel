@@ -26,6 +26,8 @@
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
 //! direct_boot = true                     # optional — files are device-encrypted, so alarms ring before the first unlock
 //! icon_background = "F7F7F7"              # optional — makes the icon adaptive, on this colour
+//! window_background = "F5F6F9"            # optional — the window and the splash screen are this colour until the page paints,
+//! window_background_dark = "101218"       #   and this with the phone in dark mode; without them Android shows white
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -119,6 +121,13 @@ fn main() {
         );
     }
     copy_assets(&config.asset_paths, &config.project_path);
+    if let Some(light) = &config.window_background {
+        set_window_background(
+            &config.project_path,
+            light,
+            config.window_background_dark.as_deref(),
+        );
+    }
 
     // Step 3: Build APK/AAB via Gradle. Trimming is now STRUCTURAL — only the
     // enabled capability modules were wired into settings.gradle + the app
@@ -247,6 +256,8 @@ struct Config {
     activity: String,
     icon_path: Option<PathBuf>,
     icon_background: Option<String>,
+    window_background: Option<String>,
+    window_background_dark: Option<String>,
     asset_paths: Vec<PathBuf>,
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
@@ -331,6 +342,14 @@ fn load_config() -> Config {
         activity,
         icon_path,
         icon_background: toml.get("icon_background").cloned(),
+        window_background: toml
+            .get("window_background")
+            .cloned()
+            .filter(|c| is_hex_colour(c)),
+        window_background_dark: toml
+            .get("window_background_dark")
+            .cloned()
+            .filter(|c| is_hex_colour(c)),
         asset_paths,
         capabilities,
         default_screen_orientation,
@@ -783,6 +802,66 @@ fn copy_icon(icon_source: &Path, background: Option<&str>, project_path: &Path) 
     }
 
     eprintln!("  Icon: {}", icon_source.display());
+}
+
+/// Six hex digits, as the colours in `sentinel.toml` are written.
+fn is_hex_colour(value: &str) -> bool {
+    value.len() == 6 && value.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// The colour of the window, and so of the splash screen, until the app's page has painted:
+/// Android shows the theme's white otherwise, whatever the page looks like. `dark` is for the
+/// phone in dark mode. The template's theme is written anew by every `dx build`, so this is
+/// done after it, like the manifest.
+fn set_window_background(project_path: &Path, light: &str, dark: Option<&str>) {
+    let res_path = project_path.join("app/src/main/res");
+    let colour_file = |dir: &str, colour: &str| {
+        let dir = res_path.join(dir);
+        let _ = fs::create_dir_all(&dir);
+        let xml = format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <color name=\"sentinel_window_background\">#{colour}</color>\n</resources>\n"
+        );
+        if let Err(e) = fs::write(dir.join("sentinel_window.xml"), xml) {
+            eprintln!("  Failed to write the window colour: {e}");
+        }
+    };
+    colour_file("values", light);
+    match dark {
+        Some(dark) => colour_file("values-night", dark),
+        None => {
+            let _ = fs::remove_file(res_path.join("values-night/sentinel_window.xml"));
+        }
+    }
+    let styles = res_path.join("values/styles.xml");
+    let Ok(content) = fs::read_to_string(&styles) else {
+        eprintln!("  No styles.xml to put the window colour in");
+        return;
+    };
+    if content.contains("sentinel_window_background") {
+        return;
+    }
+    let item = "\n        <item name=\"android:windowBackground\">@color/sentinel_window_background</item>";
+    let patched = match content.find("<style name=\"AppTheme\"") {
+        Some(start) => match content[start..].find('>') {
+            Some(end) => {
+                let at = start + end + 1;
+                format!("{}{item}{}", &content[..at], &content[at..])
+            }
+            None => content,
+        },
+        None => {
+            eprintln!("  No AppTheme in styles.xml to put the window colour in");
+            return;
+        }
+    };
+    match fs::write(&styles, patched) {
+        Ok(()) => eprintln!(
+            "  Window background: #{light}{}",
+            dark.map(|d| format!(", #{d} in dark mode"))
+                .unwrap_or_default()
+        ),
+        Err(e) => eprintln!("  Failed to write styles.xml: {e}"),
+    }
 }
 
 fn copy_assets(asset_paths: &[PathBuf], project_path: &Path) {

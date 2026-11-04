@@ -355,6 +355,8 @@ project into a wired, trimmed APK. It reads a small `sentinel.toml`:
 [android]
 activity = "dev.dioxus.main.MainActivity"   # required (or pass --activity)
 icon_background = "F7F7F7"                  # optional — makes the icon adaptive, on this colour
+window_background = "F5F6F9"                # optional — the window and splash screen until the page paints (else white),
+window_background_dark = "101218"           #   and in the phone's dark mode
 icon = "path/to/icon.webp"                  # optional — copied to all mipmap densities
 assets = ["path/to/sounds"]                 # optional — copied into APK assets/
 screen_orientation = "portrait"             # optional — default lock for main activity (see display capability for runtime per-screen overrides)

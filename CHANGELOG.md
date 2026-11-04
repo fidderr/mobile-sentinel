@@ -86,6 +86,9 @@ change.
 
 ### Added
 
+- `window_background` and `window_background_dark` in `sentinel.toml`: the colour of the window
+  and the splash screen until the page has painted, which was the theme's white. An app sets
+  its page's own colour with Dioxus's `Config::with_background_color`.
 - `health::report` and `health::open_settings`: what the phone allows for alarms to
   ring on time, and how to get to where it is changed. `AlarmKit::timing_log` keeps
   a small record of how fast rings were, for testers on other phones.
