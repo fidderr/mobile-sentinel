@@ -1,14 +1,19 @@
 package com.mobilesentinel
 
 import android.app.Activity
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.os.Build
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -143,7 +148,6 @@ object SentinelBackground {
     }
 
     private fun ensureChannel(c: Context, id: String, name: String, importance: Int, configure: (NotificationChannel) -> Unit = {}) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = NotificationChannel(id, name, importance)
         configure(ch)
@@ -313,4 +317,72 @@ object SentinelBackground {
         a.runOnUiThread { a.moveTaskToBack(true) }
         return true
     }
+
+    // ---- a wake-up from the system ----
+
+    private const val WAKE_ACTION = ".SENTINEL_WAKE"
+    /** What a wake-up gets to look around in, before the phone may go back to sleep. */
+    private const val WAKE_HOLD_MS = 30_000L
+
+    @Volatile
+    private var wakeReceiver: BroadcastReceiver? = null
+
+    /**
+     * Wakes the process in about [delayMs], also in Doze, through an inexact alarm: Android may
+     * move it by a minute, and to its next maintenance window in deep Doze. Replaces an earlier one.
+     */
+    @JvmStatic
+    fun wakeIn(delayMs: Long): Boolean {
+        return try {
+            val c = SentinelPrimitives.getAppContext() ?: return false
+            val action = c.packageName + WAKE_ACTION
+            synchronized(this) {
+                if (wakeReceiver == null) {
+                    val receiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            onWakeAlarm(c)
+                        }
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        c.registerReceiver(receiver, IntentFilter(action), Context.RECEIVER_NOT_EXPORTED)
+                    } else {
+                        c.registerReceiver(receiver, IntentFilter(action))
+                    }
+                    wakeReceiver = receiver
+                }
+            }
+            val pending = PendingIntent.getBroadcast(
+                c,
+                0,
+                Intent(action).setPackage(c.packageName),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + delayMs,
+                pending,
+            )
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "wakeIn: ${e.message}", e)
+            false
+        }
+    }
+
+    private fun onWakeAlarm(c: Context) {
+        try {
+            val pm = c.getSystemService(Context.POWER_SERVICE) as PowerManager
+            // It releases itself: nothing here can keep the phone awake for longer.
+            pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sentinel:wake").acquire(WAKE_HOLD_MS)
+            nativeOnWake()
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "nativeOnWake not linked: ${e.message}")
+        } catch (e: Throwable) {
+            Log.w(TAG, "onWakeAlarm: ${e.message}", e)
+        }
+    }
+
+    @JvmStatic
+    private external fun nativeOnWake()
 }

@@ -2,6 +2,7 @@ package com.mobilesentinel
 
 import android.os.Looper
 import android.util.Log
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -17,6 +18,10 @@ object SentinelBiometricHelper {
 
     private const val TAG = "MobileSentinel.Biometric"
 
+    /** Biometrics, or else the screen lock's PIN, pattern or password. */
+    const val WITH_SCREEN_LOCK =
+        BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+
     /** Nobody answered by then: not authenticated. */
     private const val TIMEOUT_SECONDS = 120L
 
@@ -25,7 +30,11 @@ object SentinelBiometricHelper {
      * False when there is no FragmentActivity on screen to show the prompt over.
      */
     @JvmStatic
-    fun authenticate(reason: String): Boolean {
+    fun authenticate(reason: String): Boolean = authenticate(reason, false)
+
+    /** With `screenLock`, the screen lock will do too. */
+    @JvmStatic
+    fun authenticate(reason: String, screenLock: Boolean): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             Log.e(TAG, "authenticate blocks: not on the UI thread")
             return false
@@ -54,12 +63,14 @@ object SentinelBiometricHelper {
                     // another try.
                 }
                 val prompt = BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback)
-                prompt.authenticate(
-                    BiometricPrompt.PromptInfo.Builder()
-                        .setTitle(reason)
-                        .setNegativeButtonText(activity.getString(android.R.string.cancel))
-                        .build(),
-                )
+                val info = BiometricPrompt.PromptInfo.Builder().setTitle(reason)
+                // The system offers its own way out when the screen lock is allowed.
+                if (screenLock) {
+                    info.setAllowedAuthenticators(WITH_SCREEN_LOCK)
+                } else {
+                    info.setNegativeButtonText(activity.getString(android.R.string.cancel))
+                }
+                prompt.authenticate(info.build())
             } catch (e: Exception) {
                 Log.e(TAG, "showing the prompt failed", e)
                 answered.countDown()

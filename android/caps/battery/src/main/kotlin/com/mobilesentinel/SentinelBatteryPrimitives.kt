@@ -1,8 +1,13 @@
 package com.mobilesentinel
 
+import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -40,6 +45,36 @@ object SentinelBatteryPrimitives {
         } catch (e: Throwable) {
             Log.w(TAG, "isExempt: ${e.message}")
             false
+        }
+    }
+
+    /**
+     * Returns false when someone restricted this app's background use. Safe fallback: true, since
+     * a warning that may be false teaches people to ignore warnings.
+     */
+    @JvmStatic
+    fun backgroundAllowed(): Boolean {
+        return try {
+            val c: Context = SentinelPrimitives.getAppContext() ?: return true
+            !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+        } catch (e: Throwable) {
+            Log.w(TAG, "backgroundAllowed: ${e.message}")
+            true
+        }
+    }
+
+    /**
+     * Returns false when the system takes this app's permissions away after months without use.
+     * Safe fallback: true.
+     */
+    @JvmStatic
+    fun keptWhenUnused(): Boolean {
+        return try {
+            val c: Context = SentinelPrimitives.getAppContext() ?: return true
+            c.packageManager.isAutoRevokeWhitelisted
+        } catch (e: Throwable) {
+            Log.w(TAG, "keptWhenUnused: ${e.message}")
+            true
         }
     }
 
@@ -94,4 +129,72 @@ object SentinelBatteryPrimitives {
             false
         }
     }
+
+    @Volatile
+    private var watching = false
+
+    private const val LOW_PERCENT = 15
+
+    /**
+     * What the battery is up to, as "charging,powerSave,low" with 0 or 1 for each. A phone that
+     * cannot say counts as on the charger: nothing is held back for no reason.
+     */
+    @JvmStatic
+    fun powerState(): String {
+        return try {
+            val c: Context = SentinelPrimitives.getAppContext() ?: return "1,0,0"
+            val sticky = c.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val plugged = sticky?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+            val level = sticky?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = sticky?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val charging = plugged != 0
+            val low = level >= 0 && scale > 0 && level * 100 / scale <= LOW_PERCENT
+            val pm = c.getSystemService(Context.POWER_SERVICE) as PowerManager
+            val flag = { on: Boolean -> if (on) "1" else "0" }
+            "${flag(charging)},${flag(pm.isPowerSaveMode)},${flag(low)}"
+        } catch (e: Throwable) {
+            Log.w(TAG, "powerState: ${e.message}")
+            "1,0,0"
+        }
+    }
+
+    /** From now on [nativeOnPowerChange] hears when any of that may have changed. */
+    @JvmStatic
+    fun watchPower(): Boolean {
+        return try {
+            synchronized(this) {
+                if (watching) return true
+                val c: Context = SentinelPrimitives.getAppContext() ?: return false
+                val filter = IntentFilter().apply {
+                    addAction(Intent.ACTION_POWER_CONNECTED)
+                    addAction(Intent.ACTION_POWER_DISCONNECTED)
+                    addAction(Intent.ACTION_BATTERY_LOW)
+                    addAction(Intent.ACTION_BATTERY_OKAY)
+                    addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+                }
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        try {
+                            nativeOnPowerChange()
+                        } catch (e: UnsatisfiedLinkError) {
+                            Log.w(TAG, "nativeOnPowerChange not linked: ${e.message}")
+                        }
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    c.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    c.registerReceiver(receiver, filter)
+                }
+                watching = true
+                true
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "watchPower: ${e.message}")
+            false
+        }
+    }
+
+    @JvmStatic
+    private external fun nativeOnPowerChange()
 }

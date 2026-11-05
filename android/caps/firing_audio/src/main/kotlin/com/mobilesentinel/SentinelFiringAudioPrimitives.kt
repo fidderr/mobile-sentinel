@@ -7,7 +7,6 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -177,17 +176,12 @@ object SentinelFiringAudioPrimitives {
         val c = SentinelPrimitives.getAppContext() ?: return
         try {
             val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(attributes())
-                    .setOnAudioFocusChangeListener { }
-                    .build()
-                focusRequest = request
-                am.requestAudioFocus(request)
-            } else {
-                @Suppress("DEPRECATION")
-                am.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-            }
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(attributes())
+                .setOnAudioFocusChangeListener { }
+                .build()
+            focusRequest = request
+            am.requestAudioFocus(request)
         } catch (e: Throwable) {
             Log.w(TAG, "requestFocus: ${e.message}")
         }
@@ -197,13 +191,8 @@ object SentinelFiringAudioPrimitives {
         val c = SentinelPrimitives.getAppContext() ?: return
         try {
             val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                focusRequest?.let { am.abandonAudioFocusRequest(it) }
-                focusRequest = null
-            } else {
-                @Suppress("DEPRECATION")
-                am.abandonAudioFocus(null)
-            }
+            focusRequest?.let { am.abandonAudioFocusRequest(it) }
+            focusRequest = null
         } catch (e: Throwable) {
             Log.w(TAG, "abandonFocus: ${e.message}")
         }

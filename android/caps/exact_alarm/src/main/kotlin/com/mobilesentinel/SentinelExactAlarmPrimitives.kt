@@ -3,7 +3,6 @@ package com.mobilesentinel
 import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 /**
@@ -35,7 +34,7 @@ object SentinelExactAlarmPrimitives {
                 intent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            if (!am.canScheduleExactAlarms()) {
                 Log.w(TAG, "scheduleExactAlarm: missing SCHEDULE_EXACT_ALARM permission, falling back to inexact")
                 am.set(AlarmManager.RTC_WAKEUP, targetTimeMs, pi)
             } else {

@@ -41,6 +41,34 @@ impl Kind {
     }
 }
 
+/// Wakes the process in about `delay_ms`, also in Doze, and calls what [`on_wake`] was given,
+/// with a short wake lock held. Android may move it by a minute, and to its next maintenance
+/// window in deep Doze. Replaces an earlier one. No-op on host.
+pub fn wake_in(delay_ms: u64) -> bool {
+    android_or!(android::wake_in(delay_ms), {
+        let _ = delay_ms;
+        false
+    })
+}
+
+/// What to do on a wake-up asked for with [`wake_in`]. Runs on Android's main thread: pass the
+/// news on. No-op on host.
+pub fn on_wake<F>(callback: F)
+where
+    F: Fn() + Send + Sync + 'static,
+{
+    android_or!(
+        {
+            *android::ON_WAKE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(callback));
+        },
+        {
+            let _ = callback;
+        }
+    )
+}
+
 /// Sets the (translated) texts: the service notification's title and body, and the
 /// channel names shown in the system's notification settings.
 pub fn set_texts(
@@ -123,6 +151,40 @@ pub fn warm_up() {
 
 #[cfg(target_os = "android")]
 mod android {
+    type WakeCallback = Box<dyn Fn() + Send + Sync>;
+    pub(super) static ON_WAKE: std::sync::Mutex<Option<WakeCallback>> = std::sync::Mutex::new(None);
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_mobilesentinel_SentinelBackground_nativeOnWake(
+        _env: jni::JNIEnv,
+        _class: jni::objects::JClass,
+    ) {
+        if let Ok(callback) = ON_WAKE.lock() {
+            if let Some(callback) = callback.as_ref() {
+                callback();
+            }
+        }
+    }
+
+    pub(super) fn wake_in(delay_ms: u64) -> bool {
+        crate::platform::android::jni::with_jni_class(
+            "com/mobilesentinel/SentinelBackground",
+            false,
+            |env, class| {
+                env.call_static_method(
+                    class,
+                    "wakeIn",
+                    "(J)Z",
+                    &[jni::objects::JValue::Long(
+                        delay_ms.min(i64::MAX as u64) as i64
+                    )],
+                )
+                .ok()
+                .and_then(|v| v.z().ok())
+            },
+        )
+    }
+
     use crate::platform::android::jni::{jni_str, with_jni_class};
     use jni::objects::{JString, JValue};
     use jni::sys::jint;

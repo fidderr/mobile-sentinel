@@ -1,7 +1,6 @@
 package com.mobilesentinel
 
 import android.content.Context
-import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -42,13 +41,8 @@ object SentinelHapticPrimitives {
         return try {
             val context = SentinelPrimitives.getAppContext() ?: return false
             val vibrator = vibrator(context) ?: return false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE)
-                vibrator.vibrate(effect)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(durationMs)
-            }
+            val effect = VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE)
+            vibrator.vibrate(effect)
             true
         } catch (e: Throwable) {
             Log.w(TAG, "vibrate($durationMs): ${e.message}", e)
@@ -63,9 +57,6 @@ object SentinelHapticPrimitives {
      * millisecond values (`[wait, vibrate, wait, vibrate, ...]`). No repeat
      * (`-1`).
      *
-     * API 26+ uses [VibrationEffect.createWaveform]; older devices use the
-     * deprecated `Vibrator.vibrate(long[], int)` path.
-     *
      * @return true if the call was issued, false on any failure.
      */
     @JvmStatic
@@ -73,13 +64,8 @@ object SentinelHapticPrimitives {
         return try {
             val context = SentinelPrimitives.getAppContext() ?: return false
             val vibrator = vibrator(context) ?: return false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createWaveform(pattern, -1)
-                vibrator.vibrate(effect)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(pattern, -1)
-            }
+            val effect = VibrationEffect.createWaveform(pattern, -1)
+            vibrator.vibrate(effect)
             true
         } catch (e: Throwable) {
             Log.w(TAG, "vibratePattern(${pattern.size} entries): ${e.message}", e)
@@ -126,21 +112,15 @@ object SentinelHapticPrimitives {
     /**
      * Resolve the [Vibrator] for [context].
      *
-     * On API 31+ ([Build.VERSION_CODES.S]) the [VibratorManager] is the
-     * supported entry point and its `defaultVibrator` is returned. On older
-     * devices the deprecated `VIBRATOR_SERVICE` lookup is used.
+     * The [VibratorManager] is the supported entry point and its `defaultVibrator`
+     * is returned.
      *
      * @return the resolved [Vibrator], or null when unavailable.
      */
     private fun vibrator(context: Context): Vibrator? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                manager?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
+            val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            manager?.defaultVibrator
         } catch (e: Throwable) {
             Log.w(TAG, "vibrator(): ${e.message}", e)
             null

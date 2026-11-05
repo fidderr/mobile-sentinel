@@ -432,45 +432,26 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // FGS notification doesn't show on top of the alarm UI. Android shows
         // them again temporarily on swipe-down.
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val window = activity.window
-                val controller = window.insetsController
-                if (hideStatusBar || hideNavBar) {
-                    window.setDecorFitsSystemWindows(false)
-                    var mask = 0
-                    if (hideStatusBar) mask = mask or android.view.WindowInsets.Type.statusBars()
-                    if (hideNavBar) mask = mask or android.view.WindowInsets.Type.navigationBars()
-                    controller?.hide(mask)
-                    controller?.systemBarsBehavior =
-                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    // Make sure any bar we are NOT hiding is shown.
-                    val showMask = (android.view.WindowInsets.Type.statusBars()
-                            or android.view.WindowInsets.Type.navigationBars()) and mask.inv()
-                    if (showMask != 0) controller?.show(showMask)
-                } else {
-                    window.setDecorFitsSystemWindows(true)
-                    controller?.show(
-                        android.view.WindowInsets.Type.statusBars()
-                                or android.view.WindowInsets.Type.navigationBars()
-                    )
-                }
+            val window = activity.window
+            val controller = window.insetsController
+            if (hideStatusBar || hideNavBar) {
+                window.setDecorFitsSystemWindows(false)
+                var mask = 0
+                if (hideStatusBar) mask = mask or android.view.WindowInsets.Type.statusBars()
+                if (hideNavBar) mask = mask or android.view.WindowInsets.Type.navigationBars()
+                controller?.hide(mask)
+                controller?.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                // Make sure any bar we are NOT hiding is shown.
+                val showMask = (android.view.WindowInsets.Type.statusBars()
+                        or android.view.WindowInsets.Type.navigationBars()) and mask.inv()
+                if (showMask != 0) controller?.show(showMask)
             } else {
-                @Suppress("DEPRECATION")
-                if (hideStatusBar || hideNavBar) {
-                    var flags = android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    if (hideStatusBar) {
-                        flags = flags or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
-                                android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    }
-                    if (hideNavBar) {
-                        flags = flags or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                                android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    }
-                    activity.window.decorView.systemUiVisibility = flags
-                } else {
-                    activity.window.decorView.systemUiVisibility = 0
-                }
+                window.setDecorFitsSystemWindows(true)
+                controller?.show(
+                    android.view.WindowInsets.Type.statusBars()
+                            or android.view.WindowInsets.Type.navigationBars()
+                )
             }
         } catch (e: Exception) {
             Log.w(TAG, "immersive mode failed: ${e.message}")
@@ -479,16 +460,8 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // Runtime assertion — the manifest attributes may not engage if the
         // activity reaches top via some OEM paths.
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                activity.setShowWhenLocked(true)
-                activity.setTurnScreenOn(true)
-            } else {
-                @Suppress("DEPRECATION")
-                activity.window.addFlags(
-                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
-                )
-            }
+            activity.setShowWhenLocked(true)
+            activity.setTurnScreenOn(true)
             // A challenge can take longer than the screen timeout.
             activity.window.addFlags(KEEP_AWAKE_FLAGS)
         } catch (e: Exception) {

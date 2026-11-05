@@ -3,7 +3,6 @@ package com.mobilesentinel
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
@@ -64,7 +63,7 @@ object SentinelRecorderPrimitives {
         if (recorder != null) return 3
         val target = File(File(dir).apply { mkdirs() }, "${UUID.randomUUID()}.m4a")
         @Suppress("DEPRECATION")
-        val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
+        val r = MediaRecorder(ctx)
         return try {
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)

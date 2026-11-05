@@ -7,7 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
-import android.os.Build
 import android.os.PowerManager
 import android.util.Log
 import org.json.JSONObject
@@ -147,11 +146,7 @@ object SentinelRing {
     private fun launch(context: Context, intent: Intent): Boolean {
         intent.setClassName(context.packageName, SERVICE)
         return try {
-            val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            val started = context.startForegroundService(intent)
             started != null
         } catch (e: IllegalStateException) {
             // In the background without an exemption. The service may already
@@ -453,7 +448,7 @@ object SentinelRing {
             val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pi = watchdogIntent(context, PendingIntent.FLAG_UPDATE_CURRENT) ?: return
             val at = System.currentTimeMillis() + WATCHDOG_LEAD_MS
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            if (!am.canScheduleExactAlarms()) {
                 am.set(AlarmManager.RTC_WAKEUP, at, pi)
             } else {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)

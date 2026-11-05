@@ -37,6 +37,9 @@ pub mod biometric;
 /// Calendar events. Gated behind `calendar`.
 #[cfg(feature = "calendar")]
 pub mod calendar;
+/// A live call that goes on while the app is not in front. Gated behind `call_service`.
+#[cfg(feature = "call_service")]
+pub mod call_service;
 /// Photo capture via the system camera app. Gated behind `camera`.
 #[cfg(feature = "camera")]
 pub mod camera;

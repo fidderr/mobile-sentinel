@@ -36,8 +36,7 @@ object SentinelHealth {
         }
         val nm = c.getSystemService(NotificationManager::class.java)
         read("exact_alarms") {
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                c.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+            c.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
         }
         read("notifications") { nm.areNotificationsEnabled() }
         read("full_screen") {
@@ -48,11 +47,10 @@ object SentinelHealth {
             c.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName)
         }
         read("background_allowed") {
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
-                !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+            !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
         }
         read("kept_when_unused") {
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || c.packageManager.isAutoRevokeWhitelisted
+            c.packageManager.isAutoRevokeWhitelisted
         }
         read("channel_importance") {
             nm.getNotificationChannel(channelId)?.importance ?: -1
@@ -100,11 +98,7 @@ object SentinelHealth {
         val pkg = Uri.parse("package:${c.packageName}")
         val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
         val intent = when (check) {
-            "exact_alarms" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)
-            } else {
-                appDetails
-            }
+            "exact_alarms" -> Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)
             "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
             "full_screen" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -119,11 +113,7 @@ object SentinelHealth {
                 .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
             // Where Android has a page for it. Some makers send this to the app's own page,
             // where the switch is too.
-            "kept_when_unused" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, pkg)
-            } else {
-                appDetails
-            }
+            "kept_when_unused" -> Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, pkg)
             // Background use and the maker's auto-start switch live on or near the app's page.
             else -> appDetails
         }

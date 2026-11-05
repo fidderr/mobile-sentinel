@@ -29,6 +29,8 @@ pub enum BiometricType {
 pub enum ConnectionType {
     Wifi,
     Cellular,
+    /// Connected some other way: a cable, say.
+    Other,
     None,
 }
 
