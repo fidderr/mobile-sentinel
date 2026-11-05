@@ -2,6 +2,10 @@ package com.mobilesentinel
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -228,6 +232,51 @@ object SentinelFilePickerHelper {
             Log.i(TAG, "File pick cancelled")
         }
         pickLatch?.countDown()
+    }
+
+    /**
+     * A copy of a picture at most [longestSide] on its longest side, the right way up, as a JPEG.
+     * False if it cannot be read as a picture. The source stays as it is either way.
+     */
+    @JvmStatic
+    fun shrinkImage(source: String, target: String, longestSide: Int): Boolean {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(source, bounds)
+            val longest = maxOf(bounds.outWidth, bounds.outHeight)
+            if (longest <= 0) return false
+            // Decoding a photo of a modern camera whole is what runs a phone out of memory.
+            var sample = 1
+            while (longest / (sample * 2) >= longestSide) sample *= 2
+            val decoded = BitmapFactory.decodeFile(
+                source,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            ) ?: return false
+            val scale = minOf(1f, longestSide.toFloat() / maxOf(decoded.width, decoded.height))
+            val matrix = Matrix().apply { postScale(scale, scale) }
+            when (
+                ExifInterface(source).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )
+            ) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                else -> {}
+            }
+            val shrunk = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+            val out = File(target)
+            out.parentFile?.mkdirs()
+            val draft = File("$target.tmp")
+            FileOutputStream(draft).use { shrunk.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            draft.renameTo(out)
+        } catch (e: Throwable) {
+            Log.w(TAG, "shrinkImage: ${e.message}")
+            false
+        }
     }
 
     /**

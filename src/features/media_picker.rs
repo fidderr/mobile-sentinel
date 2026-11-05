@@ -64,6 +64,23 @@ pub fn pick_files(mime_types: &[&str], multiple: bool) -> Result<Vec<PickedFile>
     }
 }
 
+/// Write a copy of the picture at `source` to `target`: a JPEG, the right way up, at most
+/// `longest_side` pixels on its longest side. Fails if it cannot be read as a picture, and
+/// `source` stays as it is either way. Android only for now.
+pub fn shrink_image(source: &str, target: &str, longest_side: u32) -> Result<(), SentinelError> {
+    #[cfg(target_os = "android")]
+    {
+        if android::shrink_image(source, target, longest_side).unwrap_or(false) {
+            return Ok(());
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (source, target, longest_side);
+    }
+    Err(SentinelError::unavailable("media_picker::shrink_image"))
+}
+
 /// Best-effort MIME type from a file extension (shared by the desktop
 /// backends; Android asks the content resolver instead).
 #[cfg(any(windows, test))]
@@ -161,6 +178,31 @@ mod android {
     use jni::objects::{JClass, JString, JValue};
 
     const FILE_PICKER: &str = "com/mobilesentinel/SentinelFilePickerHelper";
+
+    /// See [`super::shrink_image`]. `None` if the call itself did not get through.
+    pub(super) fn shrink_image(source: &str, target: &str, longest_side: u32) -> Option<bool> {
+        let (vm, _activity) = get_activity().ok()?;
+        let mut env = vm.attach_current_thread_permanently().ok()?;
+        let class = resolve_helper_class(&mut env, FILE_PICKER)?;
+        let class_ref: &JClass = <&JClass>::from(class.as_obj());
+        let s_source = env.new_string(source).ok()?;
+        let s_target = env.new_string(target).ok()?;
+        let res = env.call_static_method(
+            class_ref,
+            "shrinkImage",
+            "(Ljava/lang/String;Ljava/lang/String;I)Z",
+            &[
+                JValue::Object(&s_source.into()),
+                JValue::Object(&s_target.into()),
+                JValue::Int(i32::try_from(longest_side).unwrap_or(i32::MAX)),
+            ],
+        );
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+            return None;
+        }
+        res.ok()?.z().ok()
+    }
 
     /// Blocking multi-pick with metadata. `None` if the picker could not be
     /// launched; `Some(vec![])` on cancel/timeout.
