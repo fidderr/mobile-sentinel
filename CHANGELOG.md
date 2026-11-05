@@ -11,8 +11,42 @@ change.
 
 ## [Unreleased]
 
-- Android 12 (API 31) is the floor now: every module has minSdk 31 and the code for older versions is gone.
-- `network::on_change`, `network::on_radio_active`, `battery::power_state`, `battery::on_power_change`, `background_service::wake_in` and `on_wake`: what a messenger needs to let the radio rest.
+## [0.4.0] - 2026-11-05
+
+A minor version: `AlarmKit::set_reminder` takes a button, and Android 12 is the floor.
+
+### Added
+
+- Reminders can pop up and carry a button: `ReminderButton` on `AlarmKit::set_reminder`, and
+  `AlarmKit::take_reminder_taps` with `ReminderTap::Act` or `Undo`. A tap works with the app
+  closed and can be taken back until the ring's time, which brings the first notification back.
+- `AlarmClassConfig::firing_banner_over_ui`: `false` takes the loud firing notification and its
+  banner down as soon as the app's own screen is up. Some phones (ColorOS) kept that banner over
+  the alarm's screen for its whole time. The default keeps the old behaviour.
+- `media_picker::shrink_image`: a picture as a JPEG, the right way up, at most so large.
+- `network::on_change`, `network::on_radio_active`, `battery::power_state`,
+  `battery::on_power_change`, `background_service::wake_in` and `on_wake`: what a messenger needs
+  to let the radio rest.
+- `secure_storage`: wrap and unwrap with a key the Android Keystore holds.
+- `battery::background_allowed` and `kept_when_unused`, and `display::set_secure`.
+- `biometric::can_ask_with_screen_lock` and `authenticate_or_screen_lock`.
+- `no_backup` in `sentinel.toml`: an app's data stays out of Android's backups and out of a move
+  to a new phone.
+- `call_service`: a live call and a shown screen that go on outside the app, with Android's own
+  screen capture, and a speaker switch for calls.
+
+### Changed
+
+- **Breaking:** `AlarmKit::set_reminder` takes an `Option<ReminderButton>`.
+- Reminders pop up, on a new channel: Android does not let an existing channel become more
+  important. Still without sound or vibration.
+- Android 12 (API 31) is the floor: every module has minSdk 31 and the code for older versions is
+  gone.
+
+### Fixed
+
+- Reminders are exact where the app may. Left inexact, Android put them off by up to an hour,
+  and one set the night before could come after its ring and be dropped.
 
 ## [0.3.1] - 2026-11-04
 

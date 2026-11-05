@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.Uri
-import android.os.Build
 import android.util.Log
 import java.io.File
 
@@ -87,7 +86,7 @@ object SentinelReminders {
             // To the minute where the app may. Left to itself Android puts this off by 75% of the
             // time until it is due, up to an hour: set the night before, that is past the ring it
             // is about, and it is then dropped.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager.canScheduleExactAlarms()) {
+            if (manager.canScheduleExactAlarms()) {
                 manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
             } else {
                 manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
