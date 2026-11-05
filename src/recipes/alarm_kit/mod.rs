@@ -250,6 +250,52 @@ static RING_ENDS: std::sync::Mutex<Vec<(InstanceId, RingEnd)>> = std::sync::Mute
 #[cfg(target_os = "android")]
 const REMINDERS_CLASS: &str = "com/mobilesentinel/SentinelReminders";
 
+/// Where a tap on a reminder leaves its mark, in `SentinelReminders.kt`.
+const REMINDER_TAPS_DIR: &str = "reminder_taps";
+
+/// A button on a reminder, and what it says after the tap.
+#[derive(Debug, Clone, Copy)]
+pub struct ReminderButton<'a> {
+    pub label: &'a str,
+    /// The notification's title once it is tapped, until the ring's time.
+    pub done_title: &'a str,
+    /// The button that takes it back.
+    pub undo_label: &'a str,
+}
+
+/// What was tapped on a reminder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReminderTap {
+    Act,
+    Undo,
+}
+
+/// Read and remove the marks. One that cannot be read says nothing, and stays out of the way.
+fn take_reminder_taps_from(dir: &std::path::Path) -> Vec<(InstanceId, ReminderTap)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut taps = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Being written right now.
+        if path.extension().is_some_and(|extension| extension == "tmp") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(&path);
+        let tap = match text.split_once('\n') {
+            Some(("act", id)) => Some((id, ReminderTap::Act)),
+            Some(("undo", id)) => Some((id, ReminderTap::Undo)),
+            _ => None,
+        };
+        if let Some((id, tap)) = tap.filter(|(id, _)| !id.is_empty()) {
+            taps.push((InstanceId::new(id.to_owned()), tap));
+        }
+    }
+    taps
+}
+
 /// See [`AlarmKit::on_ring_end`].
 static RING_END_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 
@@ -686,10 +732,12 @@ impl AlarmKit {
         let _ = RING_END_HOOK.set(hook);
     }
 
-    /// Show a quiet notification at `at_ms`, replacing an earlier one for this alarm. It
+    /// Show a silent notification at `at_ms`, replacing an earlier one for this alarm. It
     /// has nothing to do with the ring, and may come a few minutes off on a dozing phone.
-    /// It goes away after `lasts_ms`. `channel_name` is what the user sees in the phone's
-    /// settings. No-op off Android.
+    /// It goes away after `lasts_ms`, when the ring is due. `channel_name` is what the user
+    /// sees in the phone's settings. With a `button`, a tap on it ends up in
+    /// [`Self::take_reminder_taps`]. No-op off Android.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_reminder(
         &self,
         id: &InstanceId,
@@ -698,20 +746,29 @@ impl AlarmKit {
         body: &str,
         channel_name: &str,
         lasts_ms: i64,
+        button: Option<ReminderButton<'_>>,
     ) {
         #[cfg(target_os = "android")]
         {
             use crate::platform::android::jni::{jni_str, with_jni_class};
             use ::jni::objects::JValue;
+            let button = button.unwrap_or(ReminderButton {
+                label: "",
+                done_title: "",
+                undo_label: "",
+            });
             with_jni_class(REMINDERS_CLASS, false, |env, class| {
                 let id = jni_str(env, &id.0)?;
                 let title = jni_str(env, title)?;
                 let body = jni_str(env, body)?;
                 let channel = jni_str(env, channel_name)?;
+                let label = jni_str(env, button.label)?;
+                let done_title = jni_str(env, button.done_title)?;
+                let undo_label = jni_str(env, button.undo_label)?;
                 env.call_static_method(
                     class,
                     "set",
-                    "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;J)Z",
+                    "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
                     &[
                         JValue::Object(&id),
                         JValue::Long(at_ms),
@@ -719,6 +776,9 @@ impl AlarmKit {
                         JValue::Object(&body),
                         JValue::Object(&channel),
                         JValue::Long(lasts_ms),
+                        JValue::Object(&label),
+                        JValue::Object(&done_title),
+                        JValue::Object(&undo_label),
                     ],
                 )
                 .ok()
@@ -726,7 +786,14 @@ impl AlarmKit {
             });
         }
         #[cfg(not(target_os = "android"))]
-        let _ = (id, at_ms, title, body, channel_name, lasts_ms);
+        let _ = (id, at_ms, title, body, channel_name, lasts_ms, button);
+    }
+
+    /// What was tapped on reminders since the last call, the last tap per alarm: a tap and its
+    /// undo before anyone looked count as the undo. The app can have been closed when it
+    /// happened, so look when it wakes: the tap wakes it.
+    pub fn take_reminder_taps(&self) -> Vec<(InstanceId, ReminderTap)> {
+        take_reminder_taps_from(&crate::utilities::app_files_dir().join(REMINDER_TAPS_DIR))
     }
 
     /// Take away what [`Self::set_reminder`] set for this alarm.
@@ -1186,6 +1253,31 @@ mod tests {
     use crate::recipes::test_lock::lock_and_clear;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    #[test]
+    fn reminder_taps_are_read_once_and_only_when_complete() {
+        let dir = TempDir::new().unwrap();
+        assert!(take_reminder_taps_from(&dir.path().join("none yet")).is_empty());
+        std::fs::write(dir.path().join("1"), "act\nmorning").unwrap();
+        std::fs::write(dir.path().join("2"), "undo\nevening").unwrap();
+        std::fs::write(dir.path().join("3"), "something else\nnoon").unwrap();
+        std::fs::write(dir.path().join("4"), "act\n").unwrap();
+        std::fs::write(dir.path().join("5.tmp"), "act\nhalf written").unwrap();
+        let mut taps = take_reminder_taps_from(dir.path());
+        taps.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+        assert_eq!(
+            taps,
+            vec![
+                (InstanceId::new("evening".to_owned()), ReminderTap::Undo),
+                (InstanceId::new("morning".to_owned()), ReminderTap::Act),
+            ]
+        );
+        assert!(take_reminder_taps_from(dir.path()).is_empty(), "read once");
+        assert!(
+            dir.path().join("5.tmp").exists(),
+            "not finished being written"
+        );
+    }
 
     struct NoopResolver;
     impl SoundResolver for NoopResolver {
