@@ -91,6 +91,8 @@ pub use features::battery;
 pub use features::biometric;
 #[cfg(feature = "calendar")]
 pub use features::calendar;
+#[cfg(feature = "call_service")]
+pub use features::call_service;
 #[cfg(feature = "camera")]
 pub use features::camera;
 #[cfg(feature = "clipboard")]

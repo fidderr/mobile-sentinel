@@ -521,6 +521,27 @@ pub const CAPABILITIES: &[Capability] = &[
         kotlin_sources: &["SentinelNetworkPrimitives.kt"],
     },
     Capability {
+        id: "call_service",
+        description: "A live call that goes on while the app is not in front: the microphone and camera keep working, the screen can be shown, and the sound can come from the speaker.",
+        permissions: &[
+            Permission::new("android.permission.FOREGROUND_SERVICE"),
+            Permission::new("android.permission.FOREGROUND_SERVICE_MICROPHONE"),
+            Permission::new("android.permission.FOREGROUND_SERVICE_CAMERA"),
+            Permission::new("android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"),
+            Permission::new("android.permission.MODIFY_AUDIO_SETTINGS"),
+            Permission::new("android.permission.POST_NOTIFICATIONS"),
+        ],
+        features: NO_FEATURES,
+        components: "",
+        // Play asks what the service types are for.
+        policy_sensitive: true,
+        kotlin_sources: &[
+            "SentinelCallPrimitives.kt",
+            "SentinelCallService.kt",
+            "SentinelScreenConsentActivity.kt",
+        ],
+    },
+    Capability {
         id: "location",
         description: "Current device location.",
         permissions: &[

@@ -101,6 +101,9 @@ recorder = ["dep:cpal", "dep:hound"]
 # Camera + microphone for getUserMedia inside the WebView (live calls).
 # Declares CAMERA / RECORD_AUDIO / MODIFY_AUDIO_SETTINGS; no Kotlin, no Rust API.
 webview_media = []
+# A live call that goes on while the app is not in front: microphone, camera, showing the screen
+# (MediaProjection, encoded by MediaCodec, straight to Rust), and the speaker.
+call_service = []
 # Quiet foreground service + boot restart + tap-to-open notifications +
 # Back-to-background, so a messenger keeps its connection with the UI closed.
 background_service = []

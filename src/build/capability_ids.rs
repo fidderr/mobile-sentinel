@@ -44,6 +44,7 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "sms",
     "phone",
     "network",
+    "call_service",
     "location",
     "maps",
     "biometric",

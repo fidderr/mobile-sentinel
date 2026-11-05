@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Keeps the microphone, the camera and a shown screen going while the app is not in front. -->
+        <service
+            android:name="com.mobilesentinel.SentinelCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera|mediaProjection" />
+
+        <!-- Invisible: only there to ask Android's own question about showing the screen. -->
+        <activity
+            android:name="com.mobilesentinel.SentinelScreenConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
+</manifest>
