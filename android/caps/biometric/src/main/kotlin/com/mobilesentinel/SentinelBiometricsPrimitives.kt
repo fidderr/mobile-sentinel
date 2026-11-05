@@ -37,6 +37,22 @@ object SentinelBiometricsPrimitives {
     }
 
     /**
+     * Whether this device can ask who is there at all: a fingerprint, a face, or the
+     * screen lock's PIN, pattern or password.
+     */
+    @JvmStatic
+    fun canAskWithScreenLock(): Boolean {
+        return try {
+            val context = SentinelPrimitives.getAppContext() ?: return false
+            BiometricManager.from(context).canAuthenticate(SentinelBiometricHelper.WITH_SCREEN_LOCK) ==
+                BiometricManager.BIOMETRIC_SUCCESS
+        } catch (e: Throwable) {
+            Log.w(TAG, "canAskWithScreenLock failed: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
      * Classify the available biometric hardware.
      *
      * Returns `2` (Face) when the device reports face hardware, else `1`
@@ -69,6 +85,17 @@ object SentinelBiometricsPrimitives {
             SentinelBiometricHelper.authenticate(reason)
         } catch (e: Throwable) {
             Log.w(TAG, "authenticate failed: ${e.message}", e)
+            false
+        }
+    }
+
+    /** The same, and whoever has no biometrics, or fails them, can use the screen lock. */
+    @JvmStatic
+    fun authenticateOrScreenLock(reason: String): Boolean {
+        return try {
+            SentinelBiometricHelper.authenticate(reason, true)
+        } catch (e: Throwable) {
+            Log.w(TAG, "authenticateOrScreenLock failed: ${e.message}", e)
             false
         }
     }

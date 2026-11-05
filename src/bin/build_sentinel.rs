@@ -28,6 +28,7 @@
 //! icon_background = "F7F7F7"              # optional — makes the icon adaptive, on this colour
 //! window_background = "F5F6F9"            # optional — the window and the splash screen are this colour until the page paints,
 //! window_background_dark = "101218"       #   and this with the phone in dark mode; without them Android shows white
+//! no_backup = "true"                     # optional — nothing of the app goes into Android's backups or a move to a new phone
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -97,6 +98,10 @@ fn main() {
             "true",
             "  Direct boot: files are device-encrypted",
         );
+    }
+
+    if config.no_backup {
+        inject_no_backup(&config.project_path);
     }
 
     if let Some(scheme) = &config.link_scheme {
@@ -190,6 +195,53 @@ const LINK_END: &str = "<!-- sentinel-link:end -->";
 /// Makes `scheme://...` links open the app: declares the link activity (its
 /// class ships with the `background_service` capability) with an intent
 /// filter for the scheme. Idempotent: an earlier block is replaced.
+/// Nothing of the app goes into Android's backups, nor along in a move to a new phone: for an
+/// app whose files are sealed with a key the Keystore holds. That key does not come along, so
+/// what comes back could not be opened. `allowBackup` alone only stops the cloud backup from
+/// Android 12 on, so the rules cover both.
+fn inject_no_backup(project_path: &Path) {
+    const RULES: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+        <data-extraction-rules>\n\
+        \x20   <cloud-backup>\n\
+        \x20       <exclude domain=\"root\" path=\".\" />\n\
+        \x20       <exclude domain=\"file\" path=\".\" />\n\
+        \x20       <exclude domain=\"database\" path=\".\" />\n\
+        \x20       <exclude domain=\"sharedpref\" path=\".\" />\n\
+        \x20       <exclude domain=\"external\" path=\".\" />\n\
+        \x20   </cloud-backup>\n\
+        \x20   <device-transfer>\n\
+        \x20       <exclude domain=\"root\" path=\".\" />\n\
+        \x20       <exclude domain=\"file\" path=\".\" />\n\
+        \x20       <exclude domain=\"database\" path=\".\" />\n\
+        \x20       <exclude domain=\"sharedpref\" path=\".\" />\n\
+        \x20       <exclude domain=\"external\" path=\".\" />\n\
+        \x20   </device-transfer>\n\
+        </data-extraction-rules>\n";
+    let xml = project_path.join("app/src/main/res/xml");
+    if let Err(e) =
+        fs::create_dir_all(&xml).and_then(|()| fs::write(xml.join("sentinel_no_backup.xml"), RULES))
+    {
+        eprintln!("  Failed to write the backup rules: {e}");
+        return;
+    }
+    let path = project_path.join("app/src/main/AndroidManifest.xml");
+    let Ok(manifest) = fs::read_to_string(&path) else {
+        return;
+    };
+    if manifest.contains("sentinel_no_backup") {
+        return;
+    }
+    let updated = manifest.replacen(
+        "<application",
+        "<application android:allowBackup=\"false\" android:dataExtractionRules=\"@xml/sentinel_no_backup\"",
+        1,
+    );
+    match fs::write(&path, updated) {
+        Ok(()) => eprintln!("  Backups: none, of this app's data"),
+        Err(e) => eprintln!("  Failed to turn backups off: {e}"),
+    }
+}
+
 fn inject_link_scheme(project_path: &Path, scheme: &str) {
     let path = project_path.join("app/src/main/AndroidManifest.xml");
     let Ok(mut manifest) = fs::read_to_string(&path) else {
@@ -262,6 +314,7 @@ struct Config {
     capabilities: Vec<String>,
     default_screen_orientation: Option<String>,
     link_scheme: Option<String>,
+    no_backup: bool,
     direct_boot: bool,
     release: bool,
     bundle_aab: bool,
@@ -354,6 +407,7 @@ fn load_config() -> Config {
         capabilities,
         default_screen_orientation,
         link_scheme,
+        no_backup: toml.get("no_backup").is_some_and(|v| v == "true"),
         direct_boot: toml.get("direct_boot").is_some_and(|v| v == "true"),
         release,
         bundle_aab,

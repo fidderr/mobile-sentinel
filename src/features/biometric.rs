@@ -35,6 +35,39 @@ pub fn authenticate(reason: &str) -> Result<(), SentinelError> {
     }
 }
 
+/// Whether this device can ask who is there at all: biometrics, or the screen lock.
+pub fn can_ask_with_screen_lock() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        android::can_ask_with_screen_lock()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        false
+    }
+}
+
+/// Like [`authenticate`], and whoever has no biometrics, or fails them, can use the
+/// screen lock's PIN, pattern or password. Blocks, so not on the UI thread.
+pub fn authenticate_or_screen_lock(reason: &str) -> Result<(), SentinelError> {
+    #[cfg(target_os = "android")]
+    {
+        if android::authenticate_or_screen_lock(reason) {
+            return Ok(());
+        }
+        Err(SentinelError::unavailable(
+            "biometric::authenticate_or_screen_lock",
+        ))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = reason;
+        Err(SentinelError::unavailable(
+            "biometric::authenticate_or_screen_lock",
+        ))
+    }
+}
+
 /// The biometric hardware type present.
 pub fn biometric_type() -> BiometricType {
     #[cfg(target_os = "android")]
@@ -63,6 +96,28 @@ mod android {
             env.call_static_method(class, "isAvailable", "()Z", &[])
                 .ok()
                 .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn can_ask_with_screen_lock() -> bool {
+        with_jni_class(BIOMETRICS, false, |env, class| {
+            env.call_static_method(class, "canAskWithScreenLock", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn authenticate_or_screen_lock(reason: &str) -> bool {
+        with_jni_class(BIOMETRICS, false, |env, class| {
+            let s = jni_str(env, reason)?;
+            env.call_static_method(
+                class,
+                "authenticateOrScreenLock",
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&s.into())],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
         })
     }
 
