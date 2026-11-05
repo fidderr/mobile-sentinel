@@ -52,6 +52,16 @@ pub fn is_exempt() -> bool {
     android_or!(android::battery_is_exempt(), false)
 }
 
+/// False when someone restricted this app's background use. True where that cannot happen.
+pub fn background_allowed() -> bool {
+    android_or!(android::background_allowed(), true)
+}
+
+/// False when the system takes this app's permissions away after months without use.
+pub fn kept_when_unused() -> bool {
+    android_or!(android::kept_when_unused(), true)
+}
+
 /// Request battery-optimization exemption (shows the system prompt).
 pub fn request_exemption() {
     android_or!(
@@ -137,6 +147,22 @@ mod android {
     pub(super) fn battery_is_exempt() -> bool {
         with_jni_class(BATTERY, false, |env, class| {
             env.call_static_method(class, "isExempt", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn background_allowed() -> bool {
+        with_jni_class(BATTERY, true, |env, class| {
+            env.call_static_method(class, "backgroundAllowed", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn kept_when_unused() -> bool {
+        with_jni_class(BATTERY, true, |env, class| {
+            env.call_static_method(class, "keptWhenUnused", "()Z", &[])
                 .ok()
                 .and_then(|v| v.z().ok())
         })

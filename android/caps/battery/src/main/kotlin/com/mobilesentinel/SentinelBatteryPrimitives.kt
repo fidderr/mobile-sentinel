@@ -1,5 +1,6 @@
 package com.mobilesentinel
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -44,6 +45,36 @@ object SentinelBatteryPrimitives {
         } catch (e: Throwable) {
             Log.w(TAG, "isExempt: ${e.message}")
             false
+        }
+    }
+
+    /**
+     * Returns false when someone restricted this app's background use. Safe fallback: true, since
+     * a warning that may be false teaches people to ignore warnings.
+     */
+    @JvmStatic
+    fun backgroundAllowed(): Boolean {
+        return try {
+            val c: Context = SentinelPrimitives.getAppContext() ?: return true
+            !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+        } catch (e: Throwable) {
+            Log.w(TAG, "backgroundAllowed: ${e.message}")
+            true
+        }
+    }
+
+    /**
+     * Returns false when the system takes this app's permissions away after months without use.
+     * Safe fallback: true.
+     */
+    @JvmStatic
+    fun keptWhenUnused(): Boolean {
+        return try {
+            val c: Context = SentinelPrimitives.getAppContext() ?: return true
+            c.packageManager.isAutoRevokeWhitelisted
+        } catch (e: Throwable) {
+            Log.w(TAG, "keptWhenUnused: ${e.message}")
+            true
         }
     }
 

@@ -159,6 +159,25 @@ object SentinelDisplayPrimitives {
      *
      * @return true on success, false if no Activity context is available.
      */
+    /**
+     * No screenshots of this window, and a blank picture in the list of recent apps.
+     * Safe fallback: false.
+     */
+    @JvmStatic
+    fun setSecure(enabled: Boolean): Boolean {
+        val activity = activityOrNull() ?: return false
+        return try {
+            activity.runOnUiThread {
+                val flag = android.view.WindowManager.LayoutParams.FLAG_SECURE
+                if (enabled) activity.window.addFlags(flag) else activity.window.clearFlags(flag)
+            }
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "setSecure: ${e.message}")
+            false
+        }
+    }
+
     @JvmStatic
     fun keepScreenOn(enabled: Boolean): Boolean {
         val activity = activityOrNull()

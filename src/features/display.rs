@@ -208,6 +208,18 @@ pub fn uses_24_hour_clock() -> bool {
     android_or!(android::flag("uses24HourClock"), true)
 }
 
+/// No screenshots of the app's window, and a blank picture in the list of recent apps. No-op on host.
+pub fn set_secure(enabled: bool) {
+    android_or!(
+        {
+            let _ = android::set_secure(enabled);
+        },
+        {
+            let _ = enabled;
+        }
+    )
+}
+
 /// Use dark system-bar icons (`true`, for light app backgrounds) or light
 /// icons (`false`, for dark backgrounds). No-op on host.
 pub fn set_light_system_bars(light: bool) {
@@ -352,6 +364,14 @@ mod android {
     pub(super) fn flag(method: &str) -> bool {
         with_jni_class(DISPLAY, true, |env, class| {
             env.call_static_method(class, method, "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn set_secure(enabled: bool) -> bool {
+        with_jni_class(DISPLAY, false, |env, class| {
+            env.call_static_method(class, "setSecure", "(Z)Z", &[JValue::Bool(enabled as u8)])
                 .ok()
                 .and_then(|v| v.z().ok())
         })
