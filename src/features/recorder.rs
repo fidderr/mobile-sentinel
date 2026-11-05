@@ -21,7 +21,9 @@
 
 use std::path::Path;
 
-use crate::error::{ErrorCode, SentinelError};
+#[cfg(any(target_os = "android", windows))]
+use crate::error::ErrorCode;
+use crate::error::SentinelError;
 
 /// A finished recording.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -32,6 +34,8 @@ pub struct Recording {
     pub duration_ms: u64,
 }
 
+/// Only Android and Windows record: elsewhere nothing can fail.
+#[cfg(any(target_os = "android", windows))]
 fn failed(message: &str) -> SentinelError {
     SentinelError::RuntimeError {
         code: ErrorCode::Internal,
