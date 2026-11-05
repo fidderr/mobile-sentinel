@@ -30,10 +30,11 @@ class SentinelForegroundService : Service() {
     companion object {
         private const val TAG = "MobileSentinel.Service"
         /**
-         * Two ids, in turn whenever the notification gains or loses its full-screen intent. The
-         * system only acts on a full-screen intent of a notification it sees for the first time:
-         * an update under the same id becomes a banner at most, and would leave a screen that
-         * went dark during the ring dark. `startForeground` under a new id takes the old one down.
+         * Two ids, in turn whenever the notification gains its full-screen intent. The system only
+         * acts on a full-screen intent of a notification it sees for the first time: an update
+         * under the same id becomes a banner at most, and would leave a screen that went dark
+         * during the ring dark. `startForeground` under a new id takes the old one down, banner
+         * and all, which is also how a loud one goes when the plan wants no banner over the app.
          */
         private const val NOTIFICATION_ID = 9001
         private const val OTHER_NOTIFICATION_ID = 9002
@@ -413,7 +414,10 @@ class SentinelForegroundService : Service() {
             return
         }
         try {
-            if (postedOwner != null && fullScreen && !postedFullScreen) {
+            val louder = fullScreen && !postedFullScreen
+            // Going quiet under the same id leaves the loud one's banner up on some phones.
+            val bannerGoes = quiet && !postedQuiet && !plan.optBoolean("firing_banner_over_ui", true)
+            if (postedOwner != null && (louder || bannerGoes)) {
                 notificationId = if (notificationId == NOTIFICATION_ID) OTHER_NOTIFICATION_ID else NOTIFICATION_ID
             }
             startForeground(notificationId, buildNotification(plan, fullScreen, backup, quiet))

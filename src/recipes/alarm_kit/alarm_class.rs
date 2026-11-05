@@ -372,6 +372,7 @@ fn fire_request(
         kiosk_hide_status_bar: runtime_cfg.kiosk_hide_status_bar,
         kiosk_hide_nav_bar: runtime_cfg.kiosk_hide_nav_bar,
         firing_full_screen: runtime_cfg.firing_full_screen,
+        firing_banner_over_ui: runtime_cfg.firing_banner_over_ui,
         fresh,
         fade_in_ms: if fresh {
             u32::from(alarm_ctx.fade_in_secs) * 1000
@@ -630,6 +631,13 @@ pub struct AlarmClassConfig {
     /// `false` to never use a full-screen intent (quiet tray notification
     /// only — note this may not reliably wake a locked screen).
     pub firing_full_screen: bool,
+    /// Whether the loud firing notification may stay up as a banner over the app's own screen
+    /// once that screen is in front. The notification goes quiet then, but some phones (seen on
+    /// ColorOS) keep showing its banner for its full time, over the alarm's screen. `false` posts
+    /// the quiet one under a new id, which takes the loud one and its banner down at once. The
+    /// full-screen intent that brings the screen up is the same either way.
+    #[serde(default = "default_true")]
+    pub firing_banner_over_ui: bool,
     /// Vibration waveform (alternating wait/vibrate ms) looped while firing,
     /// for instances whose `vibration_enabled` is set. The consumer's
     /// default-or-override knob; the default is an alarm-style buzz. An empty
@@ -694,6 +702,7 @@ impl Default for AlarmClassConfig {
             kiosk_hide_status_bar: false,
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
+            firing_banner_over_ui: true,
             vibration_pattern: vec![0, 400, 200, 400],
             min_volume_percent: 0,
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,
@@ -845,6 +854,7 @@ impl AlarmClassConfig {
             kiosk_hide_status_bar: false,
             kiosk_hide_nav_bar: false,
             firing_full_screen: true,
+            firing_banner_over_ui: true,
             vibration_pattern: Vec::new(),
             min_volume_percent: 0,
             late_ring_window_ms: DEFAULT_LATE_RING_WINDOW_MS,

@@ -74,6 +74,12 @@ pub struct FireRequest {
     pub kiosk_hide_nav_bar: bool,
     /// Use a full-screen-intent notification.
     pub firing_full_screen: bool,
+    /// Whether the loud firing notification may stay up as a banner over the app's own screen
+    /// once that screen is in front. The notification goes quiet then, but some phones (seen on
+    /// ColorOS) keep showing its banner for its full time, over the alarm's screen. `false` posts
+    /// the quiet one under a new id, which takes the loud one and its banner down at once. The
+    /// full-screen intent that brings the screen up is the same either way.
+    pub firing_banner_over_ui: bool,
     /// Fade the sound in over this many milliseconds (0 = full volume at once).
     pub fade_in_ms: u32,
     /// Only vibrate for this many milliseconds, then start the sound (0 = at once).
@@ -232,6 +238,7 @@ mod tests {
             kiosk_hide_status_bar: true,
             kiosk_hide_nav_bar: true,
             firing_full_screen: true,
+            firing_banner_over_ui: true,
             fade_in_ms: 0,
             sound_delay_ms: 0,
             min_volume_percent: 0,

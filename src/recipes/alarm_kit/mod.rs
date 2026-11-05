@@ -1311,6 +1311,7 @@ mod tests {
                 kiosk_hide_status_bar: false,
                 kiosk_hide_nav_bar: false,
                 firing_full_screen: true,
+                firing_banner_over_ui: false,
                 vibration_pattern: vec![0, 400, 200, 400],
                 min_volume_percent: 0,
                 late_ring_window_ms: LATE_WINDOW,
@@ -2191,6 +2192,7 @@ mod tests {
         assert_eq!(plan["fade_in_ms"], 15_000);
         assert_eq!(plan["vibrate"], true);
         assert_eq!(plan["firing_full_screen"], true);
+        assert_eq!(plan["firing_banner_over_ui"], false);
         assert_eq!(plan["activity_fqcn"], "dev.test.MainActivity");
     }
 
