@@ -10,13 +10,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import java.io.File
 
 /**
  * A silent notification a while before an alarm rings. Nothing here touches the ring:
- * it has its own OS alarm, may arrive some minutes off when the phone is dozing, and if
- * it never comes the alarm still goes off.
+ * it has its own OS alarm, and if it never comes the alarm still goes off.
  *
  * It can carry a button. A tap leaves a mark for Rust and starts it the way a boot does, so it
  * works with the app closed, and offers to take it back until the ring's time. Taking it back
@@ -84,7 +84,14 @@ object SentinelReminders {
                 .putExtra(EXTRA_UNDO_LABEL, undoLabel)
             val operation = pending(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT) ?: return false
             val manager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+            // To the minute where the app may. Left to itself Android puts this off by 75% of the
+            // time until it is due, up to an hour: set the night before, that is past the ring it
+            // is about, and it is then dropped.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager.canScheduleExactAlarms()) {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+            } else {
+                manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+            }
             // Still to come, so what shows now is about a ring that moved.
             val notifications = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notifications.cancel(id.hashCode())
