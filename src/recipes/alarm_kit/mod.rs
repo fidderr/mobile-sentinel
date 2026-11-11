@@ -655,17 +655,15 @@ impl AlarmKit {
     /// to ring (the alarm was deleted, or moved on since) is dropped: it would
     /// keep the guardian relaunching the app for no alarm.
     fn engage_or_fire(&self, id: &InstanceId) {
-        if let Some(end) = crate::jobs::ring_end(&id.0) {
-            if self.end_session(id) {
-                RING_ENDS
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push((id.clone(), end));
-                if let Some(hook) = RING_END_HOOK.get() {
-                    hook();
-                }
-                return;
+        if let Some(end) = self.take_platform_end(id) {
+            RING_ENDS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((id.clone(), end));
+            if let Some(hook) = RING_END_HOOK.get() {
+                hook();
             }
+            return;
         }
         let record = match self.store.load(id) {
             Ok(r) => r,
@@ -1019,8 +1017,8 @@ impl AlarmKit {
                     if self.end_session(&record.id) {
                         report.ended_by_reboot.push(record.id.clone());
                     }
-                } else if let Some(end) = crate::jobs::ring_end(&record.id.0) {
-                    if self.end_session(&record.id) {
+                } else if crate::jobs::ring_end(&record.id.0).is_some() {
+                    if let Some(end) = self.take_platform_end(&record.id) {
                         report.ring_ends.push((record.id.clone(), end));
                     }
                 } else if let Some(due_unix_ms) = snooze_too_late {
@@ -1092,6 +1090,17 @@ impl AlarmKit {
             }
         }
         report
+    }
+
+    /// End `id`'s session if the platform ended its ring, and say how. One at a time: the
+    /// start-up and a heads-up can look at the same moment, and both would report that end.
+    fn take_platform_end(&self, id: &InstanceId) -> Option<RingEnd> {
+        static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let end = crate::jobs::ring_end(&id.0)?;
+        self.end_session(id).then_some(end)
     }
 
     /// Dismiss a session that cannot go on, bypassing the challenge gate (the
@@ -2668,6 +2677,48 @@ mod tests {
             SessionState::Scheduled { next_fire_unix_ms } if next_fire_unix_ms > now
         ));
         assert_eq!(crate::jobs::ring_end(&id.0), None);
+    }
+
+    #[test]
+    fn a_ring_end_seen_by_the_start_and_a_heads_up_at_once_is_reported_once() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, _sink) = install_kit(dir.path());
+        let mut spec = weekday_spec();
+        spec.challenges = vec![ChallengeSpec {
+            challenge_type: "math".into(),
+            difficulty: 0,
+            config: serde_json::json!({}),
+        }];
+        let id = kit.create(spec.clone()).unwrap();
+        let jobs = crate::jobs::jobs_dir();
+        for round in 0..40 {
+            active_job(&id);
+            dispatch_trigger(&kit.store, Trigger::Fire, &id).unwrap();
+            std::fs::write(jobs.join(format!("{}.dismiss", id.0)), "").unwrap();
+            let now = Utc::now().timestamp_millis();
+            let together = std::sync::Barrier::new(2);
+
+            let at_start = std::thread::scope(|scope| {
+                let start = scope.spawn(|| {
+                    together.wait();
+                    kit.on_startup_at(&[(id.0.clone(), spec.clone())], Some(now - 3_600_000), now)
+                        .ring_ends
+                        .len()
+                });
+                together.wait();
+                kit.handle_job_heads_up(&id.0);
+                start.join().unwrap()
+            });
+
+            let while_running = kit.take_ring_ends().len();
+            assert_eq!(
+                at_start + while_running,
+                1,
+                "round {round}: {at_start} at the start, {while_running} by the heads-up"
+            );
+        }
+        let _ = crate::jobs::remove_job(&id.0);
     }
 
     #[test]

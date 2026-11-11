@@ -46,6 +46,9 @@ longer for the backup screen's holds.
 - The app's core dying while the phone was locked counted as its screen failing. After two
   rounds the backup screen had the ring for good, also once the phone was unlocked. Until a
   screen can start, the guardian now neither tries nor counts.
+- A ring that ended on the backup screen or at its limit could be reported to the app twice:
+  once at its start (`StartupReport::ring_ends`) and once by a heads-up that came in during
+  that start (`take_ring_ends`). It is reported once.
 
 ## [0.4.0] - 2026-11-05
 
