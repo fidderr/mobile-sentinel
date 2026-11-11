@@ -1320,6 +1320,9 @@ mod tests {
                 backup_holds: 20,
                 backup_hold_ms: 3_000,
                 backup_text: "Hold".into(),
+                unlock_text: "Unlock to go on".into(),
+                unlock_button: "Unlock".into(),
+                unlock_quiet_secs: 60,
             },
         });
         (kit, sink)
@@ -2708,6 +2711,38 @@ mod tests {
         assert_eq!(plan["backup_holds"], 20);
         assert_eq!(plan["backup_hold_ms"], 3_000);
         assert_eq!(plan["backup_text"], "Hold");
+    }
+
+    #[test]
+    fn what_the_unlock_screen_says_is_part_of_the_plan() {
+        let _g = lock_and_clear();
+        let dir = TempDir::new().unwrap();
+        let (kit, sink) = install_kit(dir.path());
+
+        kit.create(weekday_spec()).unwrap();
+
+        // The ring service runs without Rust, and before the first unlock: all it knows of
+        // the app's words and of how long to be quiet is what the alarm was armed with.
+        let plan = plan_of(&sink.last_schedule().unwrap());
+        assert_eq!(plan["unlock_text"], "Unlock to go on");
+        assert_eq!(plan["unlock_button"], "Unlock");
+        assert_eq!(plan["unlock_quiet_ms"], 60_000);
+    }
+
+    #[test]
+    fn an_app_that_says_nothing_about_the_unlock_screen_leaves_it_to_the_platform() {
+        let config = AlarmClassConfig::default();
+
+        assert_eq!(config.unlock_text, "");
+        assert_eq!(config.unlock_button, "");
+        assert_eq!(
+            config.unlock_quiet_secs, 0,
+            "a ring is never quiet by default"
+        );
+        assert_eq!(
+            config.backup_holds, 0,
+            "and no app gets a backup screen it did not ask for"
+        );
     }
 
     #[test]

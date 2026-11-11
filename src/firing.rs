@@ -96,12 +96,22 @@ pub struct FireRequest {
     /// off. Read by the boot replay, which runs without Rust.
     pub late_ring_window_ms: i64,
     /// How many long holds the platform's backup screen asks for, used when the
-    /// app's own screen cannot come up. 0 means no backup screen.
+    /// app's own screen keeps failing. 0 means no backup screen.
     pub backup_holds: u32,
     /// How long each of those holds takes, in milliseconds.
     pub backup_hold_ms: u32,
     /// The text on the backup screen's hold button.
     pub backup_text: String,
+    /// What the platform's unlock screen says. It is shown from a boot until the first
+    /// unlock, when the app's own screen cannot start yet, and only asks for that unlock.
+    /// Empty for the platform's own words.
+    pub unlock_text: String,
+    /// The text on that screen's button.
+    pub unlock_button: String,
+    /// How long the ring may stay quiet after that button, in milliseconds, so the phone can
+    /// be unlocked in peace. It is back at the unlock, and when this runs out with the phone
+    /// still locked, when the screen is back too. 0 keeps it sounding.
+    pub unlock_quiet_ms: u32,
 }
 
 /// Configuration for scheduling an OS exact alarm.
@@ -247,6 +257,9 @@ mod tests {
             backup_holds: 0,
             backup_hold_ms: 0,
             backup_text: String::new(),
+            unlock_text: String::new(),
+            unlock_button: String::new(),
+            unlock_quiet_ms: 0,
         }
     }
 

@@ -392,6 +392,9 @@ fn fire_request(
         backup_holds: runtime_cfg.backup_holds,
         backup_hold_ms: runtime_cfg.backup_hold_ms,
         backup_text: runtime_cfg.backup_text.clone(),
+        unlock_text: runtime_cfg.unlock_text.clone(),
+        unlock_button: runtime_cfg.unlock_button.clone(),
+        unlock_quiet_ms: runtime_cfg.unlock_quiet_secs.saturating_mul(1000),
     }
 }
 
@@ -661,8 +664,8 @@ pub struct AlarmClassConfig {
     #[serde(default)]
     pub fallback_title: String,
     /// How many long holds the platform's backup screen asks for, used when the
-    /// app's own screen cannot come up (before the first unlock, or when the UI
-    /// keeps failing). 0 means no backup screen.
+    /// app's own screen keeps failing (see `JobConfig::ui_failures_before_backup`).
+    /// 0 means no backup screen: such a ring goes on until its limit.
     #[serde(default)]
     pub backup_holds: u32,
     /// How long each of those holds takes, in milliseconds.
@@ -671,6 +674,22 @@ pub struct AlarmClassConfig {
     /// The text on the backup screen's hold button.
     #[serde(default)]
     pub backup_text: String,
+    /// What the platform's unlock screen says. From a boot until the first unlock a
+    /// screen that needs storage which is still closed cannot start (one in a WebView,
+    /// for one), so an alarm that rings then shows this screen, which only asks for the
+    /// unlock: the app's own takes over the moment the phone is unlocked. Empty for the
+    /// platform's own words, in English. An app whose activity is marked as aware of that
+    /// state is simply started, and never sees this screen.
+    #[serde(default)]
+    pub unlock_text: String,
+    /// The text on that screen's button.
+    #[serde(default)]
+    pub unlock_button: String,
+    /// How long the ring may stay quiet after that button, in seconds, so the phone can be
+    /// unlocked in peace. The sound is back at the unlock, and when this runs out with the
+    /// phone still locked, when the screen is back too. 0 keeps it sounding.
+    #[serde(default)]
+    pub unlock_quiet_secs: u32,
 }
 
 fn default_true() -> bool {
@@ -711,6 +730,9 @@ impl Default for AlarmClassConfig {
             backup_holds: 0,
             backup_hold_ms: 0,
             backup_text: String::new(),
+            unlock_text: String::new(),
+            unlock_button: String::new(),
+            unlock_quiet_secs: 0,
         }
     }
 }
@@ -863,6 +885,9 @@ impl AlarmClassConfig {
             backup_holds: 0,
             backup_hold_ms: 0,
             backup_text: String::new(),
+            unlock_text: String::new(),
+            unlock_button: String::new(),
+            unlock_quiet_secs: 0,
         }
     }
 }
