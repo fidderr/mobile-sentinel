@@ -1,6 +1,8 @@
 package com.mobilesentinel
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.os.UserManager
 import java.io.File
@@ -37,4 +39,23 @@ object SentinelBoot {
     @JvmStatic
     fun filesAvailable(context: Context): Boolean =
         isUserUnlocked(context) || SentinelStorage.isDirectBoot(context)
+
+    /**
+     * Whether the app's screen [activityFqcn] can come up now. Before the first unlock that
+     * takes an activity the app marked as aware of it: any other needs storage that is still
+     * closed, and Android does not start it.
+     */
+    @JvmStatic
+    fun screenCanStart(context: Context, activityFqcn: String?): Boolean {
+        if (isUserUnlocked(context)) return true
+        if (activityFqcn.isNullOrBlank()) return false
+        return try {
+            context.packageManager.getActivityInfo(
+                ComponentName(context.packageName, activityFqcn),
+                PackageManager.MATCH_DIRECT_BOOT_AWARE or PackageManager.MATCH_DIRECT_BOOT_UNAWARE,
+            ).directBootAware
+        } catch (_: Throwable) {
+            false
+        }
+    }
 }

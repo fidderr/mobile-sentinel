@@ -53,6 +53,9 @@ object SentinelJobGuardian {
     /** Times the UI failed (frozen, or died before it ever came up) since then. */
     @Volatile private var uiFailures = 0
 
+    /** Whether the user was unlocked at the last poll. Only the poll loop touches it. */
+    private var sawUnlocked = true
+
     /**
      * Start the polling loop. Called when an alarm receiver fires and
      * activates a job. Safe to call multiple times — only one loop runs.
@@ -87,7 +90,20 @@ object SentinelJobGuardian {
     private fun pollLoop(context: Context) {
         Log.i(TAG, "pollLoop: started")
         try {
+            sawUnlocked = SentinelBoot.isUserUnlocked(context)
             while (true) {
+                // The first unlock after a boot: a screen that could not start until now can.
+                // MAIN, if it runs, has heard of its jobs when it could do nothing about a
+                // screen, so it hears again; and what was tried before does not count.
+                val unlocked = SentinelBoot.isUserUnlocked(context)
+                if (unlocked && !sawUnlocked) {
+                    Log.i(TAG, "pollLoop: the user unlocked, screens can start now")
+                    headsUpSent.clear()
+                    lastLaunchAtMs = 0L
+                    lastLaunchWallMs = 0L
+                }
+                sawUnlocked = unlocked
+
                 val activeJobs = SentinelActiveJobs.list(context)
                 if (activeJobs.isEmpty()) {
                     Log.i(TAG, "pollLoop: no active jobs — stopping")
@@ -113,6 +129,11 @@ object SentinelJobGuardian {
                         // launching over it would hide the only way out; or the ring
                         // is over, and Rust is being started without one.
                         if (SentinelRing.uiFailed(context) || SentinelActiveJobs.ringEnded(context, jobId)) {
+                            continue
+                        }
+                        // Before the first unlock its screen may not be able to start at all.
+                        // That is nothing to try, and no failure of the UI to count.
+                        if (!SentinelBoot.screenCanStart(context, SentinelActiveJobs.activityOf(job))) {
                             continue
                         }
                         // MAIN is dead — start it. Clear heads-up tracking
@@ -235,13 +256,12 @@ object SentinelJobGuardian {
     }
 
     private fun startMainActivity(context: Context) {
-        // Before the first unlock it cannot start: the backup screen is up instead.
-        if (!SentinelBoot.isUserUnlocked(context)) return
         val fqcn = readActivityFqcn(context)
         if (fqcn == null) {
             Log.w(TAG, "startMainActivity: no activity FQCN available")
             return
         }
+        if (!SentinelBoot.screenCanStart(context, fqcn)) return
         try {
             val intent = Intent().apply {
                 component = ComponentName(context.packageName, fqcn)

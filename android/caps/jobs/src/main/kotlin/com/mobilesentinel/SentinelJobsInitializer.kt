@@ -75,6 +75,8 @@ class SentinelJobsInitializer : ContentProvider() {
         try {
             val job = SentinelActiveJobs.list(context).firstOrNull { it.id == jobId } ?: return
             val fqcn = SentinelActiveJobs.activityOf(job) ?: return
+            // Until the first unlock Android does not start it: the ring service asks for that.
+            if (!SentinelBoot.screenCanStart(context, fqcn)) return
             val launch = Intent().apply {
                 component = android.content.ComponentName(context.packageName, fqcn)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or

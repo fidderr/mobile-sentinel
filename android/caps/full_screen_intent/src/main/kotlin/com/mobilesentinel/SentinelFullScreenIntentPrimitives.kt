@@ -19,6 +19,8 @@ object SentinelFullScreenIntentPrimitives {
         val c = SentinelPrimitives.getAppContext() ?: return false
         // It would only cover the backup screen, the one way out.
         if (SentinelRing.uiFailed(c)) return false
+        // Until the first unlock Android does not start it: the ring service asks for the unlock.
+        if (!SentinelBoot.screenCanStart(c, activityFqcn)) return false
         return try {
             val cls = Class.forName(activityFqcn)
             val intent = Intent(c, cls).apply {
