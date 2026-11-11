@@ -626,7 +626,11 @@ pub const CAPABILITIES: &[Capability] = &[
         features: NO_FEATURES,
         components: "",
         policy_sensitive: false,
-        kotlin_sources: &["SentinelForegroundService.kt", "SentinelBackupActivity.kt"],
+        kotlin_sources: &[
+            "SentinelForegroundService.kt",
+            "SentinelUnlockActivity.kt",
+            "SentinelBackupActivity.kt",
+        ],
     },
     Capability {
         id: "firing_audio",

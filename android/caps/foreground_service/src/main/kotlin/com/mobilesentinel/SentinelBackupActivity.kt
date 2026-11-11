@@ -1,11 +1,6 @@
 package com.mobilesentinel
 
 import android.app.Activity
-import android.content.BroadcastReceiver
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -22,14 +17,15 @@ import android.widget.ProgressBar
 import android.widget.TextView
 
 /**
- * The alarm's screen for when the real one cannot come up: before the first unlock
- * after a boot (the app's UI needs a WebView, which is not available then), or when
- * the UI keeps failing. Plain views in `:sentinel`, with no Rust and no WebView.
+ * A ring's screen for an app whose own keeps failing, if that app asks for one in its ring
+ * plan (`backup_holds`): a way to end a ring that would otherwise have none. Plain views in
+ * `:sentinel`, with no Rust and no WebView.
  *
- * Asks for a number of long holds, which the ring plan decides, so it is no shortcut
- * past the real challenge: a slow way out that is awake enough to count. Rust
- * cannot run here, so success leaves a request it honours when it next runs, and
- * ends the ring itself.
+ * Asks for a number of long holds, which the plan decides, so an app can make it as slow as
+ * what it asks for on its own screen. Rust cannot run here, so success leaves a request it
+ * honours when it next runs, and ends the ring itself.
+ *
+ * Not for a phone that is merely locked after a boot: that is [SentinelUnlockActivity]'s.
  */
 class SentinelBackupActivity : Activity() {
 
@@ -70,21 +66,6 @@ class SentinelBackupActivity : Activity() {
         }
     }
 
-    /** The real screen can come up now, and the real challenge is the one to solve. */
-    private val unlocked = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (SentinelRing.uiFailed(context)) return
-            val activity = ring?.plan?.optString("activity_fqcn", "").orEmpty()
-            if (activity.isEmpty()) return
-            Log.i(TAG, "unlocked, handing over to the app's screen")
-            startActivity(Intent().apply {
-                component = ComponentName(packageName, activity)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            })
-            finish()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SentinelPrimitives.init(applicationContext)
@@ -92,13 +73,11 @@ class SentinelBackupActivity : Activity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         setContentView(buildViews())
-        registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_UNLOCKED))
         loadRing()
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        unregisterReceiver(unlocked)
         super.onDestroy()
     }
 
@@ -178,7 +157,7 @@ class SentinelBackupActivity : Activity() {
         holdsNeeded = next.plan.optInt("backup_holds", 0).coerceAtLeast(1)
         holdMs = next.plan.optLong("backup_hold_ms", 3_000L).coerceAtLeast(1L)
         holdsDone = 0
-        title.text = next.plan.optString("title", "").ifEmpty { "Alarm" }
+        title.text = next.plan.optString("title", "").ifEmpty { applicationInfo.loadLabel(packageManager) }
         button.text = next.plan.optString("backup_text", "").ifEmpty { "Hold" }
         showCount()
     }

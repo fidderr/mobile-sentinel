@@ -19,7 +19,21 @@
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- The alarm's screen when the app's own cannot come up. -->
+        <!-- A ring's screen until the first unlock after a boot, when the app's own needs
+             storage that is still closed. It only asks for the unlock. -->
+        <activity
+            android:name="com.mobilesentinel.SentinelUnlockActivity"
+            android:directBootAware="true"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:process=":sentinel"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:turnScreenOn="true" />
+
+        <!-- A ring's screen when the app's own keeps failing, for an app that asks for one. -->
         <activity
             android:name="com.mobilesentinel.SentinelBackupActivity"
             android:directBootAware="true"

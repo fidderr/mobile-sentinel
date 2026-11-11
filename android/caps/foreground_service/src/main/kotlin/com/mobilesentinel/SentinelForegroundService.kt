@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -54,8 +55,18 @@ class SentinelForegroundService : Service() {
          * of it stays. Shorter than it takes to fall asleep with the screen turned off.
          */
         private const val UI_AWAY_TICKS = 2
+        /**
+         * How long the unlock screen may be out of sight on a phone that stays locked before it
+         * comes back, for a plan that names no quiet time of its own.
+         */
+        private const val UNLOCK_AWAY_MS = 60_000L
+        /** A screen the unlock screen started is on its way for this long. */
+        private const val HANDED_OVER_MS = 5_000L
         private val DEFAULT_VIBRATION = longArrayOf(0, 400, 200, 400)
     }
+
+    /** What a ring shows: the app's own screen, or one of this module's in its place. */
+    private enum class Screen { APP, UNLOCK, BACKUP }
 
     private val handler = Handler(Looper.getMainLooper())
     private val ringing = LinkedHashMap<String, SentinelRing.Ringing>()
@@ -69,11 +80,23 @@ class SentinelForegroundService : Service() {
     private var uiVisible = false
     private var uiAwayTicks = 0
     private var postedFullScreen = false
-    private var postedBackup = false
+    private var postedScreen: Screen? = null
     private var postedQuiet = false
     private var postedOwner: String? = null
     private var notificationId = NOTIFICATION_ID
-    private var backupLaunched = false
+
+    /** The screen the ring showed at the last tick, null before the first. */
+    private var shown: Screen? = null
+
+    /**
+     * Until when the sound and vibration are off because the user asked for the unlock, on the
+     * clock that counts from the boot. 0 when they are not. Only in memory: a service that comes
+     * back after a kill rings.
+     */
+    private var quietUntil = 0L
+
+    /** Since when the unlock screen is out of sight on a locked phone, 0 when it is in front. */
+    private var unlockAwaySince = 0L
     private var commandSeen = false
     private var ticking = false
     private var ticks = 0
@@ -99,6 +122,8 @@ class SentinelForegroundService : Service() {
             )
             SentinelRing.ACTION_STOP -> stop(intent.getStringExtra(SentinelRing.EXTRA_ID).orEmpty())
             SentinelRing.ACTION_PAUSE -> pause()
+            SentinelRing.ACTION_QUIET -> quietForUnlock()
+            SentinelRing.ACTION_LOUD -> loudAgain()
             // RESUME, or null: Android restarted this sticky service after a kill.
             else -> resumeSaved()
         }
@@ -162,6 +187,39 @@ class SentinelForegroundService : Service() {
         SentinelRing.clearPaused(this)
     }
 
+    /**
+     * The user asked for the unlock on the unlock screen: quiet for as long as the plan allows,
+     * so that can be done in peace. The tick ends it, at the unlock or when the time is up.
+     */
+    private fun quietForUnlock() {
+        reload()
+        val ring = ringing[owner] ?: ringing.values.firstOrNull()
+        val ms = ring?.plan?.optLong("unlock_quiet_ms", 0) ?: 0
+        if (ring != null && ms > 0 && screenFor(ring.plan) == Screen.UNLOCK) {
+            Log.i(TAG, "quiet for the unlock, for ${ms}ms at most")
+            stopOutputs()
+            quietUntil = SystemClock.elapsedRealtime() + ms
+        }
+        settle()
+    }
+
+    /** The unlock was not gone through with. */
+    private fun loudAgain() {
+        reload()
+        endQuiet()
+        settle()
+    }
+
+    private fun endQuiet() {
+        if (quietUntil == 0L) return
+        Log.i(TAG, "the quiet for the unlock is over")
+        quietUntil = 0L
+        if (!paused) ringing[owner]?.let { startOutputs(it, fade = false) }
+    }
+
+    /** Whether the sound and vibration are off on purpose right now. */
+    private fun silenced() = paused || quietUntil != 0L
+
     private fun resumeSaved() {
         commandSeen = true
         reload()
@@ -205,7 +263,7 @@ class SentinelForegroundService : Service() {
             shutDown()
             return
         }
-        if (owner == null && !paused) {
+        if (owner == null && !silenced()) {
             ringing.values.firstOrNull()?.let { startOutputs(it, fade = true) }
         }
         showForeground()
@@ -221,6 +279,9 @@ class SentinelForegroundService : Service() {
         handler.removeCallbacks(tick)
         ticking = false
         stopOutputs()
+        quietUntil = 0L
+        unlockAwaySince = 0L
+        shown = null
         SentinelRing.clearPaused(this)
         SentinelRing.restoreVolume(this)
         SentinelRing.clearUiFailed(this)
@@ -245,7 +306,7 @@ class SentinelForegroundService : Service() {
                 }
             }
             endRingsPastTheirLimit()
-            bringUpBackupScreenIfNeeded()
+            followTheOtherScreen()
             if (ringing.isEmpty()) {
                 shutDown()
                 return
@@ -254,9 +315,9 @@ class SentinelForegroundService : Service() {
             if (paused && SentinelRing.mainPid(this@SentinelForegroundService) == 0) {
                 Log.i(TAG, "MAIN died during a pause, sound back on")
                 notPaused()
-                ringing[owner]?.let { startOutputs(it, fade = false) }
+                if (quietUntil == 0L) ringing[owner]?.let { startOutputs(it, fade = false) }
             }
-            if (!paused) {
+            if (!silenced()) {
                 if (owner == null) {
                     ringing.values.firstOrNull()?.let { startOutputs(it, fade = false) }
                 }
@@ -293,25 +354,105 @@ class SentinelForegroundService : Service() {
         }
     }
 
-    /** Whether the app's own screen cannot be counted on for this ring. */
-    private fun needsBackup(plan: JSONObject): Boolean =
-        plan.optInt("backup_holds", 0) > 0 &&
-            (!SentinelBoot.isUserUnlocked(this) || SentinelRing.uiFailed(this))
+    /**
+     * The app's own screen, unless it cannot be. Until the first unlock after a boot Android
+     * starts no screen that needs storage that is still closed: the unlock is what to ask for
+     * then. A UI that keeps failing gets the backup screen, for a plan that asks for one.
+     */
+    private fun screenFor(plan: JSONObject): Screen {
+        val activity = plan.optString("activity_fqcn", "")
+        return when {
+            activity.isNotEmpty() && !SentinelBoot.screenCanStart(this, activity) -> Screen.UNLOCK
+            plan.optInt("backup_holds", 0) > 0 && SentinelRing.uiFailed(this) -> Screen.BACKUP
+            else -> Screen.APP
+        }
+    }
 
-    private fun bringUpBackupScreenIfNeeded() {
+    /**
+     * Once a second: bring up the screen that stands in for the app's own, keep the unlock
+     * screen coming back on a phone that stays locked, and notice the unlock.
+     */
+    private fun followTheOtherScreen() {
         val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: return
-        if (!needsBackup(plan)) return
+        val screen = screenFor(plan)
+        val before = shown
+        shown = screen
+        // The quiet is for the unlock only: over when its time is up, and with any other screen.
+        if (quietUntil != 0L &&
+            (screen != Screen.UNLOCK || SystemClock.elapsedRealtime() >= quietUntil)
+        ) {
+            endQuiet()
+        }
+        when (screen) {
+            Screen.APP -> if (before == Screen.UNLOCK) unlockedNow(plan)
+            Screen.UNLOCK -> followUnlockScreen(plan, first = before != Screen.UNLOCK)
+            Screen.BACKUP -> if (before != Screen.BACKUP) {
+                showForeground()
+                launch(SentinelBackupActivity::class.java.name)
+            }
+        }
+    }
+
+    private fun followUnlockScreen(plan: JSONObject, first: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (first) {
+            unlockAwaySince = 0L
+            showForeground()
+            launch(SentinelUnlockActivity::class.java.name)
+            return
+        }
+        if (SentinelUnlockActivity.inFront) {
+            unlockAwaySince = 0L
+            return
+        }
+        if (unlockAwaySince == 0L) {
+            unlockAwaySince = now
+            return
+        }
+        val limit = plan.optLong("unlock_quiet_ms", 0).takeIf { it > 0 } ?: UNLOCK_AWAY_MS
+        if (now - unlockAwaySince < limit) return
+        Log.i(TAG, "still locked, the unlock screen comes back")
+        unlockAwaySince = now
+        endQuiet()
+        // A notification the system has seen takes no screen again: see NOTIFICATION_ID.
+        postedFullScreen = false
         showForeground()
-        if (backupLaunched) return
-        backupLaunched = true
-        // Allowed with the overlay permission; the full-screen notification is the
-        // way in otherwise.
+        launch(SentinelUnlockActivity::class.java.name)
+    }
+
+    /** The phone was unlocked in the middle of a ring that started while it was locked. */
+    private fun unlockedNow(plan: JSONObject) {
+        Log.i(TAG, "unlocked, the app's screen takes over")
+        unlockAwaySince = 0L
+        endQuiet()
+        // The unlock screen starts the app's own when it is in front: a visible screen may.
+        val handedOverAt = SentinelUnlockActivity.handedOverAt
+        val handedOver = SentinelUnlockActivity.inFront ||
+            (handedOverAt != 0L && SystemClock.elapsedRealtime() - handedOverAt < HANDED_OVER_MS)
+        if (!handedOver) {
+            // Unlocked on the lock screen itself, with the unlock screen out of sight. A new
+            // notification, for its full-screen intent or its banner, and the way below.
+            postedFullScreen = false
+        }
+        showForeground()
+        if (!handedOver) launch(plan.optString("activity_fqcn", ""))
+    }
+
+    /**
+     * Start a screen of this app. Allowed from here with the overlay permission; the
+     * full-screen notification is the way in otherwise.
+     */
+    private fun launch(activity: String) {
+        if (activity.isEmpty()) return
         try {
             startActivity(
-                Intent(this, SentinelBackupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent().apply {
+                    component = ComponentName(packageName, activity)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                },
             )
         } catch (e: Throwable) {
-            Log.w(TAG, "starting the backup screen failed: ${e.message}")
+            Log.w(TAG, "starting $activity failed: ${e.message}")
         }
     }
 
@@ -334,6 +475,8 @@ class SentinelForegroundService : Service() {
 
     private fun startOutputs(ring: SentinelRing.Ringing, fade: Boolean) {
         cancelSoundLater()
+        // Whatever starts the sound ends a quiet that was asked for.
+        quietUntil = 0L
         owner = ring.id
         val plan = ring.plan
         SentinelRing.holdVolume(this, plan.optInt("min_volume_percent", 0))
@@ -404,11 +547,12 @@ class SentinelForegroundService : Service() {
     /** Show the foreground notification, posting again only if it changed. */
     private fun showForeground() {
         val plan = (ringing[owner] ?: ringing.values.firstOrNull())?.plan ?: JSONObject()
-        val backup = needsBackup(plan)
-        val fullScreen = plan.optBoolean("firing_full_screen", true) && (!uiVisible || backup)
-        val quiet = uiVisible && !backup
+        val screen = screenFor(plan)
+        val ownScreen = screen == Screen.APP
+        val fullScreen = plan.optBoolean("firing_full_screen", true) && (!uiVisible || !ownScreen)
+        val quiet = uiVisible && ownScreen
         if (postedOwner == owner && postedOwner != null &&
-            postedFullScreen == fullScreen && postedBackup == backup && postedQuiet == quiet
+            postedFullScreen == fullScreen && postedScreen == screen && postedQuiet == quiet
         ) {
             return
         }
@@ -419,12 +563,12 @@ class SentinelForegroundService : Service() {
             if (postedOwner != null && (louder || bannerGoes)) {
                 notificationId = if (notificationId == NOTIFICATION_ID) OTHER_NOTIFICATION_ID else NOTIFICATION_ID
             }
-            startForeground(notificationId, buildNotification(plan, fullScreen, backup, quiet))
+            startForeground(notificationId, buildNotification(plan, fullScreen, screen, quiet))
             postedOwner = owner
             postedFullScreen = fullScreen
-            postedBackup = backup
+            postedScreen = screen
             postedQuiet = quiet
-            Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen backup=$backup")
+            Log.i(TAG, "foreground, owner=$owner fullScreen=$fullScreen screen=$screen")
         } catch (e: Throwable) {
             // Not allowed from here. The sound plays on for now and the watchdog,
             // which is allowed to, retries.
@@ -432,9 +576,12 @@ class SentinelForegroundService : Service() {
         }
     }
 
+    /** What the app is called, for where its plan gives no text of its own. */
+    private fun appName(): String = applicationInfo.loadLabel(packageManager).toString()
+
     private fun ensureChannel(plan: JSONObject, channelId: String, quiet: Boolean) {
         val nm = getSystemService(NotificationManager::class.java) ?: return
-        val name = plan.optString("channel_name", "").ifEmpty { "Alarms" }
+        val name = plan.optString("channel_name", "").ifEmpty { appName() }
         val importance = if (quiet) {
             NotificationManager.IMPORTANCE_LOW
         } else {
@@ -449,7 +596,7 @@ class SentinelForegroundService : Service() {
         nm.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(plan: JSONObject, fullScreen: Boolean, backup: Boolean, quiet: Boolean): Notification {
+    private fun buildNotification(plan: JSONObject, fullScreen: Boolean, screen: Screen, quiet: Boolean): Notification {
         // A banner would only cover the alarm's own screen, for some seconds. The loud channel is
         // for when that screen is not there. The sound is not the notification's: it stays. A
         // channel, as not every phone goes along with a notification that says it should not alert.
@@ -457,7 +604,7 @@ class SentinelForegroundService : Service() {
         val channelId = if (quiet) loudChannel + QUIET_CHANNEL_SUFFIX else loudChannel
         ensureChannel(plan, channelId, quiet)
         val builder = Notification.Builder(this, channelId)
-        builder.setContentTitle(plan.optString("title", "").ifEmpty { "Alarm" })
+        builder.setContentTitle(plan.optString("title", "").ifEmpty { appName() })
             .setContentText(plan.optString("body", ""))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setOngoing(true)
@@ -465,10 +612,10 @@ class SentinelForegroundService : Service() {
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
 
-        val activity = if (backup) {
-            SentinelBackupActivity::class.java.name
-        } else {
-            plan.optString("activity_fqcn", "")
+        val activity = when (screen) {
+            Screen.UNLOCK -> SentinelUnlockActivity::class.java.name
+            Screen.BACKUP -> SentinelBackupActivity::class.java.name
+            Screen.APP -> plan.optString("activity_fqcn", "")
         }
         if (activity.isNotEmpty()) {
             val tap = Intent().apply {

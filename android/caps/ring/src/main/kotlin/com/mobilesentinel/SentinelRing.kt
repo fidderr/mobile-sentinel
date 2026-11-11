@@ -54,6 +54,8 @@ object SentinelRing {
     const val ACTION_STOP = "com.mobilesentinel.ring.STOP"
     const val ACTION_PAUSE = "com.mobilesentinel.ring.PAUSE"
     const val ACTION_RESUME = "com.mobilesentinel.ring.RESUME"
+    const val ACTION_QUIET = "com.mobilesentinel.ring.QUIET"
+    const val ACTION_LOUD = "com.mobilesentinel.ring.LOUD"
     const val EXTRA_ID = "id"
     const val EXTRA_UI_VISIBLE = "ui_visible"
 
@@ -117,6 +119,19 @@ object SentinelRing {
         val c = SentinelPrimitives.getAppContext() ?: return false
         return send(c, Intent(ACTION_PAUSE))
     }
+
+    /**
+     * The user asked for the phone's unlock on the unlock screen: the ring goes quiet for as
+     * long as its plan allows (`unlock_quiet_ms`), so that can be done in peace. The service
+     * brings it back by itself: at the unlock, and when the time is up with the phone still
+     * locked. Does nothing for a plan that allows no quiet.
+     */
+    @JvmStatic
+    fun quietForUnlock(context: Context): Boolean = send(context, Intent(ACTION_QUIET))
+
+    /** The unlock was not gone through with: the ring is back at once. */
+    @JvmStatic
+    fun endQuiet(context: Context): Boolean = send(context, Intent(ACTION_LOUD))
 
     /**
      * Keep the plan and bring the service up. The plan goes to disk first, so a
