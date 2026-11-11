@@ -11,8 +11,11 @@ change.
 
 ## [Unreleased]
 
-A phone that restarted and was not unlocked yet: an alarm asks for the unlock there, and no
-longer for the backup screen's holds.
+## [0.5.0] - 2026-11-11
+
+A minor version: `AlarmClassConfig` and `FireRequest` gain fields. A phone that restarted and
+was not unlocked yet: an alarm asks for the unlock there, and no longer for the backup screen's
+holds.
 
 ### Added
 
