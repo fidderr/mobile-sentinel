@@ -11,6 +11,42 @@ change.
 
 ## [Unreleased]
 
+A phone that restarted and was not unlocked yet: an alarm asks for the unlock there, and no
+longer for the backup screen's holds.
+
+### Added
+
+- **The unlock screen** (`SentinelUnlockActivity`). From a boot until the first unlock Android
+  starts no screen that needs storage which is still closed, and a screen in a WebView always
+  does. An alarm that rings then, with its own sound as before, now shows a screen of the
+  platform that says so and has one button for Android's own unlock. Nothing on it ends the
+  ring: the app's screen takes over the moment the phone is unlocked.
+  `AlarmClassConfig::unlock_text` and `unlock_button` are its words (the platform's own, in
+  English, when empty), and `unlock_quiet_secs` is how long the ring may be quiet after the
+  button. It is back, with the screen, on a phone that is still locked after that.
+- An app whose activity is `android:directBootAware` is started before the first unlock as at
+  any other time (`SentinelBoot.screenCanStart`).
+
+### Changed
+
+- **The backup screen is only for a UI that keeps failing.** It used to come up on a locked
+  phone as well, so every app with `backup_holds` got a hold challenge there, whether that
+  suited it or not. An app that wants no backup screen at all leaves `backup_holds` at 0, as
+  before.
+- Where an app gives no text, the ring's notification and channel show the app's own name
+  instead of "Alarm" and "Alarms".
+
+### Fixed
+
+- After an unlock in the middle of a ring, only the backup screen itself started the app's
+  screen, and Home had usually ended it by then. The ring went on behind a notification, and
+  without the overlay permission nothing could start a screen at all. The unlock screen is in
+  front when the phone unlocks through its button, so it may start the app's screen whatever
+  the permissions; the ring service and the guardian react to the unlock as well.
+- The app's core dying while the phone was locked counted as its screen failing. After two
+  rounds the backup screen had the ring for good, also once the phone was unlocked. Until a
+  screen can start, the guardian now neither tries nor counts.
+
 ## [0.4.0] - 2026-11-05
 
 A minor version: `AlarmKit::set_reminder` takes a button, and Android 12 is the floor.

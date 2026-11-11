@@ -648,8 +648,34 @@ pub struct AlarmClassConfig {
     pub min_volume_percent: u8,          // raise the alarm stream to at least this % while ringing, restore after (0 = leave alone)
     pub late_ring_window_ms: i64,        // found this late after a restart it still rings; later it is a miss
     pub fallback_sound_id: Option<SoundIdSpec>, // tried when the alarm's own sound cannot play
+    pub fallback_title: String,          // notification title for an alarm without a label
+    pub firing_banner_over_ui: bool,     // false: no banner over the app's own screen once it is up
+    pub backup_holds: u32,               // 0 = no backup screen. Long holds the backup screen asks for when the UI keeps failing
+    pub backup_hold_ms: u32,
+    pub backup_text: String,             // on its button
+    pub unlock_text: String,             // what the unlock screen says ("" = the platform's words)
+    pub unlock_button: String,           // on its button
+    pub unlock_quiet_secs: u32,          // the ring may be quiet this long after that button (0 = keeps sounding)
 }
 ```
+
+Two screens of the platform can stand in for the app's own while an alarm rings. Both are plain
+Android views in `:sentinel`, need no Rust, and show only what the plan gives them.
+
+- **The unlock screen**, from a boot until the first unlock. Android starts no screen then that
+  needs storage which is still closed, and a screen in a WebView always does. An app built with
+  `direct_boot = true` rings all the same, with its own sound, behind a screen that says
+  `unlock_text` and has one button, `unlock_button`, for Android's own unlock. Nothing on it ends
+  the ring. After the button the ring may be quiet for `unlock_quiet_secs`; it is back, and so
+  is the screen, when the phone is still locked after that. The moment the phone is unlocked the
+  app's screen takes over. An app whose `activity_fqcn` is marked `android:directBootAware` is
+  simply started, and never gets this screen. Without `direct_boot` nothing rings before the
+  first unlock: such an alarm is armed again at the unlock, and rings then if it is less than
+  `late_ring_window_ms` late.
+- **The backup screen**, when the UI keeps failing and only if the app asks for it: `backup_holds`
+  above 0 here, and `JobConfig::ui_failures_before_backup` above 0. It ends the ring after that
+  many long holds, and the app hears of it as `RingEnd::BackupScreen`. Without it such a ring
+  goes on until its limit.
 
 Alarms have to be armed again with no app open: after a boot, an app update, a clock or
 time zone change. The app says what runs then, once, anywhere in its crate:

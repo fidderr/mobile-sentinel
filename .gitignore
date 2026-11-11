@@ -7,4 +7,5 @@ android/builds/
 android/.gradle/
 sentinel/
 android/ci-check/.gradle/
+android/ci-check/.kotlin/
 android/ci-check/build/
