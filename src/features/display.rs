@@ -190,6 +190,17 @@ pub fn system_dark() -> bool {
     android_or!(android::flag("isSystemDark"), true)
 }
 
+/// The phone's font size setting as a factor (1.0 is the default size). 1.0 on host.
+pub fn font_scale() -> f32 {
+    android_or!(android::font_scale(), 1.0)
+}
+
+/// Whether the phone's animation scale is set to off (the "remove animations" option). `false`
+/// on host.
+pub fn animations_off() -> bool {
+    android_or!(android::flag("animationsOff"), false)
+}
+
 /// The colour of the system bars as `0xAARRGGBB`, to go with the app's background where it does
 /// not draw under them: up to Android 14. No-op on host.
 pub fn set_system_bar_color(argb: u32) {
@@ -366,6 +377,14 @@ mod android {
             env.call_static_method(class, method, "()Z", &[])
                 .ok()
                 .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn font_scale() -> f32 {
+        with_jni_class(DISPLAY, 1.0f32, |env, class| {
+            env.call_static_method(class, "fontScale", "()F", &[])
+                .ok()
+                .and_then(|v| v.f().ok())
         })
     }
 

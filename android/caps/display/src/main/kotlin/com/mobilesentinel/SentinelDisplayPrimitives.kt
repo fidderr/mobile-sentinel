@@ -284,6 +284,24 @@ object SentinelDisplayPrimitives {
     }
 
     @JvmStatic
+    fun fontScale(): Float {
+        val c = SentinelPrimitives.getAppContext() ?: return 1f
+        return c.resources.configuration.fontScale
+    }
+
+    @JvmStatic
+    fun animationsOff(): Boolean {
+        val c = SentinelPrimitives.getAppContext() ?: return false
+        return try {
+            android.provider.Settings.Global.getFloat(
+                c.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+            ) == 0f
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    @JvmStatic
     fun uses24HourClock(): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return true
         return android.text.format.DateFormat.is24HourFormat(c)

@@ -13,6 +13,9 @@ change.
 
 ### Added
 
+- **`display::font_scale()`** (the phone's font size setting as a factor) and
+  **`display::animations_off()`** (the phone's animation scale is off), for UIs that size text
+  themselves or follow the system's reduced-motion option.
 - **`build_sentinel --project <dir>`**, and `project = "<dir>"` in `sentinel.toml` (the flag wins).
   An app that does not generate its Android project with Dioxus names the Gradle project to
   build, relative to the current directory. Without either, the project under `target/dx` is
