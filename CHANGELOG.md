@@ -25,7 +25,13 @@ change.
   logged "no JavaVM available" and e.g. `permissions::status` reported Denied for a granted
   permission. Without a cached VM the JNI layer now takes the VM from ndk-context, and the class
   loader of its context object (the Application), so `com.mobilesentinel.*` lookups work from a
-  natively attached thread.
+  natively attached thread. Because Android only finds a `native` method by name in a library
+  `System.loadLibrary` loaded, the Kotlin `native` methods (Back, sensors, boot, battery,
+  network, jobs) are now bound to their Rust functions with `RegisterNatives` (looked up with
+  `dlsym`) when that fallback runs; Back handling (`foregrounding::on_back`) logged "No
+  implementation found" in a NativeActivity app before. The wake hook after a boot still loads
+  the library as `SentinelBridge.nativeLibraryName` (default `main`), so a native host should
+  name its library `main` for that path.
 - **A native (non-Dioxus) host gets the right Activity.** `get_activity()` took the Activity from
   ndk-context, which a host built on android-activity (Slint, for one) fills with the
   Application, so `media_picker` and `accessibility` handed their Kotlin the wrong object. It now
