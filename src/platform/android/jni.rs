@@ -64,6 +64,9 @@ pub(crate) fn cache_class_loader(env: &mut JNIEnv) {
 /// Load an app class by its JNI binary name through the cached `ClassLoader`, so
 /// it works from any thread, with or without an Activity.
 fn load_app_class(env: &mut JNIEnv, name: &str) -> Option<jni::objects::GlobalRef> {
+    if CLASS_LOADER.get().is_none() {
+        adopt_ndk_context();
+    }
     let loader = CLASS_LOADER.get()?;
     let dotted = env.new_string(name.replace('/', ".")).ok()?;
     let class = env.call_method(
@@ -81,8 +84,51 @@ fn load_app_class(env: &mut JNIEnv, name: &str) -> Option<jni::objects::GlobalRe
     }
 }
 
+/// The JavaVM and, if not yet cached, the app's ClassLoader, for a process whose library was
+/// not loaded by `System.loadLibrary`: a NativeActivity loads it itself, so `JNI_OnLoad` never
+/// ran. android-activity gives ndk-context the VM and the Application, whose class loader is
+/// the app's.
+fn adopt_ndk_context() {
+    if JAVA_VM.get().is_some() && CLASS_LOADER.get().is_some() {
+        return;
+    }
+    // ndk-context panics when no host framework has set it.
+    let Ok(ctx) = std::panic::catch_unwind(ndk_context::android_context) else {
+        return;
+    };
+    if ctx.vm().is_null() {
+        return;
+    }
+    // SAFETY: the VM pointer ndk-context holds is valid for the process.
+    let Ok(vm) = (unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }) else {
+        return;
+    };
+    if CLASS_LOADER.get().is_none() && !ctx.context().is_null() {
+        if let Ok(mut env) = vm.attach_current_thread_permanently() {
+            // SAFETY: the context object is a live reference held by the host framework.
+            let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+            let loader = env
+                .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+                .and_then(|value| value.l())
+                .and_then(|loader| env.new_global_ref(loader));
+            match loader {
+                Ok(loader) => {
+                    let _ = CLASS_LOADER.set(loader);
+                }
+                Err(_) => {
+                    let _ = env.exception_clear();
+                }
+            }
+        }
+    }
+    let _ = JAVA_VM.set(vm);
+}
+
 /// Borrow the cached JavaVM.
 fn java_vm() -> Option<jni::JavaVM> {
+    if JAVA_VM.get().is_none() {
+        adopt_ndk_context();
+    }
     let vm = JAVA_VM.get()?;
     // SAFETY: the cached vm is valid for the lifetime of the process. We
     // can't move it out of the OnceCell, so wrap the raw pointer back

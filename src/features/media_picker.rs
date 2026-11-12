@@ -243,7 +243,7 @@ mod android {
 
     /// Blocking file pick. Returns the chosen file's internal path (copied
     /// into the app's import dir), or empty on cancel/timeout. Resolves the
-    /// current Activity via `ndk_context` (the helper's `pickFileBlocking`
+    /// current Activity (the resumed one, see `get_activity`; the helper's `pickFileBlocking`
     /// requires an Activity to launch the document picker).
     pub(super) fn pick_file_blocking(mime: &str) -> String {
         let (vm, activity) = match get_activity() {

@@ -18,6 +18,20 @@ change.
   build, relative to the current directory. Without either, the project under `target/dx` is
   found as before.
 
+### Fixed
+
+- **A NativeActivity host has a JavaVM and a class loader.** Android loads such an app's library
+  through the activity, not `System.loadLibrary`, so `JNI_OnLoad` never ran: every capability
+  logged "no JavaVM available" and e.g. `permissions::status` reported Denied for a granted
+  permission. Without a cached VM the JNI layer now takes the VM from ndk-context, and the class
+  loader of its context object (the Application), so `com.mobilesentinel.*` lookups work from a
+  natively attached thread.
+- **A native (non-Dioxus) host gets the right Activity.** `get_activity()` took the Activity from
+  ndk-context, which a host built on android-activity (Slint, for one) fills with the
+  Application, so `media_picker` and `accessibility` handed their Kotlin the wrong object. It now
+  asks the Kotlin `SentinelActivityTracker` for the resumed Activity, and uses the ndk-context
+  pointer only while none is resumed.
+
 ## [0.5.0] - 2026-11-11
 
 A minor version: `AlarmClassConfig` and `FireRequest` gain fields. A phone that restarted and
