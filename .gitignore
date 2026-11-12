@@ -9,3 +9,8 @@ sentinel/
 android/ci-check/.gradle/
 android/ci-check/.kotlin/
 android/ci-check/build/
+# Gradle output inside the Android modules (an IDE's own Gradle run, or a
+# build without -PsentinelBuildRoot). Scoped to android/: src/build/ is code.
+android/**/build/
+android/**/.gradle/
+android/**/.kotlin/
