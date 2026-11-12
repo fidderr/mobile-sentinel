@@ -21,6 +21,8 @@
 //! ```toml
 //! [android]
 //! activity = "com.example.MainActivity"  # required (or pass --activity)
+//! project = "android"                    # optional — the Gradle project to build (or pass --project), relative to the current directory;
+//!                                        #   without it the project `dx build` generated is used
 //! icon = "path/to/icon.webp"             # optional — copies to all mipmap densities
 //! assets = ["path/to/sounds", "other/dir"]   # optional — copies to APK assets/
 //! screen_orientation = "portrait"        # optional — sets android:screenOrientation on main activity (build-time default lock)
@@ -326,13 +328,26 @@ fn load_config() -> Config {
     let release = parse_release_cli();
     let bundle_aab = parse_aab_cli();
 
+    let explicit_project = explicit_project_path(parse_project_cli(), toml.get("project"));
+    if let Some(dir) = &explicit_project {
+        if let Err(e) = check_project_dir(dir) {
+            eprintln!("  {e}");
+            std::process::exit(1);
+        }
+    }
+    let project_path = explicit_project.or_else(|| find_project_path(release));
+
     let activity = parse_activity_cli()
         .or_else(|| toml.get("activity").cloned())
-        .or_else(|| find_project_path(release).and_then(|p| detect_activity_from_manifest(&p)))
+        .or_else(|| {
+            project_path
+                .as_deref()
+                .and_then(detect_activity_from_manifest)
+        })
         .expect("Activity not specified. Use --activity or set in sentinel.toml");
 
-    let project_path = find_project_path(release).expect(
-        "Could not find Android project. Run `dx build --platform android [--release]` first.",
+    let project_path = project_path.expect(
+        "Could not find Android project. Run `dx build --platform android [--release]` first,          or point to one with --project <dir> or `project` in sentinel.toml.",
     );
 
     let icon_path = toml.get("icon").map(PathBuf::from).filter(|p| p.exists());
@@ -619,6 +634,48 @@ fn parse_cli_value(flag: &str) -> Option<String> {
 /// mobile-sentinel consumer sharing the cargo target dir.
 fn parse_app_cli() -> Option<String> {
     parse_cli_value("--app")
+}
+
+/// The Android project to build, from `--project <dir>`.
+fn parse_project_cli() -> Option<String> {
+    parse_cli_value("--project")
+}
+
+/// The project dir named by `--project` or `project` in `sentinel.toml` (the flag wins),
+/// relative to the current directory. `None` means: look for a generated one.
+fn explicit_project_path(cli: Option<String>, toml: Option<&String>) -> Option<PathBuf> {
+    cli.or_else(|| toml.cloned())
+        .filter(|dir| !dir.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+/// An explicit project is the Gradle root: `settings.gradle` and `app/` are in it. Only the
+/// Groovy settings file will do, because the modules are added to that one.
+fn check_project_dir(dir: &Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err(format!(
+            "Android project {} is not a directory (--project / `project` in sentinel.toml)",
+            dir.display()
+        ));
+    }
+    if !dir.join("app").is_dir() {
+        return Err(format!(
+            "Android project {} has no app/ module folder",
+            dir.display()
+        ));
+    }
+    if !dir.join("settings.gradle").is_file() {
+        let hint = if dir.join("settings.gradle.kts").is_file() {
+            " (found settings.gradle.kts: the modules are added to the Groovy settings.gradle, so use that)"
+        } else {
+            ""
+        };
+        return Err(format!(
+            "Android project {} has no settings.gradle{hint}",
+            dir.display()
+        ));
+    }
+    Ok(())
 }
 
 fn parse_release_cli() -> bool {
@@ -1030,6 +1087,37 @@ fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_project_flag_wins_over_toml_and_empty_means_none() {
+        let toml = "android".to_string();
+        assert_eq!(
+            explicit_project_path(Some("cli".into()), Some(&toml)),
+            Some(PathBuf::from("cli"))
+        );
+        assert_eq!(
+            explicit_project_path(None, Some(&toml)),
+            Some(PathBuf::from("android"))
+        );
+        assert_eq!(explicit_project_path(None, None), None);
+        assert_eq!(explicit_project_path(Some("  ".into()), None), None);
+    }
+
+    #[test]
+    fn check_project_dir_wants_app_and_groovy_settings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        assert!(check_project_dir(&root.join("missing")).is_err());
+        assert!(check_project_dir(root).unwrap_err().contains("app/"));
+        fs::create_dir(root.join("app")).unwrap();
+        assert!(check_project_dir(root)
+            .unwrap_err()
+            .contains("settings.gradle"));
+        fs::write(root.join("settings.gradle.kts"), "").unwrap();
+        assert!(check_project_dir(root).unwrap_err().contains(".kts"));
+        fs::write(root.join("settings.gradle"), "").unwrap();
+        assert!(check_project_dir(root).is_ok());
+    }
 
     #[test]
     fn sync_assets_removes_files_deleted_from_source_but_keeps_foreign_ones() {

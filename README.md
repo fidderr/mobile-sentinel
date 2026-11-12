@@ -354,6 +354,7 @@ project into a wired, trimmed APK. It reads a small `sentinel.toml`:
 ```toml
 [android]
 activity = "dev.dioxus.main.MainActivity"   # required (or pass --activity)
+project = "android"                         # optional — the Gradle project to build (or pass --project); else the one `dx build` generated
 icon_background = "F7F7F7"                  # optional — makes the icon adaptive, on this colour
 window_background = "F5F6F9"                # optional — the window and splash screen until the page paints (else white),
 window_background_dark = "101218"           #   and in the phone's dark mode
@@ -370,6 +371,13 @@ with.
 Flags:
 
 - `--activity <FQCN>` — the entry activity (overrides `sentinel.toml`).
+- `--project <dir>` — the Android project to build, for an app that does not use
+  Dioxus (overrides `project` in `sentinel.toml`; relative to the current
+  directory). The dir is the Gradle root, the one that holds `app/` and a Groovy
+  `settings.gradle` (the capability modules are added to that file; a project with
+  only `settings.gradle.kts` is refused). Your own build puts the manifest, the
+  native libraries and the Java/Kotlin sources there. Without the flag or the key,
+  nothing changes: the project under `target/dx` is used.
 - `--app <name>` — in a multi-consumer workspace, scope the project,
   `sentinel.toml`, and capability set to `apps/<name>` (derived deterministically
   from that app's `Cargo.toml` feature list).
