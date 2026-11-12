@@ -11,6 +11,13 @@ change.
 
 ## [Unreleased]
 
+### Added
+
+- **`build_sentinel --project <dir>`**, and `project = "<dir>"` in `sentinel.toml` (the flag wins).
+  An app that does not generate its Android project with Dioxus names the Gradle project to
+  build, relative to the current directory. Without either, the project under `target/dx` is
+  found as before.
+
 ## [0.5.0] - 2026-11-11
 
 A minor version: `AlarmClassConfig` and `FireRequest` gain fields. A phone that restarted and
