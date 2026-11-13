@@ -1,6 +1,8 @@
 package com.mobilesentinel
 
 import android.app.Activity
+import android.app.Application
+import android.os.Bundle
 import android.content.Context
 import android.provider.Settings
 import android.util.Log
@@ -202,6 +204,99 @@ object SentinelDisplayPrimitives {
             Log.w(TAG, "keepScreenOn: ${e.message}", e)
             false
         }
+    }
+
+    // ---- Preferred frame rate ------------------------------------------------
+
+    /** Wanted rate: 0 = default (off), negative = highest, positive = that rate in Hz. */
+    @Volatile
+    private var wantedFrameRate: Float = 0f
+    private var frameRateHooked = false
+
+    /**
+     * Pick the mode id to ask for: among [modes] (id, width, height, hz) with the same
+     * size as the one with id [currentId], the fastest for a negative [wanted], or the
+     * slowest at or above [wanted] (the fastest if none reaches it). Null if nothing fits.
+     */
+    @JvmStatic
+    fun pickModeId(modes: List<FloatArray>, currentId: Int, wanted: Float): Int? {
+        val cur = modes.firstOrNull { it[0].toInt() == currentId } ?: return null
+        val same = modes.filter { it[1] == cur[1] && it[2] == cur[2] }
+        if (same.isEmpty()) return null
+        val best = if (wanted < 0f) {
+            same.maxByOrNull { it[3] }
+        } else {
+            same.filter { it[3] >= wanted - 0.5f }.minByOrNull { it[3] } ?: same.maxByOrNull { it[3] }
+        }
+        return best?.get(0)?.toInt()
+    }
+
+    private fun applyFrameRate(activity: Activity) {
+        activity.runOnUiThread {
+            try {
+                val wanted = wantedFrameRate
+                val lp = activity.window.attributes
+                var modeId = 0
+                var rate = 0f
+                if (wanted != 0f) {
+                    val display = activity.display
+                    val modes = display?.supportedModes?.map {
+                        floatArrayOf(it.modeId.toFloat(), it.physicalWidth.toFloat(), it.physicalHeight.toFloat(), it.refreshRate)
+                    } ?: emptyList()
+                    val id = display?.let { pickModeId(modes, it.mode.modeId, wanted) }
+                    if (id != null) {
+                        modeId = id
+                        rate = modes.first { it[0].toInt() == id }[3]
+                    } else {
+                        rate = if (wanted < 0f) 1000f else wanted
+                    }
+                }
+                // A change of attributes costs a layout: only write when it differs.
+                if (lp.preferredDisplayModeId != modeId || lp.preferredRefreshRate != rate) {
+                    lp.preferredDisplayModeId = modeId
+                    lp.preferredRefreshRate = rate
+                    activity.window.attributes = lp
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "applyFrameRate(UI): ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Ask for a display refresh rate for the Activity window: [rate] 0 clears the request,
+     * negative means the fastest mode at the current resolution, positive is a rate in Hz.
+     * The wish is kept and re-applied whenever an Activity resumes (a new window starts
+     * with no preference). Sets `preferredDisplayModeId` (API 23) and `preferredRefreshRate`
+     * (API 21) on the window, for apps that draw without a WebView and that the
+     * platform otherwise keeps at its default rate.
+     *
+     * @return true if applied or stored, false without an Application context.
+     */
+    @JvmStatic
+    fun setPreferredFrameRate(rate: Float): Boolean {
+        if (rate.isNaN()) return false
+        val app = SentinelPrimitives.getAppContext()?.applicationContext as? Application
+        wantedFrameRate = rate
+        synchronized(this) {
+            if (!frameRateHooked && app != null) {
+                app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                    override fun onActivityResumed(activity: Activity) {
+                        if (wantedFrameRate != 0f) applyFrameRate(activity)
+                    }
+                    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+                    override fun onActivityStarted(activity: Activity) {}
+                    override fun onActivityPaused(activity: Activity) {}
+                    override fun onActivityStopped(activity: Activity) {}
+                    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                    override fun onActivityDestroyed(activity: Activity) {}
+                })
+                frameRateHooked = true
+            }
+        }
+        val activity = activityOrNull()
+        if (activity != null) applyFrameRate(activity)
+        return activity != null || app != null
     }
 
     /**

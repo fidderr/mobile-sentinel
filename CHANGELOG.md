@@ -13,6 +13,14 @@ change.
 
 ### Added
 
+- **`display::set_preferred_frame_rate(PreferredFrameRate)`** (`Default`, `Highest`, `Rate(hz)`),
+  opt-in, for apps with a native (non-WebView) window that the platform keeps at 60 Hz. It sets
+  the Activity window's `preferredDisplayModeId` to the fitting mode at the current resolution
+  (plus `preferredRefreshRate`; API 23/21, the SDK's minSdk is 31) and re-applies it whenever an
+  Activity resumes. `Surface.setFrameRate` (API 30, change strategy API 31) and
+  `ANativeWindow_setFrameRate` need the app's own surface, so they stay with the app;
+  Android ignores `preferredRefreshRate` for surfaces that use them. Apps that do not call it
+  are unchanged. Returns `false` on host.
 - **`display::font_scale()`** (the phone's font size setting as a factor) and
   **`display::animations_off()`** (the phone's animation scale is off), for UIs that size text
   themselves or follow the system's reduced-motion option.

@@ -155,6 +155,57 @@ pub fn set_requested_orientation(orientation: ScreenOrientation) {
     )
 }
 
+/// The display refresh rate an app asks for, see [`set_preferred_frame_rate`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PreferredFrameRate {
+    /// No request: the system decides (what an app gets that never asks).
+    Default,
+    /// The fastest mode the display offers at its current resolution.
+    Highest,
+    /// This rate in Hz (for example 60.0, 90.0, 120.0): the slowest supported mode that
+    /// reaches it, or the fastest if none does.
+    Rate(f32),
+}
+
+impl PreferredFrameRate {
+    /// The wire value for the Kotlin side: 0 default, negative highest, positive Hz.
+    /// `None` for a rate that is not a positive finite number.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    fn to_wire(self) -> Option<f32> {
+        match self {
+            PreferredFrameRate::Default => Some(0.0),
+            PreferredFrameRate::Highest => Some(-1.0),
+            PreferredFrameRate::Rate(hz) if hz.is_finite() && hz > 0.0 => Some(hz),
+            PreferredFrameRate::Rate(_) => None,
+        }
+    }
+}
+
+/// Ask Android for a display refresh rate while the app's window is shown.
+///
+/// Intended for apps that draw into a native window instead of a WebView: WebViews get a
+/// high rate from the platform, a plain native surface may stay at 60 Hz on some devices.
+/// Opt-in; an app that never calls this behaves as before, and `Default` undoes a request.
+///
+/// Mechanism: the Activity window's `preferredDisplayModeId` is set to the fitting mode
+/// at the current resolution (`Display.getSupportedModes`), plus `preferredRefreshRate`.
+/// The wish is remembered and applied again whenever an Activity resumes. Android treats
+/// it as a request, not a command (battery saver and the vendor's policy may overrule it).
+/// An app that owns a `SurfaceView` or `ANativeWindow` can in addition call
+/// `Surface.setFrameRate` / `ANativeWindow_setFrameRate` itself; `preferredRefreshRate`
+/// is ignored for surfaces that do. Returns `false` on host, for a `Rate` that is not a
+/// positive number, and when there is no Application context.
+pub fn set_preferred_frame_rate(rate: PreferredFrameRate) -> bool {
+    android_or!(
+        rate.to_wire()
+            .is_some_and(android::set_preferred_frame_rate),
+        {
+            let _ = rate;
+            false
+        }
+    )
+}
+
 /// Return the orientation last requested through this API (or that the
 /// Activity currently reports via `getRequestedOrientation`). Returns `None`
 /// if no Activity context is available.
@@ -286,6 +337,23 @@ mod tests {
     }
 
     #[test]
+    fn frame_rate_wire_values() {
+        assert_eq!(PreferredFrameRate::Default.to_wire(), Some(0.0));
+        assert_eq!(PreferredFrameRate::Highest.to_wire(), Some(-1.0));
+        assert_eq!(PreferredFrameRate::Rate(90.0).to_wire(), Some(90.0));
+        assert_eq!(PreferredFrameRate::Rate(0.0).to_wire(), None);
+        assert_eq!(PreferredFrameRate::Rate(-5.0).to_wire(), None);
+        assert_eq!(PreferredFrameRate::Rate(f32::NAN).to_wire(), None);
+        assert_eq!(PreferredFrameRate::Rate(f32::INFINITY).to_wire(), None);
+    }
+
+    #[test]
+    fn frame_rate_is_false_on_host() {
+        assert!(!set_preferred_frame_rate(PreferredFrameRate::Highest));
+        assert!(!set_preferred_frame_rate(PreferredFrameRate::Default));
+    }
+
+    #[test]
     fn rejects_empty_or_malformed() {
         assert_eq!(parse_safe_area(""), None);
         assert_eq!(parse_safe_area("1,2,3,4"), None);
@@ -341,6 +409,19 @@ mod android {
                 "keepScreenOn",
                 "(Z)Z",
                 &[JValue::Bool(enabled as u8)],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn set_preferred_frame_rate(wire: f32) -> bool {
+        with_jni_class(DISPLAY, false, |env, class| {
+            env.call_static_method(
+                class,
+                "setPreferredFrameRate",
+                "(F)Z",
+                &[JValue::Float(wire)],
             )
             .ok()
             .and_then(|v| v.z().ok())
