@@ -13,6 +13,22 @@ change.
 
 ### Added
 
+- **Android declarations in `sentinel.toml` (`[declare.*]`): no manifest XML in an app.** With
+  `generate = true`, `build_sentinel` renders `AndroidManifest.xml` and the `res/xml/` files from
+  tables: `permissions` and `[[declare.permission]]`, `feature`, `application`, `activity`,
+  `activity_alias`, `service`, `receiver`, `provider` (any attribute, intent filters with data,
+  meta-data, properties, `layout`, URI permissions), `queries`, `uses_library`, `define_permission`,
+  `network_security`, `resource_xml` and `element` (any other resource or manifest element as a tree).
+  `count` + `{i}` repeats a component (a process pool needs no generator script). Generated resources:
+  device admin policies (all nine selectable), accessibility config, FileProvider paths. Presets on the
+  same tables: `work_profile` (profile owner), `boot_start`, `process_pool`. The build adds the
+  permissions the declarations need (`FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_<TYPE>`,
+  `RECEIVE_BOOT_COMPLETED`, ...), warns about what Google Play reviews and refuses invalid
+  combinations. The classes of components whose code is Rust come from the existing `lib` / `rust_lib`
+  mechanism. `manifest = ...` keeps working (last resort); an app without `[declare]` renders the
+  manifest it always did (snapshot test). New dependency: `toml`. See the README section "Declaring
+  the manifest".
+
 - **`display::set_preferred_frame_rate(PreferredFrameRate)`** (`Default`, `Highest`, `Rate(hz)`),
   opt-in, for apps with a native (non-WebView) window that the platform keeps at 60 Hz. It sets
   the Activity window's `preferredDisplayModeId` to the fitting mode at the current resolution

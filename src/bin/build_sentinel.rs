@@ -37,6 +37,10 @@
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
 //!
+//! With `generate = true` the manifest can be declared in the same file (`[declare.*]` tables:
+//! components, permissions, features, queries, resources, presets); see
+//! `mobile_sentinel::build::declare`.
+//!
 //! Trimming is structural and unconditional: only the capability modules a
 //! consumer's enabled features select are wired into the Gradle build, so a
 //! disabled capability's Kotlin/deps are never compiled (there is no opt-out).

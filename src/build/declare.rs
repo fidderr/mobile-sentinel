@@ -5,6 +5,9 @@
 //! `build_sentinel` adds the permissions what is declared needs, warns about what Google Play
 //! reviews, and refuses combinations Android rejects.
 //!
+//! The tables are `[declare.*]`, not `[android.*]`: `[android]` already has flat keys (`activity`,
+//! `manifest`, `icon`) that a table of the same name could not share.
+//!
 //! Every key of a component table that is not reserved becomes an `android:` attribute as written
 //! (`exported = true`, `launchMode = "singleTask"`; an array is joined with `|`, so
 //! `configChanges = ["orientation", "screenSize"]`). A key with a colon (`tools:node`) is written
@@ -12,37 +15,38 @@
 //! catch typos (a warning); a new attribute works the day Android has it.
 //!
 //! ```toml
+//! [declare]
 //! permissions = ["INTERNET", "POST_NOTIFICATIONS"]        # bare names get android.permission.
-//! [[android.permission]]                                  # with attributes
+//! [[declare.permission]]                                  # with attributes
 //! name = "android.permission.WRITE_EXTERNAL_STORAGE"
 //! maxSdkVersion = 28
-//! [[android.feature]]                                     # <uses-feature>
+//! [[declare.feature]]                                     # <uses-feature>
 //! name = "android.hardware.camera"
 //! required = false
-//! [android.application]                                   # attributes of <application>
+//! [declare.application]                                   # attributes of <application>
 //! allowBackup = false
 //! largeHeap = true
-//! [[android.activity]]                                    # also service, receiver, provider, activity_alias
+//! [[declare.activity]]                                    # also service, receiver, provider, activity_alias
 //! name = ".MainActivity"
 //! launcher = true                                         # MAIN + LAUNCHER filter
 //! native_lib = "ui"                                       # android.app.lib_name meta-data
 //! launchMode = "singleTask"
-//! [[android.service]]
+//! [[declare.service]]
 //! name = ".Sync"
 //! exported = false
 //! foregroundServiceType = "specialUse"
 //! special_use = "Keeps the local relay running"           # the PROPERTY_SPECIAL_USE_FGS_SUBTYPE property
-//! [[android.service]]                                     # count: one service per process
+//! [[declare.service]]                                     # count: one service per process
 //! name = ".G{i}"
 //! process = ":g{i}"
 //! count = 128
-//! [[android.receiver]]
+//! [[declare.receiver]]
 //! name = ".Admin"
 //! admin_policies = ["force-lock", "wipe-data"]            # res/xml generated; BIND_DEVICE_ADMIN set
 //! lib = "ui"                                              # mobilesentinel.lib: the code is Rust
-//! [[android.receiver.intent_filter]]
+//! [[declare.receiver.intent_filter]]
 //! actions = ["android.app.action.PROFILE_PROVISIONING_COMPLETE"]
-//! [android.boot_start]                                    # preset: a boot receiver
+//! [declare.boot_start]                                    # preset: a boot receiver
 //! receiver = ".Boot"
 //! ```
 //!
@@ -63,7 +67,7 @@ type R<T> = Result<T, String>;
 const ANDROID_NS: &str = "http://schemas.android.com/apk/res/android";
 const TOOLS_NS: &str = "http://schemas.android.com/tools";
 
-/// The declaration keys of `[android]`; an app with none of them keeps its own manifest or the
+/// The declaration keys of `[declare]`; an app with none of them keeps its own manifest or the
 /// generated native one.
 const KEYS: &[&str] = &[
     "permissions",
@@ -411,7 +415,7 @@ const DATA_ATTRS: &[&str] = &[
     "mimeGroup",
 ];
 
-/// The parsed `[android]` declaration tables of a `sentinel.toml`.
+/// The parsed `[declare]` declaration tables of a `sentinel.toml`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarations {
     android: Table,
@@ -448,7 +452,7 @@ pub fn parse(text: &str) -> R<Option<Declarations>> {
         Err(e) => {
             // The flat reader of the other keys is more forgiving than TOML; only a file that
             // tries to declare something has to be valid.
-            let tries = KEYS.iter().any(|k| text.contains(&format!("android.{k}")))
+            let tries = KEYS.iter().any(|k| text.contains(&format!("declare.{k}")))
                 || text.contains("permissions");
             return if tries {
                 Err(format!("sentinel.toml: {e}"))
@@ -457,7 +461,7 @@ pub fn parse(text: &str) -> R<Option<Declarations>> {
             };
         }
     };
-    let Some(Value::Table(android)) = table.get("android") else {
+    let Some(Value::Table(android)) = table.get("declare") else {
         return Ok(None);
     };
     if KEYS.iter().any(|k| android.contains_key(*k)) {
@@ -1843,22 +1847,22 @@ mod tests {
         let flat = "[android]\ngenerate = true\nlabel = \"X\"\nicon = \"a.webp\"\n";
         assert_eq!(parse(flat).unwrap(), None);
         assert_eq!(parse("not toml = = [").unwrap(), None);
-        assert!(parse("[android]\npermissions = [\n").is_err());
-        assert!(parse("[android]\n[[android.service]]\nname = ").is_err());
+        assert!(parse("[declare]\npermissions = [\n").is_err());
+        assert!(parse("[declare]\n[[declare.service]]\nname = ").is_err());
     }
 
     #[test]
     fn permissions_take_short_names_attributes_and_stay_unique() {
         let r = ok(r#"
-[android]
+[declare]
 permissions = ["INTERNET", "com.example.CUSTOM", "INTERNET"]
-[[android.permission]]
+[[declare.permission]]
 name = "android.permission.WRITE_EXTERNAL_STORAGE"
 maxSdkVersion = 28
-[[android.permission]]
+[[declare.permission]]
 name = "android.permission.BLUETOOTH_SCAN"
 usesPermissionFlags = "neverForLocation"
-[[android.permission]]
+[[declare.permission]]
 name = "android.permission.READ_EXTERNAL_STORAGE"
 maxSdkVersion = 32
 "#);
@@ -1886,9 +1890,9 @@ maxSdkVersion = 32
     #[test]
     fn one_permission_twice_with_other_attributes_is_refused() {
         let e = err(r#"
-[android]
+[declare]
 permissions = ["CAMERA"]
-[[android.permission]]
+[[declare.permission]]
 name = "CAMERA"
 maxSdkVersion = 30
 "#);
@@ -1898,10 +1902,10 @@ maxSdkVersion = 30
     #[test]
     fn features_take_a_name_or_a_gl_version() {
         let r = ok(r#"
-[[android.feature]]
+[[declare.feature]]
 name = "android.hardware.camera"
 required = false
-[[android.feature]]
+[[declare.feature]]
 glEsVersion = 0x00030001
 required = true
 "#);
@@ -1913,24 +1917,24 @@ required = true
             &r,
             r#"<uses-feature android:glEsVersion="0x00030001" android:required="true" />"#,
         );
-        assert!(err("[[android.feature]]\nrequired = true\n").contains("name or glEsVersion"));
-        assert!(err("[[android.feature]]\nname = \"a\"\nglEsVersion = 1\n").contains("not both"));
+        assert!(err("[[declare.feature]]\nrequired = true\n").contains("name or glEsVersion"));
+        assert!(err("[[declare.feature]]\nname = \"a\"\nglEsVersion = 1\n").contains("not both"));
     }
 
     #[test]
     fn the_application_gets_label_default_and_any_attribute() {
         let r = ok(r#"
-[android.application]
+[declare.application]
 allowBackup = false
 largeHeap = true
 theme = "@style/T"
-[[android.application.meta_data]]
+[[declare.application.meta_data]]
 name = "k"
 value = "v"
-[[android.application.property]]
+[[declare.application.property]]
 name = "p"
 resource = "@xml/p"
-[[android.uses_library]]
+[[declare.uses_library]]
 name = "org.apache.http.legacy"
 required = false
 "#);
@@ -1946,16 +1950,16 @@ required = false
             &r,
             r#"<uses-library android:name="org.apache.http.legacy" android:required="false" />"#,
         );
-        let r = ok("[android.application]\nlabel = \"Mine\"\n");
+        let r = ok("[declare.application]\nlabel = \"Mine\"\n");
         has(&r, r#"android:label="Mine""#);
-        let r = render_with("[android.application]\n", &Context { icon: true, ..cx() }).unwrap();
+        let r = render_with("[declare.application]\n", &Context { icon: true, ..cx() }).unwrap();
         has(&r, r#"android:icon="@mipmap/ic_launcher""#);
     }
 
     #[test]
     fn an_activity_takes_every_attribute_filter_and_meta_data() {
         let r = ok(r#"
-[[android.activity]]
+[[declare.activity]]
 name = ".Main"
 exported = true
 launchMode = "singleTask"
@@ -1965,7 +1969,7 @@ windowSoftInputMode = "adjustResize"
 native_lib = "ui"
 lib = "ui"
 layout = { defaultWidth = "600dp", gravity = "end" }
-[[android.activity.intent_filter]]
+[[declare.activity.intent_filter]]
 actions = ["android.intent.action.VIEW"]
 categories = ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]
 autoVerify = true
@@ -2002,7 +2006,7 @@ data = [{ scheme = "https", host = "example.com", pathPrefix = "/x" }, { mimeTyp
 
     #[test]
     fn launcher_adds_main_and_launcher_and_exports() {
-        let r = ok("[[android.activity]]\nname = \".Main\"\nlauncher = true\n");
+        let r = ok("[[declare.activity]]\nname = \".Main\"\nlauncher = true\n");
         has(&r, r#"android:exported="true""#);
         has(
             &r,
@@ -2012,19 +2016,19 @@ data = [{ scheme = "https", host = "example.com", pathPrefix = "/x" }, { mimeTyp
             &r,
             r#"<category android:name="android.intent.category.LAUNCHER" />"#,
         );
-        assert!(err("[[android.service]]\nname = \".S\"\nlauncher = true\n")
+        assert!(err("[[declare.service]]\nname = \".S\"\nlauncher = true\n")
             .contains("launcher is for activities"));
     }
 
     #[test]
     fn an_activity_alias_a_provider_and_a_receiver() {
         let r = ok(r#"
-[[android.activity_alias]]
+[[declare.activity_alias]]
 name = ".Alias"
 targetActivity = ".Main"
 exported = true
 enabled = false
-[[android.provider]]
+[[declare.provider]]
 name = ".Files"
 authorities = ["a.b.files", "a.b.more"]
 exported = false
@@ -2059,18 +2063,18 @@ path_permission = [{ pathPrefix = "/secret", readPermission = "a.b.READ" }]
             paths.contains(r#"<cache-path name="tmp" path="." />"#),
             "{paths}"
         );
-        assert!(err("[[android.activity_alias]]\nname = \".A\"\n").contains("targetActivity"));
-        assert!(err("[[android.provider]]\nname = \".P\"\n").contains("authorities"));
-        assert!(err("[[android.provider]]\nname = \".P\"\nauthorities = \"a\"\nfile_paths = [{ kind = \"bogus\", name = \"x\" }]\n").contains("bogus"));
+        assert!(err("[[declare.activity_alias]]\nname = \".A\"\n").contains("targetActivity"));
+        assert!(err("[[declare.provider]]\nname = \".P\"\n").contains("authorities"));
+        assert!(err("[[declare.provider]]\nname = \".P\"\nauthorities = \"a\"\nfile_paths = [{ kind = \"bogus\", name = \"x\" }]\n").contains("bogus"));
     }
 
     #[test]
     fn a_foreground_service_gets_the_permissions_of_its_types() {
         let r = ok(r#"
-[[android.service]]
+[[declare.service]]
 name = ".A"
 foregroundServiceType = ["dataSync", "location", "shortService"]
-[[android.service]]
+[[declare.service]]
 name = ".B"
 foregroundServiceType = "specialUse"
 special_use = "keeps the relay alive"
@@ -2107,7 +2111,7 @@ special_use = "keeps the relay alive"
                 ""
             };
             let r = ok(&format!(
-                "[[android.service]]\nname = \".S\"\nforegroundServiceType = \"{ty}\"\n{sub}"
+                "[[declare.service]]\nname = \".S\"\nforegroundServiceType = \"{ty}\"\n{sub}"
             ));
             has(&r, r#"android.permission.FOREGROUND_SERVICE" />"#);
             if let Some(p) = perm {
@@ -2119,23 +2123,23 @@ special_use = "keeps the relay alive"
     #[test]
     fn foreground_service_mistakes_are_refused() {
         assert!(
-            err("[[android.service]]\nname = \".S\"\nforegroundServiceType = \"gps\"\n")
+            err("[[declare.service]]\nname = \".S\"\nforegroundServiceType = \"gps\"\n")
                 .contains("\"gps\"")
         );
         assert!(err(
-            "[[android.service]]\nname = \".S\"\nforegroundServiceType = \"specialUse\"\n"
+            "[[declare.service]]\nname = \".S\"\nforegroundServiceType = \"specialUse\"\n"
         )
         .contains("special_use"));
         assert!(
-            err("[[android.service]]\nname = \".S\"\nspecial_use = \"x\"\n")
+            err("[[declare.service]]\nname = \".S\"\nspecial_use = \"x\"\n")
                 .contains("foregroundServiceType")
         );
         assert!(
-            err("[[android.receiver]]\nname = \".R\"\nforegroundServiceType = \"dataSync\"\n")
+            err("[[declare.receiver]]\nname = \".R\"\nforegroundServiceType = \"dataSync\"\n")
                 .contains("services")
         );
         ok(r#"
-[[android.service]]
+[[declare.service]]
 name = ".S"
 foregroundServiceType = "specialUse"
 property = [{ name = "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE", value = "x" }]
@@ -2145,10 +2149,10 @@ property = [{ name = "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE", value = "x"
     #[test]
     fn a_boot_receiver_gets_its_permission_once() {
         let src = r#"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".Boot"
 exported = true
-[[android.receiver.intent_filter]]
+[[declare.receiver.intent_filter]]
 actions = ["android.intent.action.LOCKED_BOOT_COMPLETED", "android.intent.action.BOOT_COMPLETED"]
 "#;
         let r = ok(src);
@@ -2158,15 +2162,15 @@ actions = ["android.intent.action.LOCKED_BOOT_COMPLETED", "android.intent.action
             .iter()
             .any(|n| n.contains("RECEIVE_BOOT_COMPLETED") && n.contains(".Boot")));
         let r = ok(&format!(
-            "[android]\npermissions = [\"RECEIVE_BOOT_COMPLETED\"]\n{src}"
+            "[declare]\npermissions = [\"RECEIVE_BOOT_COMPLETED\"]\n{src}"
         ));
         assert_eq!(r.manifest.matches("RECEIVE_BOOT_COMPLETED").count(), 1);
         assert!(r.notes.is_empty());
         let r = ok(r#"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".Sms"
 exported = true
-[[android.receiver.intent_filter]]
+[[declare.receiver.intent_filter]]
 actions = ["android.provider.Telephony.SMS_RECEIVED"]
 "#);
         has(&r, "android.permission.RECEIVE_SMS");
@@ -2176,7 +2180,7 @@ actions = ["android.provider.Telephony.SMS_RECEIVED"]
     #[test]
     fn count_repeats_a_component_with_its_number() {
         let r = ok(r#"
-[[android.service]]
+[[declare.service]]
 name = ".G{i}"
 process = ":g{i}"
 exported = false
@@ -2191,17 +2195,17 @@ count = 3
             );
         }
         lacks(&r, ".G3");
-        assert!(err("[[android.service]]\nname = \".G\"\ncount = 3\n").contains("without {i}"));
-        assert!(err("[[android.service]]\nname = \".G{i}\"\n").contains("needs count"));
-        assert!(err("[[android.service]]\nname = \".G{i}\"\ncount = 0\n").contains("1 or more"));
+        assert!(err("[[declare.service]]\nname = \".G\"\ncount = 3\n").contains("without {i}"));
+        assert!(err("[[declare.service]]\nname = \".G{i}\"\n").contains("needs count"));
+        assert!(err("[[declare.service]]\nname = \".G{i}\"\ncount = 0\n").contains("1 or more"));
         assert!(
-            err("[[android.service]]\nname = \".G{i}\"\ncount = \"3\"\n").contains("whole number")
+            err("[[declare.service]]\nname = \".G{i}\"\ncount = \"3\"\n").contains("whole number")
         );
     }
 
     #[test]
     fn intent_filters_are_checked() {
-        let base = "[[android.activity]]\nname = \".A\"\nexported = true\n[[android.activity.intent_filter]]\n";
+        let base = "[[declare.activity]]\nname = \".A\"\nexported = true\n[[declare.activity.intent_filter]]\n";
         assert!(err(&format!("{base}categories = [\"x\"]\n")).contains("without an action"));
         assert!(err(&format!(
             "{base}action = \"a\"\ndata = {{ host = \"h\" }}\n"
@@ -2221,49 +2225,49 @@ count = 3
         ));
         has(&r, r#"<intent-filter android:priority="5">"#);
         let e = err(
-            "[[android.activity]]\nname = \".A\"\n[[android.activity.intent_filter]]\naction = \"a\"\n",
+            "[[declare.activity]]\nname = \".A\"\n[[declare.activity.intent_filter]]\naction = \"a\"\n",
         );
         assert!(e.contains("exported"), "{e}");
     }
 
     #[test]
     fn invalid_values_are_refused() {
-        assert!(err("[[android.service]]\n").contains("needs name"));
+        assert!(err("[[declare.service]]\n").contains("needs name"));
         assert!(
-            err("[[android.service]]\nname = \".S\"\n[[android.service]]\nname = \".S\"\n")
+            err("[[declare.service]]\nname = \".S\"\n[[declare.service]]\nname = \".S\"\n")
                 .contains("twice")
         );
-        assert!(err("[[android.service]]\nname = \".S\"\nprocess = \"Bad\"\n").contains("process"));
-        assert!(err("[[android.service]]\nname = \".S\"\nprocess = \":\"\n").contains("process"));
+        assert!(err("[[declare.service]]\nname = \".S\"\nprocess = \"Bad\"\n").contains("process"));
+        assert!(err("[[declare.service]]\nname = \".S\"\nprocess = \":\"\n").contains("process"));
         assert!(
-            err("[[android.activity]]\nname = \".A\"\nlaunchMode = \"always\"\n")
+            err("[[declare.activity]]\nname = \".A\"\nlaunchMode = \"always\"\n")
                 .contains("launchMode")
         );
         assert!(
-            err("[[android.service]]\nname = \".A\"\nlaunchMode = \"singleTop\"\n")
+            err("[[declare.service]]\nname = \".A\"\nlaunchMode = \"singleTop\"\n")
                 .contains("launchMode")
         );
         assert!(
-            err("[[android.activity]]\nname = \".A\"\nscreenOrientation = \"tilted\"\n")
+            err("[[declare.activity]]\nname = \".A\"\nscreenOrientation = \"tilted\"\n")
                 .contains("screenOrientation")
         );
         assert!(
-            err("[[android.activity]]\nname = \".A\"\nlabel = { a = 1 }\n")
+            err("[[declare.activity]]\nname = \".A\"\nlabel = { a = 1 }\n")
                 .contains("not an attribute value")
         );
         assert!(
-            err("[[android.activity]]\nname = \".A\"\nlib = \"my-lib\"\n")
+            err("[[declare.activity]]\nname = \".A\"\nlib = \"my-lib\"\n")
                 .contains("letters and digits")
         );
         assert!(
-            err("[[android.service]]\nname = \".A\"\nnative_lib = \"x\"\n").contains("activities")
+            err("[[declare.service]]\nname = \".A\"\nnative_lib = \"x\"\n").contains("activities")
         );
-        ok("[[android.service]]\nname = \".S\"\nprocess = \"com.example.shared\"\n");
+        ok("[[declare.service]]\nname = \".S\"\nprocess = \"com.example.shared\"\n");
     }
 
     #[test]
     fn meta_data_wants_a_value_or_a_resource() {
-        let c = "[[android.service]]\nname = \".S\"\n[[android.service.meta_data]]\nname = \"k\"\n";
+        let c = "[[declare.service]]\nname = \".S\"\n[[declare.service.meta_data]]\nname = \"k\"\n";
         assert!(err(c).contains("value or resource"));
         assert!(err(&format!("{c}value = 1\nresource = \"@x/y\"\n")).contains("pick one"));
         let r = ok(&format!("{c}value = 42\n"));
@@ -2273,7 +2277,7 @@ count = 3
     #[test]
     fn a_device_admin_gets_its_policy_file_and_defaults() {
         let r = ok(r#"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".space.Admin"
 admin_policies = ["force-lock", "wipe-data"]
 lib = "ui"
@@ -2301,14 +2305,14 @@ lib = "ui"
 
     #[test]
     fn every_device_admin_policy_can_be_selected() {
-        let all = ok("[[android.receiver]]\nname = \".A\"\nadmin_policies = [\"all\"]\n");
+        let all = ok("[[declare.receiver]]\nname = \".A\"\nadmin_policies = [\"all\"]\n");
         let xml = &all.resources["xml/device_admin_a.xml"];
         for p in ADMIN_POLICIES {
             assert!(xml.contains(&format!("<{p} />")), "{p} in {xml}");
         }
         for p in ADMIN_POLICIES {
             let one = ok(&format!(
-                "[[android.receiver]]\nname = \".A\"\nadmin_policies = [\"{p}\"]\n"
+                "[[declare.receiver]]\nname = \".A\"\nadmin_policies = [\"{p}\"]\n"
             ));
             assert_eq!(
                 one.resources["xml/device_admin_a.xml"]
@@ -2318,37 +2322,37 @@ lib = "ui"
             );
         }
         let named = ok(
-            "[[android.receiver]]\nname = \".A\"\nadmin_policies = []\nadmin_resource = \"policies\"\n",
+            "[[declare.receiver]]\nname = \".A\"\nadmin_policies = []\nadmin_resource = \"policies\"\n",
         );
         assert!(named.resources.contains_key("xml/policies.xml"));
         assert!(
-            err("[[android.receiver]]\nname = \".A\"\nadmin_policies = [\"fly\"]\n")
+            err("[[declare.receiver]]\nname = \".A\"\nadmin_policies = [\"fly\"]\n")
                 .contains("\"fly\"")
         );
         assert!(
-            err("[[android.service]]\nname = \".A\"\nadmin_policies = []\n").contains("receivers")
+            err("[[declare.service]]\nname = \".A\"\nadmin_policies = []\n").contains("receivers")
         );
     }
 
     #[test]
     fn two_files_of_one_name_with_other_content_are_refused() {
         let e = err(r#"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".A"
 admin_policies = ["force-lock"]
 admin_resource = "same"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".B"
 admin_policies = ["wipe-data"]
 admin_resource = "same"
 "#);
         assert!(e.contains("res/xml/same.xml"), "{e}");
         ok(r#"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".A"
 admin_policies = ["force-lock"]
 admin_resource = "same"
-[[android.receiver]]
+[[declare.receiver]]
 name = ".B"
 admin_policies = ["force-lock"]
 admin_resource = "same"
@@ -2358,7 +2362,7 @@ admin_resource = "same"
     #[test]
     fn an_accessibility_service_gets_its_config() {
         let r = ok(r#"
-[[android.service]]
+[[declare.service]]
 name = ".Watch"
 accessibility = { accessibilityEventTypes = ["typeViewClicked", "typeWindowStateChanged"], accessibilityFeedbackType = "feedbackGeneric", canRetrieveWindowContent = true, notificationTimeout = 100 }
 "#);
@@ -2391,13 +2395,13 @@ accessibility = { accessibilityEventTypes = ["typeViewClicked", "typeWindowState
     #[test]
     fn network_security_and_free_form_resources() {
         let r = ok(r#"
-[android.application]
+[declare.application]
 label = "x"
-[android.network_security]
+[declare.network_security]
 cleartext = false
 trust_user_certs = true
 domains = [{ name = "10.0.0.5", include_subdomains = false }, { name = "dev.example.com", cleartext = false }]
-[[android.resource_xml]]
+[[declare.resource_xml]]
 path = "xml/backup_rules"
 tag = "full-backup-content"
 children = [{ tag = "exclude", attrs = { domain = "sharedpref", path = "device.xml" } }]
@@ -2436,14 +2440,14 @@ children = [{ tag = "exclude", attrs = { domain = "sharedpref", path = "device.x
     #[test]
     fn any_other_element_goes_in_as_a_tree() {
         let r = ok(r#"
-[[android.element]]
+[[declare.element]]
 tag = "supports-screens"
 attrs = { "android:largeScreens" = "true" }
-[[android.element]]
+[[declare.element]]
 parent = "application"
 tag = "profileable"
 attrs = { "android:shell" = "true" }
-[[android.element]]
+[[declare.element]]
 tag = "uses-sdk-library"
 attrs = { "android:name" = "x" }
 children = [{ tag = "child" }]
@@ -2455,18 +2459,18 @@ children = [{ tag = "child" }]
             r#"<uses-sdk-library android:name="x"> <child /> </uses-sdk-library>"#,
         );
         assert!(
-            err("[[android.element]]\ntag = \"a\"\nparent = \"activity\"\n").contains("parent")
+            err("[[declare.element]]\ntag = \"a\"\nparent = \"activity\"\n").contains("parent")
         );
-        assert!(err("[[android.element]]\nattrs = {}\n").contains("tag"));
+        assert!(err("[[declare.element]]\nattrs = {}\n").contains("tag"));
     }
 
     #[test]
     fn queries_list_packages_providers_and_intents() {
         let r = ok(r#"
-[android.queries]
+[declare.queries]
 packages = ["com.a", "com.b"]
 providers = ["com.a.provider"]
-[[android.queries.intent]]
+[[declare.queries.intent]]
 action = "android.intent.action.SEND"
 data = { mimeType = "text/plain" }
 "#);
@@ -2477,7 +2481,7 @@ data = { mimeType = "text/plain" }
             r#"<intent> <action android:name="android.intent.action.SEND" /> <data android:mimeType="text/plain" /> </intent>"#,
         );
         assert!(
-            err("[[android.queries.intent]]\naction = \"a\"\nlabel = \"x\"\n")
+            err("[[declare.queries.intent]]\naction = \"a\"\nlabel = \"x\"\n")
                 .contains("not allowed")
         );
     }
@@ -2485,7 +2489,7 @@ data = { mimeType = "text/plain" }
     #[test]
     fn the_work_profile_preset_declares_a_profile_owner() {
         let r = ok(r#"
-[android.work_profile]
+[declare.work_profile]
 admin = ".space.Admin"
 compliance = ".space.Comply"
 policies = ["force-lock"]
@@ -2513,15 +2517,15 @@ admin_resource = "device_admin"
         assert!(r.resources.contains_key("xml/device_admin.xml"));
         warned(&r, "device admin");
         let r =
-            ok("[android.work_profile]\nadmin = \".A\"\ncompliance = \".C\"\nquiet_mode = false\n");
+            ok("[declare.work_profile]\nadmin = \".A\"\ncompliance = \".C\"\nquiet_mode = false\n");
         lacks(&r, "MODIFY_QUIET_MODE");
-        assert!(err("[android.work_profile]\nadmin = \".A\"\n").contains("compliance"));
+        assert!(err("[declare.work_profile]\nadmin = \".A\"\n").contains("compliance"));
     }
 
     #[test]
     fn the_boot_start_preset_declares_a_boot_receiver_and_its_permission() {
         let r = ok(r#"
-[android.boot_start]
+[declare.boot_start]
 receiver = ".Boot"
 locked = true
 package_replaced = true
@@ -2544,7 +2548,7 @@ lib = "ui"
             &r,
             r#"<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />"#,
         );
-        let r = ok("[android.boot_start]\nreceiver = \".B\"\n");
+        let r = ok("[declare.boot_start]\nreceiver = \".B\"\n");
         lacks(&r, "LOCKED_BOOT_COMPLETED");
         lacks(&r, "directBootAware");
     }
@@ -2552,7 +2556,7 @@ lib = "ui"
     #[test]
     fn the_process_pool_preset_declares_services_in_their_own_processes() {
         let r = ok(r#"
-[[android.process_pool]]
+[[declare.process_pool]]
 prefix = ".worker.W"
 count = 2
 foregroundServiceType = "dataSync"
@@ -2563,26 +2567,26 @@ foregroundServiceType = "dataSync"
         has(&r, r#"android:exported="false""#);
         has(&r, "FOREGROUND_SERVICE_DATA_SYNC");
         let r = ok(
-            "[[android.process_pool]]\nprefix = \".R\"\ncount = 1\nkind = \"receiver\"\nprocess_prefix = \":rx\"\n",
+            "[[declare.process_pool]]\nprefix = \".R\"\ncount = 1\nkind = \"receiver\"\nprocess_prefix = \":rx\"\n",
         );
         has(&r, r#"<receiver android:name=".R0""#);
         has(&r, r#"android:process=":rx0""#);
-        assert!(err("[[android.process_pool]]\nprefix = \".R\"\n").contains("count"));
+        assert!(err("[[declare.process_pool]]\nprefix = \".R\"\n").contains("count"));
         assert!(
-            err("[[android.process_pool]]\nprefix = \".R\"\ncount = 1\nkind = \"x\"\n")
+            err("[[declare.process_pool]]\nprefix = \".R\"\ncount = 1\nkind = \"x\"\n")
                 .contains("kind")
         );
     }
 
     #[test]
     fn play_sensitive_items_are_warned_about() {
-        let r = ok("[android]
+        let r = ok("[declare]
 permissions = [\"QUERY_ALL_PACKAGES\", \"READ_SMS\", \"INTERNET\", \"SYSTEM_ALERT_WINDOW\"]\n");
         warned(&r, "QUERY_ALL_PACKAGES");
         warned(&r, "READ_SMS");
         warned(&r, "SYSTEM_ALERT_WINDOW");
         assert!(!r.warnings.iter().any(|w| w.contains("INTERNET")));
-        assert!(ok("[android]
+        assert!(ok("[declare]
 permissions = [\"INTERNET\"]\n")
         .warnings
         .is_empty());
@@ -2591,7 +2595,7 @@ permissions = [\"INTERNET\"]\n")
     #[test]
     fn a_misspelled_attribute_warns_and_still_passes_through() {
         let r = ok(
-            "[[android.service]]\nname = \".S\"\nexporte = true\ndirectbootaware = true\nmadeUp = 1\n",
+            "[[declare.service]]\nname = \".S\"\nexporte = true\ndirectbootaware = true\nmadeUp = 1\n",
         );
         warned(&r, "not a known attribute of <service>");
         assert!(r
@@ -2608,7 +2612,7 @@ permissions = [\"INTERNET\"]\n")
             ..cx()
         };
         let r = render_with(
-            "[android]
+            "[declare]
 permissions = [\"CAMERA\"]\n",
             &native,
         )
@@ -2621,7 +2625,7 @@ permissions = [\"CAMERA\"]\n",
         has(&r, r#"android:enableOnBackInvokedCallback="true""#);
         has(&r, r#"android:theme="@style/AppTheme""#);
         let r = render_with(
-            "[[android.activity]]\nname = \"android.app.NativeActivity\"\nnative_lib = \"mine\"\nlauncher = true\n",
+            "[[declare.activity]]\nname = \"android.app.NativeActivity\"\nnative_lib = \"mine\"\nlauncher = true\n",
             &native,
         )
         .unwrap();
@@ -2631,7 +2635,7 @@ permissions = [\"CAMERA\"]\n",
 
     #[test]
     fn values_are_escaped_and_the_output_is_stable() {
-        let src = "[[android.service]]\nname = \".S\"\nlabel = \"a & \\\"b\\\" <c>\"\n";
+        let src = "[[declare.service]]\nname = \".S\"\nlabel = \"a & \\\"b\\\" <c>\"\n";
         let r = ok(src);
         has(&r, r#"android:label="a &amp; &quot;b&quot; &lt;c&gt;""#);
         assert_eq!(r.manifest, ok(src).manifest);

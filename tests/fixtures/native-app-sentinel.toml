@@ -1,4 +1,4 @@
-# AlarmFree — mobile-sentinel build configuration
+# Native app — mobile-sentinel build configuration
 # Used by: build_sentinel (run via ./build.sh, with optional "workspace" flag for local dev)
 #
 # build_sentinel writes the whole Gradle project into target/sentinel-android/ on every run: this
@@ -7,12 +7,12 @@
 
 [android]
 generate = true
-application_id = "com.fidderr.alarmfree.slint"
-label = "AlarmFree Slint"
+application_id = "com.example.nativeapp"
+label = "Native App"
 version_code = 1
 version_name = "0.4.1"
 native_lib = "main"
-# build.sh stages libalarmfree.so here as <abi>/libmain.so (the SDK's Kotlin loads it by that name).
+# build.sh stages libnativeapp.so here as <abi>/libmain.so (the SDK's Kotlin loads it by that name).
 jni_libs = "build/jniLibs"
 # A copy for comparing, never for Play: a release build is signed with the debug key, so it installs.
 release_debug_signing = true
@@ -41,7 +41,7 @@ direct_boot = true
 # manifest entry, no Kotlin module, and no Gradle dependency.
 #
 # Deliberately NOT enabled: "accessibility" and "device_admin" — both are
-# policy-sensitive on Google Play and AlarmFree does not need them.
+# policy-sensitive on Google Play and Native app does not need them.
 
 # Default screen orientation for the main activity (injected at build time by
 # mobile-sentinel). From 600dp wide on, Android 16 goes its own way, and the layout is

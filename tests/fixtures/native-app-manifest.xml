@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="AlarmFree Slint"
+        android:label="Native App"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="true"
         android:supportsRtl="true"
