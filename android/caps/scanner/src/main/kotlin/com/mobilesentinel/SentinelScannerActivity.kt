@@ -9,6 +9,8 @@ import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.hardware.Camera
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -55,22 +57,24 @@ import kotlin.math.min
  */
 class SentinelScannerActivity : Activity() {
 
-    private companion object {
-        const val TAG = "MobileSentinel.ScanAct"
-        const val PERMISSION_REQUEST_CAMERA = 100
-        const val RESULT_FILE = "sentinel_scan_result.txt"
+    companion object {
+        /** Milliseconds after which the camera screen closes itself; 0 or absent: never. */
+        const val EXTRA_CLOSE_AFTER_MS = "com.mobilesentinel.scanner.close_after_ms"
+        private const val TAG = "MobileSentinel.ScanAct"
+        private const val PERMISSION_REQUEST_CAMERA = 100
+        private const val RESULT_FILE = "sentinel_scan_result.txt"
 
         // Opaque backdrop so the translucent window reads as a solid scanner.
-        const val COLOR_BACKDROP = 0xFF0E0E14.toInt()
-        const val COLOR_CONTROL_BG = 0x66000000 // semi-transparent black chip
-        const val COLOR_CONTROL_FG = Color.WHITE
-        const val COLOR_TORCH_ON = 0xFFFFC850.toInt() // warm amber when lit
+        private const val COLOR_BACKDROP = 0xFF0E0E14.toInt()
+        private const val COLOR_CONTROL_BG = 0x66000000 // semi-transparent black chip
+        private const val COLOR_CONTROL_FG = Color.WHITE
+        private const val COLOR_TORCH_ON = 0xFFFFC850.toInt() // warm amber when lit
 
         // Tap-to-focus: half-size of the focus/metering rect in the Camera1
         // -1000..1000 coordinate space, and the touch-slop (px) under which a
         // press counts as a tap rather than a drag.
-        const val FOCUS_AREA_HALF = 150
-        const val TAP_SLOP_PX = 24f
+        private const val FOCUS_AREA_HALF = 150
+        private const val TAP_SLOP_PX = 24f
     }
 
     private var rootLayout: FrameLayout? = null
@@ -79,12 +83,27 @@ class SentinelScannerActivity : Activity() {
     private var scanResult: String? = null
     private var torchOn = false
 
+    private val closer = Handler(Looper.getMainLooper())
+    private val closeOnTime = Runnable {
+        if (!isFinishing) {
+            Log.i(TAG, "Time limit reached, closing the scanner")
+            finish()
+        }
+    }
+
     // Tap tracking for tap-to-focus (distinguish tap from drag).
     private var downX = 0f
     private var downY = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // A caller's time limit: the screen closes itself, as Back would, and the caller gets
+        // nothing scanned.
+        val closeAfterMs = intent?.getLongExtra(EXTRA_CLOSE_AFTER_MS, 0L) ?: 0L
+        if (closeAfterMs > 0) {
+            closer.postDelayed(closeOnTime, closeAfterMs)
+        }
 
         // Show over the lock screen + turn the screen on, matching the host's
         // lock-screen flags so scanning works when the phone is locked. It does not ask for
@@ -398,6 +417,7 @@ class SentinelScannerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        closer.removeCallbacks(closeOnTime)
         super.onDestroy()
         barcodeView?.pause()
         // Safety net: if the activity is destroyed without a scan, write an

@@ -24,6 +24,9 @@ change.
 - **`display::font_scale()`** (the phone's font size setting as a factor) and
   **`display::animations_off()`** (the phone's animation scale is off), for UIs that size text
   themselves or follow the system's reduced-motion option.
+- **`scanner::scan_for(limit)`**: as `scan()`, and the camera screen closes itself after `limit`, as
+  Back would (nothing scanned). The scanner keeps the time, so it holds while the app's own screen is
+  covered by the camera. `scan()` is unchanged.
 - **`build_sentinel --project <dir>`**, and `project = "<dir>"` in `sentinel.toml` (the flag wins).
   An app that does not generate its Android project with Dioxus names the Gradle project to
   build, relative to the current directory. Without either, the project under `target/dx` is

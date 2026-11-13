@@ -25,7 +25,14 @@ object SentinelScannerHelper {
      * MUST be called from a background thread.
      */
     @JvmStatic
-    fun scanFromAppContext(timeoutSeconds: Long = 1800): String {
+    fun scanFromAppContext(timeoutSeconds: Long = 1800): String = scanFromAppContext(timeoutSeconds, 0)
+
+    /**
+     * As [scanFromAppContext], and the camera screen closes itself after [closeAfterMs] (0: it stays
+     * until a code or Back). The limit is kept by the scanner itself, not by the caller's screen.
+     */
+    @JvmStatic
+    fun scanFromAppContext(timeoutSeconds: Long, closeAfterMs: Long): String {
         val ctx = SentinelPrimitives.getAppContext()
             ?: run {
                 Log.e(TAG, "scanFromAppContext: no appContext")
@@ -44,12 +51,14 @@ object SentinelScannerHelper {
         try {
             if (activity != null) {
                 val intent = Intent(activity, SentinelScannerActivity::class.java)
+                    .putExtra(SentinelScannerActivity.EXTRA_CLOSE_AFTER_MS, closeAfterMs)
                 activity.runOnUiThread {
                     activity.startActivity(intent)
                 }
                 Log.i(TAG, "Scanner activity launched from current activity (same task)")
             } else {
                 val intent = Intent(ctx, SentinelScannerActivity::class.java)
+                    .putExtra(SentinelScannerActivity.EXTRA_CLOSE_AFTER_MS, closeAfterMs)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(intent)
                 Log.i(TAG, "Scanner activity launched from appContext (no activity available)")
