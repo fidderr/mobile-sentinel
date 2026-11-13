@@ -15,6 +15,7 @@
 //! None of this is reachable at runtime by a consumer app; it runs on the
 //! build host via the `build_sentinel` binary.
 
+pub mod declare;
 pub mod embedded;
 pub mod helper;
 pub mod host;

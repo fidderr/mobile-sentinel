@@ -25,12 +25,16 @@ fn flat_android_keys(toml: &str) -> HashMap<String, String> {
 #[test]
 fn alarmfree_manifest_is_unchanged() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let keys = flat_android_keys(&std::fs::read_to_string(dir.join("alarmfree-sentinel.toml")).unwrap());
+    let keys =
+        flat_android_keys(&std::fs::read_to_string(dir.join("alarmfree-sentinel.toml")).unwrap());
     let cfg = HostConfig::from_toml(&keys, Path::new(".")).unwrap();
     let manifest = render_native_manifest(&cfg, cfg.native_lib.as_deref().unwrap());
     let snapshot = dir.join("alarmfree-native-manifest.xml");
     if std::env::var("UPDATE_SNAPSHOT").is_ok() {
         std::fs::write(&snapshot, &manifest).unwrap();
     }
-    assert_eq!(manifest, std::fs::read_to_string(snapshot).unwrap());
+    let expected = std::fs::read_to_string(snapshot)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert_eq!(manifest, expected);
 }

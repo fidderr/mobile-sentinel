@@ -1,0 +1,84 @@
+# Virtual Main as declarations: the equivalent of its AndroidManifest.template.xml,
+# res/xml/device_admin.xml and tools/gen_guests.py.
+[android]
+generate = true
+application_id = "dev.virtualmain"
+label = "Virtual Main"
+rust_lib = "vmain"
+permissions = ["INTERNET", "POST_NOTIFICATIONS", "QUERY_ALL_PACKAGES"]
+
+[android.application]
+allowBackup = false
+
+[[android.activity]]
+name = ".MainActivity"
+launcher = true
+launchMode = "singleTask"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+windowSoftInputMode = "adjustResize"
+configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "smallestScreenSize", "screenLayout", "uiMode", "density", "fontScale"]
+native_lib = "vmui"
+
+# Test door for the scripted checks.
+[[android.activity]]
+name = ".DevActivity"
+exported = true
+launchMode = "singleTask"
+theme = "@android:style/Theme.NoDisplay"
+
+[[android.service]]
+name = ".HostService"
+exported = false
+foregroundServiceType = "specialUse"
+special_use = "Runs the processes of a virtual phone"
+
+# Private space: its own process, one Slint screen per process.
+[[android.activity]]
+name = ".space.SpaceActivity"
+exported = true
+launchMode = "singleTop"
+process = ":space"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+windowSoftInputMode = "adjustResize"
+configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "smallestScreenSize", "screenLayout", "uiMode", "density", "fontScale"]
+native_lib = "vmui"
+lib = "vmui"
+
+[[android.activity]]
+name = ".space.SpaceHome"
+exported = true
+label = "Space"
+enabled = false
+launchMode = "singleTop"
+launcher = true
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+windowSoftInputMode = "adjustResize"
+configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "smallestScreenSize", "screenLayout", "uiMode", "density", "fontScale"]
+native_lib = "vmui"
+lib = "vmui"
+
+[android.work_profile]
+admin = ".space.Admin"
+compliance = ".space.Comply"
+policies = ["force-lock", "reset-password", "limit-password", "watch-login", "wipe-data"]
+lib = "vmui"
+admin_resource = "device_admin"
+
+[[android.service]]
+name = ".space.SpaceService"
+exported = false
+directBootAware = true
+foregroundServiceType = "specialUse"
+special_use = "loopback kill listener for the private space"
+lib = "vmui"
+
+[android.boot_start]
+receiver = ".space.Events"
+locked = true
+package_replaced = true
+actions = ["android.intent.action.USER_UNLOCKED"]
+lib = "vmui"
+
+[[android.process_pool]]
+prefix = ".G"
+count = 128

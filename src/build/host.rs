@@ -65,11 +65,26 @@ pub struct HostConfig {
     pub ndk_version: Option<String>,
     /// The library of the app's Rust components (see `shims`), unless one names its own.
     pub rust_lib: Option<String>,
+    /// The manifest declarations of `sentinel.toml` (see `declare`), when it has any.
+    pub declared: Option<super::declare::Declarations>,
 }
 
 impl HostConfig {
     /// From the `[android]` keys of `sentinel.toml`; relative paths are taken from `app_root`.
     pub fn from_toml(keys: &HashMap<String, String>, app_root: &Path) -> Result<Self, String> {
+        Self::from_toml_text(keys, app_root, None)
+    }
+
+    /// As `from_toml`, with the text of `sentinel.toml` for the manifest declarations.
+    pub fn from_toml_text(
+        keys: &HashMap<String, String>,
+        app_root: &Path,
+        text: Option<&str>,
+    ) -> Result<Self, String> {
+        let declared = match text {
+            Some(text) => super::declare::parse(text)?,
+            None => None,
+        };
         let application_id = keys
             .get("application_id")
             .cloned()
@@ -96,8 +111,11 @@ impl HostConfig {
         };
         let native_lib = keys.get("native_lib").cloned();
         let manifest = keys.get("manifest").map(|p| path(p));
-        if manifest.is_none() && native_lib.is_none() {
-            return Err("generate = true needs manifest (the app's own) or native_lib (a NativeActivity app)".into());
+        if manifest.is_none() && native_lib.is_none() && declared.is_none() {
+            return Err("generate = true needs declarations ([[android.activity]] ...), native_lib (a NativeActivity app) or manifest (the app's own)".into());
+        }
+        if manifest.is_some() && declared.is_some() {
+            return Err("manifest = ... and manifest declarations ([[android.activity]], permissions, ...) cannot be mixed: declare everything, or keep the file".into());
         }
         let label = keys.get("label").cloned().unwrap_or_else(|| {
             application_id
@@ -128,6 +146,7 @@ impl HostConfig {
             release_debug_signing: flag("release_debug_signing"),
             ndk_version: keys.get("ndk_version").cloned().or_else(ndk_from_env),
             rust_lib: keys.get("rust_lib").cloned(),
+            declared,
             application_id,
         })
     }
@@ -157,12 +176,30 @@ pub fn generate(cfg: &HostConfig, wrapper_dir: &Path, out: &Path) -> Result<(), 
     write("gradle.properties", GRADLE_PROPERTIES)?;
     write("app/build.gradle.kts", &render_app_build(cfg))?;
     write("app/proguard-rules.pro", &render_proguard(cfg))?;
-    let manifest = match (&cfg.manifest, &cfg.native_lib) {
-        (Some(file), _) => {
+    let manifest = match (&cfg.manifest, &cfg.declared, &cfg.native_lib) {
+        (Some(file), _, _) => {
             fs::read_to_string(file).map_err(|e| format!("manifest {}: {e}", file.display()))?
         }
-        (None, Some(lib)) => render_native_manifest(cfg, lib),
-        (None, None) => return Err("no manifest and no native_lib".into()),
+        (None, Some(declared), _) => {
+            let rendered = declared.render(&super::declare::Context {
+                label: cfg.label.clone(),
+                icon: cfg.icon,
+                native_lib: cfg.native_lib.clone(),
+                min_sdk: cfg.min_sdk,
+            })?;
+            for note in &rendered.notes {
+                eprintln!("  manifest: {note}");
+            }
+            for warning in &rendered.warnings {
+                eprintln!("  WARNING: {warning}");
+            }
+            for (path, text) in &rendered.resources {
+                write(&format!("app/src/main/res/{path}"), text)?;
+            }
+            rendered.manifest
+        }
+        (None, None, Some(lib)) => render_native_manifest(cfg, lib),
+        (None, None, None) => return Err("no manifest, declarations or native_lib".into()),
     };
     write("app/src/main/AndroidManifest.xml", &manifest)?;
     let components = super::shims::components(&manifest, &cfg.application_id);
@@ -329,7 +366,7 @@ pub fn render_native_manifest(cfg: &HostConfig, lib: &str) -> String {
 
 /// A native UI redraws itself on every configuration change, so the activity is never
 /// recreated for one.
-const CONFIG_CHANGES: &str = "mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|density|screenSize|smallestScreenSize|layoutDirection|colorMode|fontWeightAdjustment";
+pub(crate) const CONFIG_CHANGES: &str = "mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|density|screenSize|smallestScreenSize|layoutDirection|colorMode|fontWeightAdjustment";
 
 const STYLES: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    \
     <style name=\"AppTheme\" parent=\"@android:style/Theme.DeviceDefault.NoActionBar\">\n    \
@@ -642,6 +679,121 @@ mod tests {
         assert!(generate(&cfg, &wrapper, &out)
             .unwrap_err()
             .contains("rust_lib"));
+    }
+
+    const DECLARED: &str = "[android]
+[[android.service]]
+name = \".Sync\"
+exported = false
+foregroundServiceType = \"dataSync\"
+lib = \"main\"
+[[android.receiver]]
+name = \".Admin\"
+admin_policies = [\"force-lock\"]
+[android.boot_start]
+receiver = \".Boot\"
+";
+
+    fn declared_cfg() -> HostConfig {
+        HostConfig::from_toml_text(
+            &keys(&[("application_id", "com.example.app")]),
+            Path::new("/work/app"),
+            Some(DECLARED),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn declarations_stand_in_for_the_manifest() {
+        let cfg = declared_cfg();
+        assert!(cfg.declared.is_some() && cfg.manifest.is_none());
+        let both = HostConfig::from_toml_text(
+            &keys(&[
+                ("application_id", "com.example.app"),
+                ("manifest", "app/AndroidManifest.xml"),
+            ]),
+            Path::new("/work/app"),
+            Some(DECLARED),
+        );
+        assert!(both.unwrap_err().contains("cannot be mixed"));
+        let none = HostConfig::from_toml_text(
+            &keys(&[("application_id", "com.example.app")]),
+            Path::new("/work/app"),
+            Some(
+                "[android]
+generate = true
+",
+            ),
+        );
+        assert!(none.unwrap_err().contains("declarations"));
+        let broken = HostConfig::from_toml_text(
+            &keys(&[("application_id", "com.example.app")]),
+            Path::new("/work/app"),
+            Some(
+                "[[android.service]]
+name = \".S\"
+launchMode = \"x\"
+",
+            ),
+        );
+        assert!(
+            broken.unwrap().declared.is_some(),
+            "errors surface at render"
+        );
+    }
+
+    #[test]
+    fn generate_writes_declared_manifest_resources_and_component_classes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let wrapper = dir.path().join("wrapper");
+        fs::create_dir_all(wrapper.join("gradle/wrapper")).unwrap();
+        for f in [
+            "gradlew",
+            "gradlew.bat",
+            "gradle/wrapper/gradle-wrapper.jar",
+            "gradle/wrapper/gradle-wrapper.properties",
+        ] {
+            fs::write(wrapper.join(f), f).unwrap();
+        }
+        let mut cfg = declared_cfg();
+        cfg.rust_lib = Some("main".into());
+        let out = dir.path().join("host");
+        generate(&cfg, &wrapper, &out).unwrap();
+        let main = out.join("app/src/main");
+        let manifest = fs::read_to_string(main.join("AndroidManifest.xml")).unwrap();
+        assert!(manifest.contains("FOREGROUND_SERVICE_DATA_SYNC"));
+        assert!(manifest.contains("RECEIVE_BOOT_COMPLETED"));
+        assert!(manifest.contains("@xml/device_admin_admin"));
+        assert!(
+            fs::read_to_string(main.join("res/xml/device_admin_admin.xml"))
+                .unwrap()
+                .contains("<force-lock />")
+        );
+        let java = main.join("java/com/example/app");
+        assert!(fs::read_to_string(java.join("Sync.java"))
+            .unwrap()
+            .contains("RustService"));
+        assert!(fs::read_to_string(java.join("Admin.java"))
+            .unwrap()
+            .contains("RustAdminReceiver"));
+        assert!(fs::read_to_string(java.join("Boot.java"))
+            .unwrap()
+            .contains("RustReceiver"));
+        // Generated again: the resource of a removed declaration does not stay.
+        cfg.declared = HostConfig::from_toml_text(
+            &keys(&[("application_id", "com.example.app")]),
+            Path::new("/"),
+            Some(
+                "[[android.service]]
+name = \".Only\"
+lib = \"main\"
+",
+            ),
+        )
+        .unwrap()
+        .declared;
+        generate(&cfg, &wrapper, &out).unwrap();
+        assert!(!main.join("res/xml/device_admin_admin.xml").exists());
     }
 
     #[test]

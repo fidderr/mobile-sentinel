@@ -754,7 +754,8 @@ fn parse_string_list(s: &str) -> Vec<String> {
 fn generate_host(toml: &std::collections::HashMap<String, String>) -> (PathBuf, Option<String>) {
     use mobile_sentinel::build::host;
     let root = std::env::current_dir().expect("current directory");
-    let mut cfg = host::HostConfig::from_toml(toml, &root).unwrap_or_else(|e| {
+    let text = CONFIG_TEXT.get().map(String::as_str);
+    let mut cfg = host::HostConfig::from_toml_text(toml, &root, text).unwrap_or_else(|e| {
         eprintln!("  {e}");
         std::process::exit(1);
     });
@@ -783,6 +784,10 @@ fn apply_bundle_rules(cfg: &mut mobile_sentinel::build::host::HostConfig, aab: b
         cfg.legacy_jni_packaging = false;
     }
 }
+
+/// The text of the sentinel.toml in use, for the manifest declarations (tables the flat key
+/// reader skips).
+static CONFIG_TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn read_sentinel_toml() -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
@@ -833,6 +838,7 @@ fn read_sentinel_toml() -> std::collections::HashMap<String, String> {
             }
             if !map.is_empty() {
                 eprintln!("  Using config: {}", path.display());
+                let _ = CONFIG_TEXT.set(content);
                 return map;
             }
         }
