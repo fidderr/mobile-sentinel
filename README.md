@@ -392,8 +392,8 @@ list; for that one `build_sentinel` still scans `target/` as before.
 
 With `generate = true`, an app declares everything Android needs in `sentinel.toml` and
 `build_sentinel` writes the `AndroidManifest.xml` and the `res/xml/` files the declarations point to.
-The tables are `[declare.*]` (not `[android.*]`: the flat keys of `[android]`, like `activity` and
-`manifest`, cannot share a name with a table). A complete example:
+The tables are `[android.declare.*]`, a subtable of `[android]` (a table named `activity` or `manifest`
+directly in `[android]` would clash with those flat keys). A complete example:
 [`examples/declarations/sentinel.toml`](examples/declarations/sentinel.toml).
 
 ```toml
@@ -402,52 +402,52 @@ generate = true
 application_id = "com.example.app"
 rust_lib = "main"                       # the components below are handled by libmain.so
 
-[declare]
+[android.declare]
 permissions = ["INTERNET", "POST_NOTIFICATIONS"]   # bare names get android.permission.
 
-[[declare.permission]]                  # <uses-permission> with attributes
+[[android.declare.permission]]                  # <uses-permission> with attributes
 name = "android.permission.WRITE_EXTERNAL_STORAGE"
 maxSdkVersion = 28
 
-[declare.application]                   # any attribute of <application>
+[android.declare.application]                   # any attribute of <application>
 allowBackup = false
 
-[[declare.activity]]                    # also service, receiver, provider, activity_alias
+[[android.declare.activity]]                    # also service, receiver, provider, activity_alias
 name = ".MainActivity"
 launcher = true                         # MAIN + LAUNCHER filter, exported
 launchMode = "singleTask"               # every other key is an android: attribute as written
 configChanges = ["orientation", "screenSize"]   # a list is joined with |
 native_lib = "main"                     # android.app.lib_name meta-data
 
-[[declare.service]]
+[[android.declare.service]]
 name = ".Sync"
 exported = false
 foregroundServiceType = ["dataSync", "specialUse"]
 special_use = "Keeps the local relay running"   # PROPERTY_SPECIAL_USE_FGS_SUBTYPE
 lib = "main"                            # mobilesentinel.lib: the code of this service is Rust
 
-[[declare.service]]                     # count: one service per process, no generator script
+[[android.declare.service]]                     # count: one service per process, no generator script
 name = ".G{i}"
 process = ":g{i}"
 exported = false
 count = 128
 
-[[declare.receiver]]
+[[android.declare.receiver]]
 name = ".Admin"
 admin_policies = ["force-lock", "wipe-data"]   # or "all"; writes res/xml, sets BIND_DEVICE_ADMIN
-[[declare.receiver.intent_filter]]
+[[android.declare.receiver.intent_filter]]
 actions = ["android.app.action.PROFILE_PROVISIONING_COMPLETE"]
 
-[declare.boot_start]                    # preset: BOOT_COMPLETED receiver (+ RECEIVE_BOOT_COMPLETED)
+[android.declare.boot_start]                    # preset: BOOT_COMPLETED receiver (+ RECEIVE_BOOT_COMPLETED)
 receiver = ".Boot"
 ```
 
-What can be declared (all keys under `[declare]`):
+What can be declared (all keys under `[android.declare]`):
 
 - `permissions`, `permission` (`name`, `maxSdkVersion`, `usesPermissionFlags`, ...), `feature` (`name` or
   `glEsVersion`, `required`), `define_permission`, `permission_group`, `permission_tree`.
 - `application` (every `<application>` attribute, plus `meta_data` and `property`), `uses_library`,
-  `uses_native_library`, `queries` (`packages`, `providers`, `[[declare.queries.intent]]`).
+  `uses_native_library`, `queries` (`packages`, `providers`, `[[android.declare.queries.intent]]`).
 - `activity`, `activity_alias`, `service`, `receiver`, `provider`: any attribute (`exported`, `process`,
   `permission`, `directBootAware`, `foregroundServiceType`, `launchMode`, `theme`, `configChanges`,
   `taskAffinity`, `isolatedProcess`, `enabled`, `authorities`, ...), and `intent_filter` (`actions`,
@@ -459,13 +459,13 @@ What can be declared (all keys under `[declare]`):
 - Generated resources: `admin_policies` (any of `force-lock`, `reset-password`, `limit-password`,
   `watch-login`, `wipe-data`, `expire-password`, `encrypted-storage`, `disable-camera`,
   `disable-keyguard-features`, or `"all"`), `accessibility = { ... }` on a service (the accessibility
-  config), `file_paths = [{ kind, name, path }]` on a provider, `[declare.network_security]`, and any
-  other `res/xml` file as a tree with `[[declare.resource_xml]]` (`path`, `tag`, `attrs`, `children`).
-  `[[declare.element]]` does the same for any other manifest element (`parent = "application"` or the
+  config), `file_paths = [{ kind, name, path }]` on a provider, `[android.declare.network_security]`, and any
+  other `res/xml` file as a tree with `[[android.declare.resource_xml]]` (`path`, `tag`, `attrs`, `children`).
+  `[[android.declare.element]]` does the same for any other manifest element (`parent = "application"` or the
   manifest).
-- Presets built on the same tables: `[declare.work_profile]` (`admin`, `compliance`, `policies`, `lib`;
-  a profile owner, with `MODIFY_QUIET_MODE`), `[declare.boot_start]` (`receiver`, `locked`,
-  `package_replaced`, `actions`), `[[declare.process_pool]]` (`prefix`, `count`, `kind`,
+- Presets built on the same tables: `[android.declare.work_profile]` (`admin`, `compliance`, `policies`, `lib`;
+  a profile owner, with `MODIFY_QUIET_MODE`), `[android.declare.boot_start]` (`receiver`, `locked`,
+  `package_replaced`, `actions`), `[[android.declare.process_pool]]` (`prefix`, `count`, `kind`,
   `process_prefix`, other keys as attributes).
 
 The build helps and checks: a foreground service type adds `FOREGROUND_SERVICE` and
@@ -480,7 +480,7 @@ a bad process name, `launchMode` or `screenOrientation`, two components of one n
 
 With `native_lib` the standard NativeActivity launcher stays unless an activity of that name is
 declared. `manifest = "..."` (an own manifest file) still works as before and is the last resort; it
-cannot be combined with `[declare]`. The Rust code of a component comes from `lib` / `rust_lib` as
+cannot be combined with `[android.declare]`. The Rust code of a component comes from `lib` / `rust_lib` as
 before (activities, services and receivers; a `provider` needs a class of its own).
 
 ### Faster and smaller builds

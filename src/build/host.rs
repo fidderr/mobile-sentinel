@@ -112,10 +112,10 @@ impl HostConfig {
         let native_lib = keys.get("native_lib").cloned();
         let manifest = keys.get("manifest").map(|p| path(p));
         if manifest.is_none() && native_lib.is_none() && declared.is_none() {
-            return Err("generate = true needs declarations ([[declare.activity]] ...), native_lib (a NativeActivity app) or manifest (the app's own)".into());
+            return Err("generate = true needs declarations ([[android.declare.activity]] ...), native_lib (a NativeActivity app) or manifest (the app's own)".into());
         }
         if manifest.is_some() && declared.is_some() {
-            return Err("manifest = ... and manifest declarations ([[declare.activity]], permissions, ...) cannot be mixed: declare everything, or keep the file".into());
+            return Err("manifest = ... and manifest declarations ([[android.declare.activity]], permissions, ...) cannot be mixed: declare everything, or keep the file".into());
         }
         let label = keys.get("label").cloned().unwrap_or_else(|| {
             application_id
@@ -681,16 +681,16 @@ mod tests {
             .contains("rust_lib"));
     }
 
-    const DECLARED: &str = "[declare]
-[[declare.service]]
+    const DECLARED: &str = "[android.declare]
+[[android.declare.service]]
 name = \".Sync\"
 exported = false
 foregroundServiceType = \"dataSync\"
 lib = \"main\"
-[[declare.receiver]]
+[[android.declare.receiver]]
 name = \".Admin\"
 admin_policies = [\"force-lock\"]
-[declare.boot_start]
+[android.declare.boot_start]
 receiver = \".Boot\"
 ";
 
@@ -730,7 +730,7 @@ generate = true
             &keys(&[("application_id", "com.example.app")]),
             Path::new("/work/app"),
             Some(
-                "[[declare.service]]
+                "[[android.declare.service]]
 name = \".S\"
 launchMode = \"x\"
 ",
@@ -784,7 +784,7 @@ launchMode = \"x\"
             &keys(&[("application_id", "com.example.app")]),
             Path::new("/"),
             Some(
-                "[[declare.service]]
+                "[[android.declare.service]]
 name = \".Only\"
 lib = \"main\"
 ",

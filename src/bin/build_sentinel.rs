@@ -37,7 +37,7 @@
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
 //!
-//! With `generate = true` the manifest can be declared in the same file (`[declare.*]` tables:
+//! With `generate = true` the manifest can be declared in the same file (`[android.declare.*]` tables:
 //! components, permissions, features, queries, resources, presets); see
 //! `mobile_sentinel::build::declare`.
 //!

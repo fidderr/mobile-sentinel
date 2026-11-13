@@ -7,29 +7,29 @@ label = "Declarations"
 activity = "com.example.declare.MainActivity"
 rust_lib = "main"
 
-[declare]
+[android.declare]
 permissions = ["INTERNET", "POST_NOTIFICATIONS"]
 
-[[declare.permission]]
+[[android.declare.permission]]
 name = "android.permission.WRITE_EXTERNAL_STORAGE"
 maxSdkVersion = 28
 
-[[declare.feature]]
+[[android.declare.feature]]
 name = "android.hardware.camera"
 required = false
 
-[declare.application]
+[android.declare.application]
 allowBackup = false
 largeHeap = true
 
-[[declare.activity]]
+[[android.declare.activity]]
 name = ".MainActivity"
 launcher = true
 launchMode = "singleTask"
 configChanges = ["orientation", "screenSize", "keyboardHidden"]
 native_lib = "main"
 
-[[declare.service]]
+[[android.declare.service]]
 name = ".Sync"
 exported = false
 foregroundServiceType = ["dataSync", "specialUse"]
@@ -37,31 +37,31 @@ special_use = "Keeps the local relay running"
 lib = "main"
 
 # Four workers, each in its own process.
-[[declare.process_pool]]
+[[android.declare.process_pool]]
 prefix = ".W"
 count = 4
 
-[declare.boot_start]
+[android.declare.boot_start]
 receiver = ".Boot"
 locked = true
 lib = "main"
 
-[declare.work_profile]
+[android.declare.work_profile]
 admin = ".profile.Admin"
 compliance = ".profile.Comply"
 policies = ["force-lock", "wipe-data", "disable-camera"]
 lib = "main"
 
-[[declare.provider]]
+[[android.declare.provider]]
 name = "androidx.core.content.FileProvider"
 authorities = "com.example.declare.files"
 exported = false
 grantUriPermissions = true
 file_paths = [{ kind = "files-path", name = "shared", path = "shared/" }]
 
-[declare.network_security]
+[android.declare.network_security]
 cleartext = false
 domains = [{ name = "10.0.0.5", include_subdomains = false }]
 
-[declare.queries]
+[android.declare.queries]
 packages = ["com.example.other"]

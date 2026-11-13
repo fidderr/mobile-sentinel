@@ -13,9 +13,9 @@ change.
 
 ### Added
 
-- **Android declarations in `sentinel.toml` (`[declare.*]`): no manifest XML in an app.** With
+- **Android declarations in `sentinel.toml` (`[android.declare.*]`): no manifest XML in an app.** With
   `generate = true`, `build_sentinel` renders `AndroidManifest.xml` and the `res/xml/` files from
-  tables: `permissions` and `[[declare.permission]]`, `feature`, `application`, `activity`,
+  tables: `permissions` and `[[android.declare.permission]]`, `feature`, `application`, `activity`,
   `activity_alias`, `service`, `receiver`, `provider` (any attribute, intent filters with data,
   meta-data, properties, `layout`, URI permissions), `queries`, `uses_library`, `define_permission`,
   `network_security`, `resource_xml` and `element` (any other resource or manifest element as a tree).
@@ -25,7 +25,7 @@ change.
   permissions the declarations need (`FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_<TYPE>`,
   `RECEIVE_BOOT_COMPLETED`, ...), warns about what Google Play reviews and refuses invalid
   combinations. The classes of components whose code is Rust come from the existing `lib` / `rust_lib`
-  mechanism. `manifest = ...` keeps working (last resort); an app without `[declare]` renders the
+  mechanism. `manifest = ...` keeps working (last resort); an app without `[android.declare]` renders the
   manifest it always did (snapshot test). New dependency: `toml`. See the README section "Declaring
   the manifest".
 

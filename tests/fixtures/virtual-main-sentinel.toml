@@ -6,13 +6,13 @@ application_id = "dev.virtualmain"
 label = "Virtual Main"
 rust_lib = "vmain"
 
-[declare]
+[android.declare]
 permissions = ["INTERNET", "POST_NOTIFICATIONS", "QUERY_ALL_PACKAGES"]
 
-[declare.application]
+[android.declare.application]
 allowBackup = false
 
-[[declare.activity]]
+[[android.declare.activity]]
 name = ".MainActivity"
 launcher = true
 launchMode = "singleTask"
@@ -22,20 +22,20 @@ configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "sma
 native_lib = "vmui"
 
 # Test door for the scripted checks.
-[[declare.activity]]
+[[android.declare.activity]]
 name = ".DevActivity"
 exported = true
 launchMode = "singleTask"
 theme = "@android:style/Theme.NoDisplay"
 
-[[declare.service]]
+[[android.declare.service]]
 name = ".HostService"
 exported = false
 foregroundServiceType = "specialUse"
 special_use = "Runs the processes of a virtual phone"
 
 # Private space: its own process, one Slint screen per process.
-[[declare.activity]]
+[[android.declare.activity]]
 name = ".space.SpaceActivity"
 exported = true
 launchMode = "singleTop"
@@ -46,7 +46,7 @@ configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "sma
 native_lib = "vmui"
 lib = "vmui"
 
-[[declare.activity]]
+[[android.declare.activity]]
 name = ".space.SpaceHome"
 exported = true
 label = "Space"
@@ -59,14 +59,14 @@ configChanges = ["orientation", "keyboardHidden", "keyboard", "screenSize", "sma
 native_lib = "vmui"
 lib = "vmui"
 
-[declare.work_profile]
+[android.declare.work_profile]
 admin = ".space.Admin"
 compliance = ".space.Comply"
 policies = ["force-lock", "reset-password", "limit-password", "watch-login", "wipe-data"]
 lib = "vmui"
 admin_resource = "device_admin"
 
-[[declare.service]]
+[[android.declare.service]]
 name = ".space.SpaceService"
 exported = false
 directBootAware = true
@@ -74,13 +74,13 @@ foregroundServiceType = "specialUse"
 special_use = "loopback kill listener for the private space"
 lib = "vmui"
 
-[declare.boot_start]
+[android.declare.boot_start]
 receiver = ".space.Events"
 locked = true
 package_replaced = true
 actions = ["android.intent.action.USER_UNLOCKED"]
 lib = "vmui"
 
-[[declare.process_pool]]
+[[android.declare.process_pool]]
 prefix = ".G"
 count = 128
