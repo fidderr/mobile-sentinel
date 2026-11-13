@@ -29,9 +29,20 @@ use crate::error::SentinelError;
 /// dependency are wired automatically by `build_sentinel` because the
 /// feature is enabled — see [`crate::build::registry`].
 pub fn scan() -> Result<String, SentinelError> {
+    scan_with(0)
+}
+
+/// As [`scan`], but the camera screen closes itself after `limit`, as Back would, and nothing is
+/// scanned. The scanner keeps the time itself, so it holds while the caller's own screen is
+/// covered by the camera and not drawing.
+pub fn scan_for(limit: std::time::Duration) -> Result<String, SentinelError> {
+    scan_with(limit.as_millis().clamp(1, i64::MAX as u128) as i64)
+}
+
+fn scan_with(close_after_ms: i64) -> Result<String, SentinelError> {
     #[cfg(target_os = "android")]
     {
-        let value = android::scan();
+        let value = android::scan(close_after_ms);
         if value.is_empty() {
             Err(SentinelError::unavailable("scanner::scan"))
         } else {
@@ -40,6 +51,7 @@ pub fn scan() -> Result<String, SentinelError> {
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = close_after_ms;
         Err(SentinelError::unavailable("scanner::scan"))
     }
 }
@@ -59,15 +71,15 @@ mod android {
     const WAIT_SECS: i64 = 30 * 60;
 
     /// Blocking barcode/QR scan from the app context. Returns the decoded
-    /// string, or empty on cancel/timeout.
-    pub(super) fn scan() -> String {
+    /// string, or empty on cancel/timeout. `close_after_ms` above 0 closes the camera then.
+    pub(super) fn scan(close_after_ms: i64) -> String {
         with_jni_class(SCANNER, String::new(), |env, class| {
             let res = env
                 .call_static_method(
                     class,
                     "scanFromAppContext",
-                    "(J)Ljava/lang/String;",
-                    &[JValue::Long(WAIT_SECS)],
+                    "(JJ)Ljava/lang/String;",
+                    &[JValue::Long(WAIT_SECS), JValue::Long(close_after_ms)],
                 )
                 .ok()?;
             let obj = res.l().ok()?;
@@ -75,5 +87,20 @@ mod android {
             let s: String = env.get_string(&jstr).ok()?.into();
             Some(s)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_a_scanner_both_ways_say_unavailable() {
+        if cfg!(target_os = "android") {
+            return;
+        }
+        assert!(scan().is_err());
+        assert!(scan_for(std::time::Duration::from_secs(60)).is_err());
+        assert!(scan_for(std::time::Duration::ZERO).is_err());
     }
 }
