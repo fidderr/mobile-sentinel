@@ -923,7 +923,7 @@ impl Builder {
         let (mut schemes, mut hosts, mut ports_or_paths) = (false, false, false);
         for d in tables(t, "data")? {
             let mut n = Node::new("data");
-            for (k, v) in d {
+            for k in d.keys() {
                 if !DATA_ATTRS.contains(&k.as_str()) {
                     return Err(format!("{owner}: {k} is not an attribute of <data>"));
                 }
