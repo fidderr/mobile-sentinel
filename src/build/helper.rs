@@ -38,7 +38,7 @@ const GRADLE_MARKER: &str = "mobile-sentinel:modules";
 /// `CARGO_MANIFEST_DIR/android`, captured at **compile time**: a path dependency's
 /// own tree, or the unpacked registry source for a published crate. An explicit
 /// `SENTINEL_ANDROID_DIR` overrides it, for vendored copies.
-fn find_sentinel_android_dir() -> Option<PathBuf> {
+pub fn find_sentinel_android_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("SENTINEL_ANDROID_DIR") {
         let path = PathBuf::from(dir);
         if path.exists() {

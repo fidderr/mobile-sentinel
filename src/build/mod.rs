@@ -8,9 +8,11 @@
 //!   capability contributes to the APK.
 //! - [`helper`] — wires mobile-sentinel's Gradle module into a host Android
 //!   project and injects the capability-derived manifest fragments.
+//! - [`host`] — generates the whole Gradle project for an app that keeps none.
 //!
 //! None of this is reachable at runtime by a consumer app; it runs on the
 //! build host via the `build_sentinel` binary.
 
 pub mod helper;
+pub mod host;
 pub mod registry;

@@ -31,6 +31,8 @@
 //! window_background = "F5F6F9"            # optional — the window and the splash screen are this colour until the page paints,
 //! window_background_dark = "101218"       #   and this with the phone in dark mode; without them Android shows white
 //! no_backup = "true"                     # optional — nothing of the app goes into Android's backups or a move to a new phone
+//! generate = true                       # optional — build_sentinel writes the whole Gradle project into target/sentinel-android/
+//!                                        #   (keys: see `mobile_sentinel::build::host`); the app keeps no android/ folder
 //! link_scheme = "myapp"                  # optional — clicking myapp://... opens the app (needs the `background_service` feature;
 //!                                        #   the app reads the link with `background_service::take_open_request()` as "link:<uri>")
 //! ```
@@ -328,7 +330,15 @@ fn load_config() -> Config {
     let release = parse_release_cli();
     let bundle_aab = parse_aab_cli();
 
-    let explicit_project = explicit_project_path(parse_project_cli(), toml.get("project"));
+    let generated = if toml.get("generate").is_some_and(|v| v == "true") {
+        Some(generate_host(&toml))
+    } else {
+        None
+    };
+    let explicit_project = generated
+        .as_ref()
+        .map(|(dir, _)| dir.clone())
+        .or_else(|| explicit_project_path(parse_project_cli(), toml.get("project")));
     if let Some(dir) = &explicit_project {
         if let Err(e) = check_project_dir(dir) {
             eprintln!("  {e}");
@@ -339,6 +349,7 @@ fn load_config() -> Config {
 
     let activity = parse_activity_cli()
         .or_else(|| toml.get("activity").cloned())
+        .or_else(|| generated.as_ref().and_then(|(_, a)| a.clone()))
         .or_else(|| {
             project_path
                 .as_deref()
@@ -699,6 +710,31 @@ fn parse_string_list(s: &str) -> Vec<String> {
     } else {
         vec![trimmed.to_string()]
     }
+}
+
+/// `generate = true`: writes the app's Gradle project into `target/sentinel-android/`.
+/// Returns the folder and the activity a NativeActivity app starts with.
+fn generate_host(toml: &std::collections::HashMap<String, String>) -> (PathBuf, Option<String>) {
+    use mobile_sentinel::build::host;
+    let root = std::env::current_dir().expect("current directory");
+    let cfg = host::HostConfig::from_toml(toml, &root).unwrap_or_else(|e| {
+        eprintln!("  {e}");
+        std::process::exit(1);
+    });
+    let wrapper = mobile_sentinel::build::helper::find_sentinel_android_dir()
+        .map(|d| d.join("host"))
+        .filter(|d| d.join("gradlew").exists())
+        .unwrap_or_else(|| {
+            eprintln!("  The crate's android/host/ (Gradle wrapper) is missing");
+            std::process::exit(1);
+        });
+    let out = PathBuf::from(host::HOST_DIR);
+    if let Err(e) = host::generate(&cfg, &wrapper, &out) {
+        eprintln!("  Generating the Android project failed: {e}");
+        std::process::exit(1);
+    }
+    println!("  Generated the Android project: {}", out.display());
+    (out, cfg.default_activity().map(str::to_string))
 }
 
 fn read_sentinel_toml() -> std::collections::HashMap<String, String> {
