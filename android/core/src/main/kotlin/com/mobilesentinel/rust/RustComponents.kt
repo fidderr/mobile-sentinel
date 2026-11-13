@@ -1,6 +1,7 @@
 package com.mobilesentinel.rust
 
 import android.app.Activity
+import android.app.NativeActivity
 import android.app.Service
 import android.app.admin.DeviceAdminReceiver
 import android.content.BroadcastReceiver
@@ -29,6 +30,8 @@ import android.os.IBinder
  *   "provisioned" (profile provisioning complete).
  * - activity: "create", "new_intent", "resume", "pause", "destroy",
  *   "result" (a = requestCode, b = resultCode, intent = the data).
+ * - native activity (a screen the library draws, that also wants these): "new_intent",
+ *   "result".
  */
 interface RustComponent {
     fun rust(event: String, self: Any, intent: Intent?, a: Int, b: Int): Any?
@@ -101,6 +104,45 @@ abstract class RustActivity : Activity(), RustComponent {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         rust("result", this, data, requestCode, resultCode)
+    }
+}
+
+abstract class RustNativeActivity : NativeActivity(), RustComponent {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        rust("new_intent", this, intent, 0, 0)
+    }
+
+    @Deprecated("Activity result API of the platform")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        rust("result", this, data, requestCode, resultCode)
+    }
+}
+
+/**
+ * A receiver Rust registers at run time (for broadcasts only such a receiver gets, like
+ * screen off). Its broadcasts arrive at `Lib_<lib>.event(name, "receive", context, intent)`.
+ */
+class RustRuntimeReceiver(private val lib: String, private val name: String) : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        try {
+            Class.forName("com.mobilesentinel.rust.Lib_$lib")
+                .getMethod(
+                    "event",
+                    String::class.java,
+                    String::class.java,
+                    Any::class.java,
+                    Any::class.java,
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                )
+                .invoke(null, name, "receive", context, intent, 0, 0)
+        } catch (e: ReflectiveOperationException) {
+            android.util.Log.w("RustRuntimeReceiver", "no bridge for lib$lib: $e")
+        }
     }
 }
 

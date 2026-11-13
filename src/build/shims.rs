@@ -6,7 +6,8 @@
 //! hands every lifecycle event to the native library handling the component:
 //!
 //! - an activity with `android.app.lib_name` meta-data: `android.app.NativeActivity`
-//!   (a screen drawn by that library; nothing to forward);
+//!   (a screen drawn by that library; nothing to forward), or `RustNativeActivity` when it
+//!   also names a `mobilesentinel.lib` (then its results and new intents are forwarded);
 //! - any other activity: `RustActivity`; a service: `RustService`;
 //! - a receiver with `android.app.device_admin` meta-data: `RustAdminReceiver`, any other
 //!   receiver: `RustReceiver`.
@@ -29,6 +30,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Base {
     Native,
+    NativeRust,
     Activity,
     Service,
     Receiver,
@@ -39,6 +41,7 @@ impl Base {
     fn class(self) -> &'static str {
         match self {
             Base::Native => "android.app.NativeActivity",
+            Base::NativeRust => "com.mobilesentinel.rust.RustNativeActivity",
             Base::Activity => "com.mobilesentinel.rust.RustActivity",
             Base::Service => "com.mobilesentinel.rust.RustService",
             Base::Receiver => "com.mobilesentinel.rust.RustReceiver",
@@ -95,7 +98,11 @@ pub fn components(manifest: &str, namespace: &str) -> Vec<Component> {
             }
             let base = match base {
                 Base::Activity if meta_value(body, "android.app.lib_name").is_some() => {
-                    Base::Native
+                    if meta_value(body, "mobilesentinel.lib").is_some() {
+                        Base::NativeRust
+                    } else {
+                        Base::Native
+                    }
                 }
                 Base::Receiver
                     if meta_value(body, "android.app.device_admin").is_some()
@@ -249,6 +256,10 @@ mod tests {
             <meta-data android:name="android.app.lib_name" android:value="ui" />
         </activity>
         <activity android:name=".DevActivity" android:exported="true" />
+        <activity android:name=".Screen">
+            <meta-data android:name="android.app.lib_name" android:value="ui" />
+            <meta-data android:name="mobilesentinel.lib" android:value="ui" />
+        </activity>
         <activity-alias android:name=".Alias" android:targetActivity=".DevActivity" />
         <service android:name=".HostService" android:exported="false">
             <property android:name="x" android:value="y" />
@@ -268,7 +279,8 @@ mod tests {
     fn finds_the_apps_components_and_their_bases() {
         let found = components(MANIFEST, "dev.app");
         let by = |c: &str| found.iter().find(|x| x.class == c).cloned().unwrap();
-        assert_eq!(found.len(), 6, "{found:?}");
+        assert_eq!(found.len(), 7, "{found:?}");
+        assert_eq!(by("dev.app.Screen").base, Base::NativeRust);
         assert_eq!(by("dev.app.MainActivity").base, Base::Native);
         assert_eq!(by("dev.app.DevActivity").base, Base::Activity);
         assert_eq!(by("dev.app.HostService").base, Base::Service);
@@ -304,6 +316,9 @@ mod tests {
         assert!(host.contains("extends com.mobilesentinel.rust.RustService"));
         assert!(host.contains("Lib_ui.event(\"dev.app.HostService\""));
         assert!(file("dev/app/G0.java").unwrap().contains("Lib_core.event("));
+        assert!(file("dev/app/Screen.java")
+            .unwrap()
+            .contains("extends com.mobilesentinel.rust.RustNativeActivity"));
         assert!(file("com/mobilesentinel/rust/Lib_ui.java")
             .unwrap()
             .contains("System.loadLibrary(\"ui\")"));
