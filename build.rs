@@ -65,6 +65,11 @@ fn main() {
     );
     // Also surface the resolved set as a build-time env for convenience.
     println!("cargo:rustc-env=MOBILE_SENTINEL_CAPABILITIES={contents}");
+    // The same list on one line: `build::embedded` keeps it inside the app's library.
+    println!(
+        "cargo:rustc-env=MOBILE_SENTINEL_CAPABILITY_LIST={}",
+        enabled.join(",")
+    );
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/build/capability_ids.rs");
 }

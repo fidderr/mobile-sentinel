@@ -32,6 +32,18 @@ change.
   build, relative to the current directory. Without either, the project under `target/dx` is
   found as before.
 
+### Changed
+
+- **`build_sentinel` finds the capability list in the `.so`** (`build::embedded`, the string
+  `mobile-sentinel-capabilities:v1[...]` exported from the library) instead of scanning `./target`, which
+  silently gave no capabilities when `CARGO_TARGET_DIR` pointed elsewhere. Libraries from an older
+  mobile-sentinel still fall back to the old scan.
+- **Gradle runs with its daemon, build cache and parallel execution** (no more `--no-daemon
+  --no-build-cache`), and the generated host's `gradle.properties` turns on the build and configuration
+  caches. A rebuild with a new `.so` goes from about 40 s to about 4 s.
+- **`legacy_jni_packaging = true` applies to APKs only**; a `--aab` build ignores it (Play decides).
+- README: how to make a release build smaller (`panic = "abort"` and what it does to `wake_hook!`).
+
 ### Fixed
 
 - **`generate = true` with `native_lib`: no duplicate `launchMode`.** The generated NativeActivity manifest

@@ -387,8 +387,10 @@ fn load_config() -> Config {
     // build-script-output-timestamp contamination that can occur when two
     // consumers share the cargo target dir.
     //
-    // Without `--app` (single consumer), fall back to reading the capability
-    // set the compiled `.so`'s build.rs recorded (`enabled_capabilities.txt`).
+    // Without `--app` (single consumer), read the capability list the `.so` itself
+    // carries (`build::embedded`), from the libraries about to be packaged. Only for
+    // a library built with an older mobile-sentinel does it fall back to the file the
+    // build script left in `target/` (`enabled_capabilities.txt`).
     let capabilities = match parse_app_cli() {
         Some(app) => {
             let caps = read_app_cargo_capabilities(&app);
@@ -405,10 +407,17 @@ fn load_config() -> Config {
             caps
         }
         None => {
-            let caps = read_feature_capabilities();
+            let libs = library_dirs(&toml, &project_path);
+            let (caps, source) = match capabilities_from_libraries(&libs) {
+                Some(caps) => (caps, "embedded in the .so"),
+                None => (
+                    read_feature_capabilities(),
+                    "target/ scan, library has no list",
+                ),
+            };
             if !caps.is_empty() {
                 eprintln!(
-                    "  Feature-derived capabilities (from compiled .so): {}",
+                    "  Feature-derived capabilities ({source}): {}",
                     caps.join(", ")
                 );
             }
@@ -438,6 +447,34 @@ fn load_config() -> Config {
         release,
         bundle_aab,
     }
+}
+
+/// Where the native libraries to be packaged are: `jni_libs` of `sentinel.toml` and the
+/// project's own `app/src/main/jniLibs`.
+fn library_dirs(
+    toml: &std::collections::HashMap<String, String>,
+    project_path: &Path,
+) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(libs) = toml.get("jni_libs") {
+        dirs.push(PathBuf::from(libs));
+    }
+    dirs.push(project_path.join("app/src/main/jniLibs"));
+    dirs
+}
+
+/// The capability list embedded in the libraries below `dirs`, `None` when none holds one.
+fn capabilities_from_libraries(dirs: &[PathBuf]) -> Option<Vec<String>> {
+    let mut found: Option<Vec<String>> = None;
+    for dir in dirs {
+        if let Some(ids) = mobile_sentinel::build::embedded::scan_dir(dir) {
+            let all = found.get_or_insert_with(Vec::new);
+            all.extend(ids);
+            all.sort();
+            all.dedup();
+        }
+    }
+    found
 }
 
 /// Discover the capabilities derived from the Cargo features the consumer's
@@ -717,10 +754,11 @@ fn parse_string_list(s: &str) -> Vec<String> {
 fn generate_host(toml: &std::collections::HashMap<String, String>) -> (PathBuf, Option<String>) {
     use mobile_sentinel::build::host;
     let root = std::env::current_dir().expect("current directory");
-    let cfg = host::HostConfig::from_toml(toml, &root).unwrap_or_else(|e| {
+    let mut cfg = host::HostConfig::from_toml(toml, &root).unwrap_or_else(|e| {
         eprintln!("  {e}");
         std::process::exit(1);
     });
+    apply_bundle_rules(&mut cfg, parse_aab_cli());
     let wrapper = mobile_sentinel::build::helper::find_sentinel_android_dir()
         .map(|d| d.join("host"))
         .filter(|d| d.join("gradlew").exists())
@@ -735,6 +773,15 @@ fn generate_host(toml: &std::collections::HashMap<String, String>) -> (PathBuf, 
     }
     println!("  Generated the Android project: {}", out.display());
     (out, cfg.default_activity().map(str::to_string))
+}
+
+/// Play delivers an AAB's libraries in the form it wants by itself (compressed in the split,
+/// extracted or not by the device), so `legacy_jni_packaging` is for APKs only.
+fn apply_bundle_rules(cfg: &mut mobile_sentinel::build::host::HostConfig, aab: bool) {
+    if aab && cfg.legacy_jni_packaging {
+        eprintln!("  legacy_jni_packaging: not applied to an AAB");
+        cfg.legacy_jni_packaging = false;
+    }
 }
 
 fn read_sentinel_toml() -> std::collections::HashMap<String, String> {
@@ -1104,7 +1151,7 @@ fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
     };
 
     let mut cmd = Command::new(&gradlew);
-    cmd.arg(task).arg("--no-daemon").arg("--no-build-cache");
+    cmd.arg(task);
     for prop in extra_props {
         cmd.arg(prop);
     }
@@ -1123,6 +1170,61 @@ fn run_gradle(project_path: &Path, extra_props: &[String], task: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_come_from_the_library_and_not_from_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let libs = dir.path().join("jniLibs");
+        fs::create_dir_all(libs.join("arm64-v8a")).unwrap();
+        // The scan of `target/` finds nothing here (no CARGO_TARGET_DIR guessing): the list
+        // is in the library.
+        assert_eq!(
+            capabilities_from_libraries(std::slice::from_ref(&libs)),
+            None
+        );
+        fs::write(
+            libs.join("arm64-v8a/libmain.so"),
+            b"ELF..mobile-sentinel-capabilities:v1[scanner,audio] ..",
+        )
+        .unwrap();
+        let missing = dir.path().join("none");
+        assert_eq!(
+            capabilities_from_libraries(&[missing, libs]),
+            Some(vec!["audio".to_string(), "scanner".to_string()])
+        );
+    }
+
+    #[test]
+    fn legacy_jni_packaging_is_for_apks_only() {
+        use mobile_sentinel::build::host::{render_app_build, HostConfig};
+        let keys: std::collections::HashMap<String, String> = [
+            ("application_id", "com.example.app"),
+            ("native_lib", "main"),
+            ("legacy_jni_packaging", "true"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let mut cfg = HostConfig::from_toml(&keys, Path::new(".")).unwrap();
+        apply_bundle_rules(&mut cfg, false);
+        assert!(render_app_build(&cfg).contains("useLegacyPackaging = true"));
+        apply_bundle_rules(&mut cfg, true);
+        assert!(render_app_build(&cfg).contains("useLegacyPackaging = false"));
+    }
+
+    #[test]
+    fn library_dirs_are_jni_libs_then_the_projects_own() {
+        let mut toml = std::collections::HashMap::new();
+        assert_eq!(
+            library_dirs(&toml, Path::new("p")),
+            vec![PathBuf::from("p/app/src/main/jniLibs")]
+        );
+        toml.insert("jni_libs".to_string(), "build/jniLibs".to_string());
+        assert_eq!(
+            library_dirs(&toml, Path::new("p"))[0],
+            PathBuf::from("build/jniLibs")
+        );
+    }
 
     #[test]
     fn explicit_project_flag_wins_over_toml_and_empty_means_none() {

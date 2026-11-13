@@ -382,6 +382,38 @@ Flags:
   `sentinel.toml`, and capability set to `apps/<name>` (derived deterministically
   from that app's `Cargo.toml` feature list).
 
+How the capability set is found: `mobile-sentinel` keeps the list of the features it was built with
+inside the app's `.so` (the string `mobile-sentinel-capabilities:v1[...]`), and `build_sentinel` reads it
+from the libraries it packages (`jni_libs` of `sentinel.toml`, or the project's `app/src/main/jniLibs`).
+It does not matter where `CARGO_TARGET_DIR` points. A library built with an older mobile-sentinel has no
+list; for that one `build_sentinel` still scans `target/` as before.
+
+### Faster and smaller builds
+
+`build_sentinel` leaves Gradle's daemon, build cache and configuration cache on; the generated
+`gradle.properties` turns them on. A rebuild with only a new `.so` takes about 4 s instead of 40 s. The
+first build after a change of features (so of `settings.gradle`) is a normal one.
+
+Ways an app can make its own release build smaller (measured on a Slint app, in the app's repository,
+not in this crate):
+
+```toml
+# Cargo.toml of the app
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic = "abort"      # about -8% of the .so (the unwind tables). A panic ends the process.
+```
+
+`panic = "abort"` has one effect here: `wake_hook!` catches a panic of the hook with `catch_unwind` and logs
+it; under `abort` there is nothing to catch and the process ends (Android starts it again for the next
+wake). An app whose wake hook must survive a panic keeps `unwind`.
+
+In `sentinel.toml`, `legacy_jni_packaging = true` stores the native library compressed in an **APK** and
+extracts it on install: a sideloaded or GitHub APK shrinks by about half, with no start-up cost seen. It is
+ignored for an AAB (`--aab`), where Play decides.
+
 `build_sentinel` warns prominently when a **policy-sensitive** capability
 (`sms`, `phone`, `location`, `device_admin`, `contacts`, `calendar`,
 `accessibility`) is declared, so you make an informed choice before shipping.
