@@ -1,0 +1,49 @@
+# AlarmFree — mobile-sentinel build configuration
+# Used by: build_sentinel (run via ./build.sh, with optional "workspace" flag for local dev)
+#
+# build_sentinel writes the whole Gradle project into target/sentinel-android/ on every run: this
+# app keeps no android/ folder. It is a NativeActivity app (Slint draws in it), so the manifest is
+# generated too. The package name is not the original's: this copy installs next to it, never to Play.
+
+[android]
+generate = true
+application_id = "com.fidderr.alarmfree.slint"
+label = "AlarmFree Slint"
+version_code = 1
+version_name = "0.4.1"
+native_lib = "main"
+# build.sh stages libalarmfree.so here as <abi>/libmain.so (the SDK's Kotlin loads it by that name).
+jni_libs = "build/jniLibs"
+# A copy for comparing, never for Play: a release build is signed with the debug key, so it installs.
+release_debug_signing = true
+# The library is stored compressed in the APK (21 MB -> 12 MB) and extracted on install. For this APK
+# only: a --aab build ignores it and Play decides.
+legacy_jni_packaging = true
+icon = "assets/icon.webp"
+# The picture's own background, so launchers can give it any shape without a box in it.
+icon_background = "F7F7F7"
+# Until the UI has painted, the window and the splash screen: the light and dark background of
+# the default theme, following the phone's dark mode as the default theme does. Without them Android
+# shows white, and a dark app flashed.
+window_background = "F5F6F9"
+window_background_dark = "101218"
+assets = ["assets/sounds"]
+
+# An alarm has to ring after a reboot, also before the first unlock. Its files are
+# device-encrypted for that, as a system clock's are.
+direct_boot = true
+
+# Capabilities are NOT declared here — every capability is a Cargo FEATURE on
+# the mobile-sentinel dependency in Cargo.toml (the single, compile-enforced
+# source of truth). build_sentinel derives the manifest permissions/components
+# AND the set of Gradle capability modules to compile from the exact features
+# the .so was built with. A capability you don't enable ships no Rust, no
+# manifest entry, no Kotlin module, and no Gradle dependency.
+#
+# Deliberately NOT enabled: "accessibility" and "device_admin" — both are
+# policy-sensitive on Google Play and AlarmFree does not need them.
+
+# Default screen orientation for the main activity (injected at build time by
+# mobile-sentinel). From 600dp wide on, Android 16 goes its own way, and the layout is
+# made for that.
+screen_orientation = "portrait"

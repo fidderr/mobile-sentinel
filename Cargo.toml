@@ -177,6 +177,7 @@ log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+toml = { version = "1", default-features = false, features = ["parse", "std"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
