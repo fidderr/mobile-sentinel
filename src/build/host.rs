@@ -315,7 +315,7 @@ pub fn render_native_manifest(cfg: &HostConfig, lib: &str) -> String {
          android:supportsRtl=\"true\"\n        android:enableOnBackInvokedCallback=\"true\"\n        \
          android:theme=\"@style/AppTheme\">\n        \
          <activity android:name=\"android.app.NativeActivity\" android:exported=\"true\"\n            \
-         android:launchMode=\"singleTask\"\n            android:windowSoftInputMode=\"adjustResize\"\n            \
+         android:windowSoftInputMode=\"adjustResize\"\n            \
          android:configChanges=\"{changes}\">\n            \
          <meta-data android:name=\"android.app.lib_name\" android:value=\"{lib}\" />\n            \
          <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                \
@@ -533,6 +533,9 @@ mod tests {
         assert!(m.contains("android:value=\"main\""));
         assert!(m.contains("android.intent.category.LAUNCHER"));
         assert!(m.contains("android:label=\"A &amp; B\""));
+        // build_sentinel adds launchMode (singleInstance) and the lock-screen flags to the activity:
+        // a second launchMode here would be a duplicate attribute and fail the manifest merge.
+        assert!(!m.contains("launchMode"));
         assert!(!m.contains("ic_launcher"));
         cfg.icon = true;
         assert!(render_native_manifest(&cfg, "main").contains("@mipmap/ic_launcher"));

@@ -31,6 +31,9 @@ change.
 
 ### Fixed
 
+- **`generate = true` with `native_lib`: no duplicate `launchMode`.** The generated NativeActivity manifest
+  named `launchMode="singleTask"` and build_sentinel then added `singleInstance`, so the manifest merge
+  failed on the duplicate attribute. The generator leaves `launchMode` to build_sentinel.
 - **A NativeActivity host has a JavaVM and a class loader.** Android loads such an app's library
   through the activity, not `System.loadLibrary`, so `JNI_OnLoad` never ran: every capability
   logged "no JavaVM available" and e.g. `permissions::status` reported Denied for a granted
