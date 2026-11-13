@@ -25,6 +25,7 @@
 //! proguard = "app/proguard-rules.pro"    # extra R8 rules for release builds
 //! release_debug_signing = false          # true: a release build is signed with the debug key
 //! ndk_version = "28.2.13676358"          # default: the folder name of ANDROID_NDK_HOME
+//! rust_lib = "main"                      # the library of components whose code is Rust (see `shims`)
 //! ```
 //!
 //! Release builds run R8 (code and resources). The app's own package and every native
@@ -61,6 +62,8 @@ pub struct HostConfig {
     pub proguard: Option<PathBuf>,
     pub release_debug_signing: bool,
     pub ndk_version: Option<String>,
+    /// The library of the app's Rust components (see `shims`), unless one names its own.
+    pub rust_lib: Option<String>,
 }
 
 impl HostConfig {
@@ -123,6 +126,7 @@ impl HostConfig {
             proguard: keys.get("proguard").map(|p| path(p)),
             release_debug_signing: flag("release_debug_signing"),
             ndk_version: keys.get("ndk_version").cloned().or_else(ndk_from_env),
+            rust_lib: keys.get("rust_lib").cloned(),
             application_id,
         })
     }
@@ -160,6 +164,17 @@ pub fn generate(cfg: &HostConfig, wrapper_dir: &Path, out: &Path) -> Result<(), 
         (None, None) => return Err("no manifest and no native_lib".into()),
     };
     write("app/src/main/AndroidManifest.xml", &manifest)?;
+    let components = super::shims::components(&manifest, &cfg.application_id);
+    let defined = super::shims::defined_classes(&cfg.java_dirs);
+    for (rel, text) in super::shims::render(&components, &defined, cfg.rust_lib.as_deref())? {
+        write(
+            &format!(
+                "app/src/main/java/{}",
+                rel.to_string_lossy().replace('\\', "/")
+            ),
+            &text,
+        )?;
+    }
     if !cfg
         .res_dirs
         .iter()
@@ -575,6 +590,41 @@ mod tests {
             "<manifest>own</manifest>"
         );
         assert!(!out.join("app/src/main/res/values/styles.xml").exists());
+    }
+
+    #[test]
+    fn generate_writes_shims_for_the_apps_rust_components() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let wrapper = dir.path().join("wrapper");
+        fs::create_dir_all(wrapper.join("gradle/wrapper")).unwrap();
+        for f in [
+            "gradlew",
+            "gradlew.bat",
+            "gradle/wrapper/gradle-wrapper.jar",
+            "gradle/wrapper/gradle-wrapper.properties",
+        ] {
+            fs::write(wrapper.join(f), f).unwrap();
+        }
+        let own = dir.path().join("AndroidManifest.xml");
+        fs::write(
+            &own,
+            "<manifest><application><service android:name=\".Worker\" /></application></manifest>",
+        )
+        .unwrap();
+        let mut cfg = native();
+        cfg.manifest = Some(own);
+        cfg.rust_lib = Some("main".into());
+        let out = dir.path().join("host");
+        generate(&cfg, &wrapper, &out).unwrap();
+        let java = out.join("app/src/main/java");
+        assert!(fs::read_to_string(java.join("com/example/app/Worker.java"))
+            .unwrap()
+            .contains("RustService"));
+        assert!(java.join("com/mobilesentinel/rust/Lib_main.java").exists());
+        cfg.rust_lib = None;
+        assert!(generate(&cfg, &wrapper, &out)
+            .unwrap_err()
+            .contains("rust_lib"));
     }
 
     #[test]
