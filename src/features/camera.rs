@@ -32,7 +32,7 @@ use crate::error::SentinelError;
 ///
 /// Requires the `camera` feature. The `SentinelCameraActivity` proxy +
 /// `FileProvider` are wired automatically by `build_sentinel` because the
-/// feature is enabled — see [`crate::build::registry`].
+/// feature is enabled — see `build::registry` (feature `build`).
 pub fn capture_photo() -> Result<String, SentinelError> {
     #[cfg(target_os = "android")]
     {

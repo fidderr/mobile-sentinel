@@ -50,6 +50,13 @@ change.
 
 ### Changed
 
+- **Build tooling is host-side only: new `build` Cargo feature.** The `build` module (host project
+  generation, declarations, registry, helper) and the `toml` dependency are compiled only with
+  `--features build`, which `build_sentinel` requires (`required-features`). An app's library no longer
+  contains any of it. The capability list in the `.so` stays (`capability_info`, always compiled).
+  Breaking for whoever runs the tool: `cargo run --manifest-path <sdk>/Cargo.toml --features build
+  --bin build_sentinel`. The `mobile_sentinel::prepare_android_project*` and registry re-exports
+  need the feature as well. README: now introduced as a cross-platform SDK, Android first.
 - **`build_sentinel` finds the capability list in the `.so`** (`build::embedded`, the string
   `mobile-sentinel-capabilities:v1[...]` exported from the library) instead of scanning `./target`, which
   silently gave no capabilities when `CARGO_TARGET_DIR` pointed elsewhere. Libraries from an older

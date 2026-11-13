@@ -3,7 +3,7 @@ name = "mobile-sentinel"
 version = "0.5.0"
 edition = "2021"
 rust-version = "1.76.0"
-description = "Rust-first Android SDK — write mobile app logic in Rust, Kotlin is just the thin JNI layer"
+description = "Cross-platform Rust SDK, Android first — write app logic in Rust, Kotlin is just the thin JNI layer"
 license = "MIT"
 authors = ["fidderr"]
 repository = "https://github.com/fidderr/mobile-sentinel"
@@ -24,6 +24,11 @@ exclude = [
 
 [features]
 default = []
+
+# Host-side build tooling: `build_sentinel` and the `build` module (manifest and Gradle project
+# generation, sentinel.toml declarations). Never enable it in an app's library; build the tool with
+# `cargo run --manifest-path <mobile-sentinel>/Cargo.toml --features build --bin build_sentinel`.
+build = ["dep:toml"]
 
 # ---------------------------------------------------------------------------
 # Capability features — the single source of truth for "what a consumer
@@ -177,7 +182,7 @@ log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
-toml = { version = "1", default-features = false, features = ["parse", "std", "serde"] }
+toml = { version = "1", default-features = false, features = ["parse", "std", "serde"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
@@ -199,6 +204,19 @@ proptest = "1"
 
 # Integration test exercising the Recipe + ContextStore + dispatch boundary;
 # only compiles when the alarm-kit subsystem is enabled.
+[[bin]]
+name = "build_sentinel"
+path = "src/bin/build_sentinel.rs"
+required-features = ["build"]
+
+[[test]]
+name = "declare_virtual_main"
+required-features = ["build"]
+
+[[test]]
+name = "native_manifest_snapshot"
+required-features = ["build"]
+
 [[test]]
 name = "correctness_properties"
 required-features = ["alarm-kit"]

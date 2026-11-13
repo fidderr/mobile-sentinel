@@ -27,7 +27,7 @@ use crate::error::SentinelError;
 /// Requires the `scanner` feature. The corresponding Android manifest
 /// pieces (CAMERA permission, `SentinelScannerActivity`) and the ZXing
 /// dependency are wired automatically by `build_sentinel` because the
-/// feature is enabled — see [`crate::build::registry`].
+/// feature is enabled — see `build::registry` (feature `build`).
 pub fn scan() -> Result<String, SentinelError> {
     scan_with(0)
 }

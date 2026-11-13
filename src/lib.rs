@@ -1,6 +1,6 @@
 //! # mobile-sentinel
 //!
-//! A Rust-first Android SDK. Write your mobile app logic in Rust; Kotlin
+//! A cross-platform Rust SDK, Android first. Write your app logic in Rust; on Android, Kotlin
 //! is only a thin JNI execution layer.
 //!
 //! ## Overview
@@ -25,7 +25,11 @@
 //! Job Guardian for cross-process persistence, a DST-correct Recurrence
 //! Engine, and a Sound Library.
 
+/// Build-time tooling for `build_sentinel` (manifest, Gradle project, declarations). Host side only:
+/// behind the `build` feature, so it is never compiled into an app's library.
+#[cfg(feature = "build")]
 pub mod build;
+pub mod capability_info;
 pub mod error;
 /// Consumer-facing capabilities, each gated behind its own Cargo feature.
 /// Grouped under `features/`; re-exported at the crate root below so
@@ -231,12 +235,14 @@ pub use jobs::{
 };
 
 // Build helper for Android project preparation.
+#[cfg(feature = "build")]
 pub use build::helper::{
     prepare_android_project, prepare_android_project_with_capabilities,
     prepare_android_project_with_capabilities_and_orientation,
 };
 
 // Capability registry — declarative manifest assembly for build_sentinel.
+#[cfg(feature = "build")]
 pub use build::registry::{assemble, capability, Capability, ManifestInjection, CAPABILITIES};
 
 /// Says what runs when the app is started or woken without its UI: a boot, an app update,

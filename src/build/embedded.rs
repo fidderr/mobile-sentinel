@@ -4,21 +4,14 @@
 //! that list as a string in the library itself. `build_sentinel` reads it back from the `.so` it
 //! is about to package, so the manifest and the Gradle modules always match the library, whatever
 //! `CARGO_TARGET_DIR` is and however many older builds lie in `target/`.
+//!
+//! Only the reading side is here (host tooling). The list itself is kept in the library by
+//! `crate::capability_info`, which every build has.
 
 use std::fs;
 use std::path::Path;
 
-/// What every embedded list starts with. The list follows, comma separated, then `]`.
-pub const MARKER: &str = "mobile-sentinel-capabilities:v1[";
-
-/// Kept in the library: exported, so neither the compiler nor the linker drops it.
-#[no_mangle]
-#[used]
-pub static MOBILE_SENTINEL_CAPABILITIES_INFO: &str = concat!(
-    "mobile-sentinel-capabilities:v1[",
-    env!("MOBILE_SENTINEL_CAPABILITY_LIST"),
-    "]"
-);
+pub use crate::capability_info::MARKER;
 
 /// The capability ids embedded in a library's bytes: `None` when it holds no list (a library
 /// built with an older mobile-sentinel), `Some(vec![])` when it was built with none.
@@ -83,6 +76,7 @@ fn collect(dir: &Path, depth: usize, found: &mut Option<Vec<String>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability_info::MOBILE_SENTINEL_CAPABILITIES_INFO;
 
     #[test]
     fn the_embedded_list_starts_with_the_marker_and_is_what_build_rs_recorded() {

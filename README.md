@@ -1,13 +1,15 @@
 # mobile-sentinel
 
-A Rust-first Android SDK. You write your app's logic in Rust; Kotlin shrinks to
-thin JNI shims that do exactly what Rust tells them. One language owns the
-lifecycle, the state, the recovery — and one place explains what happened when
+A cross-platform Rust SDK for apps whose logic lives in Rust, **Android first**. On Android, Kotlin
+shrinks to thin JNI shims that do exactly what Rust tells them. **Windows** has real backends for a few
+capabilities (file dialog, recorder, share); every other capability returns a host fallback there and on
+other desktop targets, and an iOS backend is not built yet (see [Platform support](#platform-support)).
+One language owns the lifecycle, the state, the recovery — and one place explains what happened when
 something breaks.
 
 mobile-sentinel is **generic**. It does not assume you are building an alarm
-clock, a timer, a kiosk, or a meditation app. It hands you Android's
-capabilities — audio, alarms, foreground services, kiosk lock-task, camera and
+clock, a timer, a kiosk, or a meditation app. It hands you the platform's
+capabilities (Android's today) — audio, alarms, foreground services, kiosk lock-task, camera and
 scanners, sensors, pickers, notifications, permissions, biometrics, location,
 SMS, and more — as **feature-gated Rust modules**. On top of those it ships
 reusable building blocks (a durable state store, a cross-process job guardian, a
@@ -238,11 +240,11 @@ point the bundled binary at it:
 
 ```bash
 # Single consumer:
-cargo run -p mobile-sentinel --bin build_sentinel -- --activity com.example.app.MainActivity
+cargo run -p mobile-sentinel --features build --bin build_sentinel -- --activity com.example.app.MainActivity
 
 # Workspace with more than one consumer — scope to the app (derives the
 # capability set from that app's Cargo.toml features):
-cargo run -p mobile-sentinel --bin build_sentinel -- --app myapp
+cargo run -p mobile-sentinel --features build --bin build_sentinel -- --app myapp
 ```
 
 This wires `:sentinel-core` plus only the Gradle modules of the capabilities you
@@ -348,7 +350,9 @@ Kotlin executes; Rust decides. The state machine writes `SessionState` to the
 
 ## Building the APK (build_sentinel)
 
-`build_sentinel` is the bundled CLI that turns your framework-generated Android
+`build_sentinel` is the bundled CLI (host tooling, behind the `build` Cargo feature: run it with
+`--features build`, and never enable `build` in an app's own dependency, so none of it is compiled into the
+app's library) that turns your framework-generated Android
 project into a wired, trimmed APK. It reads a small `sentinel.toml`:
 
 ```toml
@@ -515,14 +519,15 @@ ignored for an AAB (`--aab`), where Play decides.
 
 ## Platform support
 
-Android is the real target (`aarch64-linux-android`, modules at compileSdk 34,
+Android is the first real target (`aarch64-linux-android`, modules at compileSdk 34,
 minSdk 24; what an app runs on is its own `minSdk`). Every capability also has a **host fallback** so the crate builds and
 tests on desktop: capability functions return
 `SentinelError::PlatformUnsupported` or a safe default (`false`, `0`, `None`).
 This is what lets the recurrence engine, snooze policy, state store, recipe
 engine, and AlarmKit be unit- and property-tested on your dev machine with no
-device attached. An iOS backend can later implement `FiringSink` and the
-capability JNI seams without consumer changes.
+device attached. The platform code sits inside the feature files today (`#[cfg(target_os = "android")]` blocks); a second
+serious platform will move it into per-platform backends behind the same one API per feature, without
+consumer changes.
 
 **Windows** has real backends for the capabilities a desktop app needs, each
 pulled in only by its feature:

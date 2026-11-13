@@ -10,7 +10,7 @@
 //!
 //! The step counter additionally requires the `ACTIVITY_RECOGNITION`
 //! permission, which `build_sentinel` injects when the `sensors` capability
-//! is enabled (see [`crate::build::registry`]).
+//! is enabled (see `build::registry` (feature `build`)).
 
 /// Start the accelerometer-backed shake detector.
 pub fn start_accelerometer() {
