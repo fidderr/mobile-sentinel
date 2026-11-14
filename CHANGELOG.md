@@ -11,6 +11,8 @@ change.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
 ### Added
 
 - **`diag`: a rotating diagnostic log for bug reports.** `diag::log(tag, message)` appends a timestamped line to
