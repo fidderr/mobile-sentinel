@@ -52,6 +52,69 @@ pub fn file(path: &str, mime_type: &str) -> Result<(), SentinelError> {
     }
 }
 
+/// A mail to compose in the user's own email app. Nothing is sent by this crate: the user
+/// presses send there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Email<'a> {
+    pub to: &'a str,
+    pub subject: &'a str,
+    pub body: &'a str,
+    /// Absolute paths of files under the app's files or cache directory.
+    pub attachments: &'a [&'a str],
+}
+
+impl Email<'_> {
+    /// The attachments as one string for the platform side, one path per line. `None` when
+    /// the mail cannot be made: no address, or a path with a newline in it.
+    pub fn attachment_list(&self) -> Option<String> {
+        if !self.to.contains('@') || self.to.contains(['\n', '\r', ' ']) {
+            return None;
+        }
+        if self
+            .attachments
+            .iter()
+            .any(|p| p.is_empty() || p.contains(['\n', '\r']))
+        {
+            return None;
+        }
+        Some(self.attachments.join("\n"))
+    }
+}
+
+/// Compose an email in the user's email app with `attachments`, through
+/// `ACTION_SEND_MULTIPLE` and the share FileProvider. Returns `Err` when there is no email app
+/// (the app should then offer another way, such as [`save_to_downloads`]). The app must declare
+/// `<queries>` for the intent `android.intent.action.SEND_MULTIPLE` with `message/rfc822`, or
+/// Android 11+ hides the email apps from this check.
+pub fn email(
+    to: &str,
+    subject: &str,
+    body: &str,
+    attachments: &[&str],
+) -> Result<(), SentinelError> {
+    let mail = Email {
+        to,
+        subject,
+        body,
+        attachments,
+    };
+    let Some(list) = mail.attachment_list() else {
+        return Err(SentinelError::unavailable("share::email"));
+    };
+    #[cfg(target_os = "android")]
+    {
+        if android::email(to, subject, body, &list) {
+            return Ok(());
+        }
+        Err(SentinelError::unavailable("share::email"))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = list;
+        Err(SentinelError::unavailable("share::email"))
+    }
+}
+
 /// Open a file with the app the system associates with its type (a PDF
 /// viewer, a video player, ...). Android: `ACTION_VIEW`; Windows: the
 /// default program.
@@ -80,7 +143,8 @@ pub fn open(path: &str, mime_type: &str) -> Result<(), SentinelError> {
 
 /// Open a web address (http/https) in the user's browser.
 pub fn open_url(url: &str) -> Result<(), SentinelError> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("market://"))
+    {
         return Err(SentinelError::unavailable("share::open_url"));
     }
     #[cfg(target_os = "android")]
@@ -164,6 +228,33 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn an_email_needs_an_address_and_clean_paths() {
+        let mail = |to, paths| Email {
+            to,
+            subject: "s",
+            body: "b",
+            attachments: paths,
+        };
+        assert_eq!(
+            mail("a@b.com", &["/f/one.txt", "/f/two.json"]).attachment_list(),
+            Some("/f/one.txt\n/f/two.json".to_owned())
+        );
+        assert_eq!(mail("a@b.com", &[]).attachment_list(), Some(String::new()));
+        assert_eq!(mail("", &[]).attachment_list(), None);
+        assert_eq!(mail("a b@c.com", &[]).attachment_list(), None);
+        assert_eq!(mail("a@b.com", &["/x\ny"]).attachment_list(), None);
+        assert!(email("nobody", "s", "b", &[]).is_err());
+    }
+
+    #[test]
+    fn open_url_takes_web_and_store_addresses_only() {
+        assert!(open_url("file:///etc/passwd").is_err());
+        assert!(open_url("javascript:alert(1)").is_err());
+    }
+
     #[test]
     fn unique_names_do_not_overwrite() {
         let dir = tempfile::tempdir().unwrap();
@@ -205,6 +296,28 @@ mod android {
                 &[
                     JValue::Object(&s_path.into()),
                     JValue::Object(&s_mime.into()),
+                ],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
+    pub(super) fn email(to: &str, subject: &str, body: &str, paths: &str) -> bool {
+        with_jni_class(SHARE, false, |env, class| {
+            let s_to = jni_str(env, to)?;
+            let s_subject = jni_str(env, subject)?;
+            let s_body = jni_str(env, body)?;
+            let s_paths = jni_str(env, paths)?;
+            env.call_static_method(
+                class,
+                "shareEmail",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+                &[
+                    JValue::Object(&s_to.into()),
+                    JValue::Object(&s_subject.into()),
+                    JValue::Object(&s_body.into()),
+                    JValue::Object(&s_paths.into()),
                 ],
             )
             .ok()

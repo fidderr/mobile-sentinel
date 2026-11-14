@@ -158,6 +158,7 @@ fn install_panic_log() {
                 &message,
             );
             log::error!("[mobile-sentinel] {report}");
+            crate::diag::log("panic", &report);
             if let Some(path) = &log_path {
                 append_panic_report(path, &report);
             }

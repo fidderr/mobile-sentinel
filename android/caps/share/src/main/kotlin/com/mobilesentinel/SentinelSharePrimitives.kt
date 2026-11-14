@@ -97,6 +97,47 @@ object SentinelSharePrimitives {
     }
 
     /**
+     * Compose an email in the user's own email app: ACTION_SEND_MULTIPLE with the files as
+     * content:// URIs. [paths] is one absolute path per line (may be empty).
+     * @return true if the email app was opened, false if there is none or it failed.
+     */
+    @JvmStatic
+    fun shareEmail(to: String, subject: String, body: String, paths: String): Boolean {
+        val context = SentinelPrimitives.getAppContext() ?: return false
+        return try {
+            val uris = ArrayList<Uri>()
+            for (path in paths.split("\n").filter { it.isNotEmpty() }) {
+                uris.add(uriFor(context, File(path)))
+            }
+            val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "message/rfc822"
+                putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+                putExtra(Intent.EXTRA_SUBJECT, subject)
+                putExtra(Intent.EXTRA_TEXT, body)
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (uris.isNotEmpty()) {
+                    val clip = android.content.ClipData.newRawUri("", uris[0])
+                    for (i in 1 until uris.size) clip.addItem(android.content.ClipData.Item(uris[i]))
+                    clipData = clip
+                }
+            }
+            if (intent.resolveActivity(context.packageManager) == null) {
+                Log.i(TAG, "shareEmail: no email app")
+                return false
+            }
+            val chooser = Intent.createChooser(intent, subject).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "shareEmail: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
      * A content:// URI for [file]: through the share capability's own
      * provider ("<package>.sentinelshareprovider", declared when the feature
      * is enabled), falling back to a host-declared "<package>.fileprovider".

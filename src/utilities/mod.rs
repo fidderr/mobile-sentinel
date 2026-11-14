@@ -3,6 +3,7 @@
 pub mod app_dirs;
 pub mod asset_extractor;
 pub mod boot;
+pub mod diag;
 pub mod event_loop;
 // Only the on-disk stores use it.
 #[cfg(any(feature = "jobs", feature = "state-store"))]

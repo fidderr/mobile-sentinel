@@ -13,6 +13,15 @@ change.
 
 ### Added
 
+- **`diag`: a rotating diagnostic log for bug reports.** `diag::log(tag, message)` appends a timestamped line to
+  `<files>/sentinel/diag.log`; at 256 KB it becomes `diag.1.log` and the older one goes, so the log never
+  exceeds 512 KB. `diag::read()`, `clear()`, `tail()`, `lines_since()`, `device_summary()` (maker, model, Android
+  version, language, time zone; no identifiers). Panics (`panic_log`) are written to it as well as to
+  `last_panic.txt`. `HealthReport::summary()` lists every check as ok or BLOCKED.
+- **`share::email(to, subject, body, attachments)`**: composes a mail in the user's own email app
+  (`ACTION_SEND_MULTIPLE`, files through the share FileProvider). Nothing is sent by the SDK and no internet
+  permission is involved; `Err` when there is no email app. The app declares `<queries>` for
+  `SEND_MULTIPLE` + `message/rfc822`. `share::open_url` also takes `market://` addresses.
 - **Android declarations in `sentinel.toml` (`[android.declare.*]`): no manifest XML in an app.** With
   `generate = true`, `build_sentinel` renders `AndroidManifest.xml` and the `res/xml/` files from
   tables: `permissions` and `[[android.declare.permission]]`, `feature`, `application`, `activity`,

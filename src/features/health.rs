@@ -114,6 +114,37 @@ impl HealthReport {
         }
     }
 
+    /// One line per check for a bug report: `name: ok` or `name: BLOCKED`, plus the channel
+    /// importance.
+    pub fn summary(&self) -> String {
+        let mut out = String::new();
+        for check in [
+            Check::ExactAlarms,
+            Check::Notifications,
+            Check::FullScreen,
+            Check::Overlay,
+            Check::BatteryUnrestricted,
+            Check::BackgroundAllowed,
+            Check::KeptWhenUnused,
+            Check::ChannelImportance,
+            Check::NotTotalSilence,
+            Check::BootSignal,
+        ] {
+            let state = if self.is_ok(check) { "ok" } else { "BLOCKED" };
+            out.push_str(&format!(
+                "{}: {state}
+",
+                check.key()
+            ));
+        }
+        out.push_str(&format!(
+            "channel_importance: {}
+",
+            self.channel_importance
+        ));
+        out
+    }
+
     /// Every check that is not fine, the ones that can silence an alarm first.
     pub fn problems(&self) -> Vec<Check> {
         [
@@ -229,6 +260,17 @@ mod tests {
                 Check::Overlay
             ]
         );
+    }
+
+    #[test]
+    fn the_summary_names_every_blocked_check() {
+        let r = HealthReport {
+            battery_unrestricted: false,
+            ..Default::default()
+        };
+        let s = r.summary();
+        assert!(s.contains("battery_unrestricted: BLOCKED"));
+        assert!(s.contains("exact_alarms: ok"));
     }
 
     #[test]
