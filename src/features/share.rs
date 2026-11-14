@@ -65,9 +65,10 @@ pub struct Email<'a> {
 
 impl Email<'_> {
     /// The attachments as one string for the platform side, one path per line. `None` when
-    /// the mail cannot be made: no address, or a path with a newline in it.
+    /// the mail cannot be made: an address that is not one (an empty `to` is fine: the user types
+    /// it), or a path with a newline in it.
     pub fn attachment_list(&self) -> Option<String> {
-        if !self.to.contains('@') || self.to.contains(['\n', '\r', ' ']) {
+        if !self.to.is_empty() && (!self.to.contains('@') || self.to.contains(['\n', '\r', ' '])) {
             return None;
         }
         if self
@@ -243,7 +244,8 @@ mod tests {
             Some("/f/one.txt\n/f/two.json".to_owned())
         );
         assert_eq!(mail("a@b.com", &[]).attachment_list(), Some(String::new()));
-        assert_eq!(mail("", &[]).attachment_list(), None);
+        assert_eq!(mail("", &[]).attachment_list(), Some(String::new()));
+        assert_eq!(mail("nobody", &[]).attachment_list(), None);
         assert_eq!(mail("a b@c.com", &[]).attachment_list(), None);
         assert_eq!(mail("a@b.com", &["/x\ny"]).attachment_list(), None);
         assert!(email("nobody", "s", "b", &[]).is_err());

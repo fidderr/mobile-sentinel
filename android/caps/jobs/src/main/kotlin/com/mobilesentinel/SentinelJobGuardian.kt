@@ -184,7 +184,7 @@ object SentinelJobGuardian {
                             if (isUiFrozen(context, mainPid, job.sinceMs, timeout)) {
                                 SentinelRing.noteFrozenKill(context)
                                 noteUiFailure(context, config)
-                                killFrozenMain(mainPid, jobId, timeout)
+                                killFrozenMain(context, mainPid, jobId, timeout)
                                 break
                             }
                         }
@@ -243,13 +243,15 @@ object SentinelJobGuardian {
         val allowed = config?.optLong("ui_failures_before_backup", 0) ?: 0
         if (allowed > 0 && uiFailures >= allowed && !SentinelRing.uiFailed(context)) {
             Log.w(TAG, "UI failed $uiFailures times, handing over to the backup screen")
+            SentinelDiag.log(context, "sentinel", "UI failed $uiFailures times: backup screen takes over")
             SentinelRing.markUiFailed(context)
         }
     }
 
     /** Kill MAIN so the next poll relaunches it. */
-    private fun killFrozenMain(mainPid: Int, jobId: String, timeoutMs: Long) {
+    private fun killFrozenMain(context: Context, mainPid: Int, jobId: String, timeoutMs: Long) {
         livenessKills++
+        SentinelDiag.log(context, "sentinel", "UI frozen for more than ${timeoutMs}ms: restarting the app, kill #$livenessKills")
         Log.w(TAG, "UI frozen for more than ${timeoutMs}ms — killing MAIN (pid $mainPid), kill #$livenessKills")
         headsUpSent.remove(jobId)
         android.os.Process.killProcess(mainPid)

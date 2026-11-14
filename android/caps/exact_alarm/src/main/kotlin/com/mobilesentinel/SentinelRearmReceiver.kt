@@ -20,6 +20,7 @@ class SentinelRearmReceiver : BroadcastReceiver() {
         Log.i(TAG, "onReceive: ${intent.action}")
         SentinelPrimitives.init(context.applicationContext)
         if (!SentinelBoot.filesAvailable(context)) return
+        SentinelDiag.log(context, "wake", "${intent.action}")
         val pending = goAsync()
         Thread({
             try {

@@ -111,7 +111,7 @@ object SentinelSharePrimitives {
             }
             val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
                 type = "message/rfc822"
-                putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+                if (to.isNotEmpty()) putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
                 putExtra(Intent.EXTRA_SUBJECT, subject)
                 putExtra(Intent.EXTRA_TEXT, body)
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
@@ -143,6 +143,18 @@ object SentinelSharePrimitives {
      * is enabled), falling back to a host-declared "<package>.fileprovider".
      */
     private fun uriFor(context: Context, file: File): Uri {
+        return try {
+            providerUri(context, file)
+        } catch (e: IllegalArgumentException) {
+            // A file outside the provider's roots, such as the device-protected files of an app
+            // that starts before the first unlock: share a copy from the cache.
+            val copy = File(File(context.cacheDir, "shared").apply { mkdirs() }, file.name)
+            file.copyTo(copy, overwrite = true)
+            providerUri(context, copy)
+        }
+    }
+
+    private fun providerUri(context: Context, file: File): Uri {
         return try {
             FileProvider.getUriForFile(context, "${context.packageName}.sentinelshareprovider", file)
         } catch (e: IllegalArgumentException) {
