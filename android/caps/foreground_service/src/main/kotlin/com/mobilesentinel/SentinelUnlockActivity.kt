@@ -218,7 +218,7 @@ class SentinelUnlockActivity : Activity() {
         if (handedOver || !SentinelBoot.isUserUnlocked(this)) return
         handedOver = true
         handedOverAt = SystemClock.elapsedRealtime()
-        val activity = ring?.plan?.optString("activity_fqcn", "").orEmpty()
+        val activity = ring?.plan?.let { SentinelCompat.optString(it, "activity_fqcn") }.orEmpty()
         if (activity.isNotEmpty()) {
             Log.i(TAG, "unlocked, handing over to the app's screen")
             try {

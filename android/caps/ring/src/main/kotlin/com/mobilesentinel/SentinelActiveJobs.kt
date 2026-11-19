@@ -135,5 +135,5 @@ object SentinelActiveJobs {
     /** The activity to bring up for [job], from its payload, or null. */
     @JvmStatic
     fun activityOf(job: ActiveJob): String? =
-        job.json.optJSONObject("payload")?.optString("activity_fqcn", "")?.takeIf { it.isNotBlank() }
+        job.json.optJSONObject("payload")?.let { SentinelCompat.optString(it, "activity_fqcn") }?.takeIf { it.isNotBlank() }
 }

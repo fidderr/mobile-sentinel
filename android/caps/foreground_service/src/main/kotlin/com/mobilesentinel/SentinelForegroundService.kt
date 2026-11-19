@@ -360,7 +360,7 @@ class SentinelForegroundService : Service() {
      * then. A UI that keeps failing gets the backup screen, for a plan that asks for one.
      */
     private fun screenFor(plan: JSONObject): Screen {
-        val activity = plan.optString("activity_fqcn", "")
+        val activity = SentinelCompat.optString(plan, "activity_fqcn")
         return when {
             activity.isNotEmpty() && !SentinelBoot.screenCanStart(this, activity) -> Screen.UNLOCK
             plan.optInt("backup_holds", 0) > 0 && SentinelRing.uiFailed(this) -> Screen.BACKUP
@@ -435,7 +435,7 @@ class SentinelForegroundService : Service() {
             postedFullScreen = false
         }
         showForeground()
-        if (!handedOver) launch(plan.optString("activity_fqcn", ""))
+        if (!handedOver) launch(SentinelCompat.optString(plan, "activity_fqcn"))
     }
 
     /**
@@ -615,7 +615,7 @@ class SentinelForegroundService : Service() {
         val activity = when (screen) {
             Screen.UNLOCK -> SentinelUnlockActivity::class.java.name
             Screen.BACKUP -> SentinelBackupActivity::class.java.name
-            Screen.APP -> plan.optString("activity_fqcn", "")
+            Screen.APP -> SentinelCompat.optString(plan, "activity_fqcn")
         }
         if (activity.isNotEmpty()) {
             val tap = Intent().apply {

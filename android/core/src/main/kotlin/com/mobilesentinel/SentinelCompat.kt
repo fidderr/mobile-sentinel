@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.WindowManager
+import org.json.JSONObject
 
 /**
  * What differs between Android versions, in one place. The modules call these instead of an
@@ -42,4 +43,12 @@ object SentinelCompat {
             )
         }
     }
+
+    /**
+     * A string of a JSON object, or [fallback] when it is missing or JSON null. Android's
+     * `optString` turns a JSON null into the text "null", which Rust sends for an unset option.
+     */
+    @JvmStatic
+    fun optString(json: JSONObject, name: String, fallback: String = ""): String =
+        if (json.isNull(name)) fallback else json.optString(name, fallback)
 }
