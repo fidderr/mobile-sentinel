@@ -175,7 +175,7 @@ fn main() {
     );
     run_gradle(
         &config.project_path,
-        &[sentinel_build_root_arg(&config.project_path)],
+        &gradle_args(&config.project_path),
         task,
     );
 
@@ -872,6 +872,19 @@ fn sentinel_build_root_arg(project_path: &Path) -> String {
     format!("-PsentinelBuildRoot={s}")
 }
 
+/// The `-PsentinelMinSdk=<n>` Gradle argument: the app's `minSdk`, which every module takes as its
+/// own. Left out when the project names none, and the modules then use their default.
+fn sentinel_min_sdk_arg(project_path: &Path) -> Option<String> {
+    mobile_sentinel::build::helper::app_min_sdk(project_path)
+        .map(|min| format!("-PsentinelMinSdk={min}"))
+}
+
+fn gradle_args(project_path: &Path) -> Vec<String> {
+    let mut args = vec![sentinel_build_root_arg(project_path)];
+    args.extend(sentinel_min_sdk_arg(project_path));
+    args
+}
+
 /// Wipe the centralized Gradle module build output so each `build_sentinel`
 /// run starts clean. Every module redirects its `buildDirectory` under the
 /// consumer-side build root (`<project>/sentinel-build`), so removing that one
@@ -1202,6 +1215,29 @@ mod tests {
             capabilities_from_libraries(&[missing, libs]),
             Some(vec!["audio".to_string(), "scanner".to_string()])
         );
+    }
+
+    #[test]
+    fn modules_get_the_apps_min_sdk() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(sentinel_min_sdk_arg(dir.path()), None);
+        let app = dir.path().join("app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(
+            app.join("build.gradle.kts"),
+            "android {
+    defaultConfig {
+        minSdk = 29
+    }
+}
+",
+        )
+        .unwrap();
+        assert_eq!(
+            sentinel_min_sdk_arg(dir.path()).as_deref(),
+            Some("-PsentinelMinSdk=29")
+        );
+        assert_eq!(gradle_args(dir.path()).len(), 2);
     }
 
     #[test]

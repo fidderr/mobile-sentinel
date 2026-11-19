@@ -37,7 +37,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        minSdk = 31
+        minSdk = (project.findProperty("sentinelMinSdk") as String?)?.toInt() ?: 31
         targetSdk = 34
     }
 

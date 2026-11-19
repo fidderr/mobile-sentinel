@@ -223,7 +223,7 @@ fn trim_app_build(content: &str) -> String {
 }
 
 /// The oldest Android the app runs on, as the generated project says.
-fn app_min_sdk(project_path: &Path) -> Option<u32> {
+pub fn app_min_sdk(project_path: &Path) -> Option<u32> {
     let content = fs::read_to_string(project_path.join("app/build.gradle.kts")).ok()?;
     content.lines().find_map(|line| {
         line.trim()

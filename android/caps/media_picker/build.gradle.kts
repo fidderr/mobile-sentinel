@@ -18,7 +18,7 @@ layout.buildDirectory.set(
 android {
     namespace = "com.mobilesentinel.mediapicker"
     compileSdk = 34
-    defaultConfig { minSdk = 31 }
+    defaultConfig { minSdk = (project.findProperty("sentinelMinSdk") as String?)?.toInt() ?: 31 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
