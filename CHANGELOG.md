@@ -13,6 +13,12 @@ change.
 
 ### Added
 
+- **Kotlin tests.** JVM tests (JUnit 4, Robolectric 4.18.1) for alarm arming, the boot replay, the alarm receiver, the ring service,
+  the vibrator, permissions and the version guards, run across Android 8 to 16 with `gradle -p android/ci-check testDebugUnitTest
+  -PsentinelMinSdk=26` (needs a JDK 21 for Android 16). `tests/kotlin_contract.rs` checks every JNI `external fun` against its Rust
+  export and pins the ring plan JSON in `tests/fixtures`, which the Kotlin tests read.
+- **Fixed:** an unset `activity_fqcn` (JSON null) was read as the class name "null" by Android's `optString`, so a ring without an
+  app screen got a notification pointing at a screen that does not exist. `SentinelCompat.optString` reads null as missing.
 - **Apps can run on Android older than 12: `min_sdk` in `sentinel.toml` now reaches every Kotlin module.** The
   modules took a fixed `minSdk = 31`, so the manifest merger refused an app with a lower minimum. `build_sentinel`
   passes the app's `minSdk` to Gradle as `-PsentinelMinSdk`; a module without it keeps 31, so an app that sets no

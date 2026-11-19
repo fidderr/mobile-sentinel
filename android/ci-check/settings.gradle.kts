@@ -3,6 +3,7 @@
 //
 //   gradle -p android/ci-check compileDebugKotlin
 //   gradle -p android/ci-check lintDebug -PsentinelMinSdk=26   (NewApi is an error: every call newer than 26 needs a guard)
+//   gradle -p android/ci-check testDebugUnitTest -PsentinelMinSdk=26   (Robolectric tests of the modules, in their src/test)
 rootProject.name = "sentinel-ci-check"
 
 include(":sentinel-core")

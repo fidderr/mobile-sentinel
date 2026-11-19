@@ -578,6 +578,22 @@ cargo test  -p mobile-sentinel --features alarm-kit
 cargo clippy -p mobile-sentinel --all-features
 ```
 
+The Kotlin side has JVM tests (JUnit 4 + Robolectric 4.18.1) next to each module, in `src/test`. They run the real
+receivers, services and guards across Android 8 to 16 (`@Config(sdk = [...])`), with no device. One Gradle command
+runs them all; Robolectric needs a JDK 21 installed for Android 16 (Gradle finds it through `JAVA_HOME_21_X64`, or
+`org.gradle.java.installations.paths`), while Gradle itself stays on 17:
+
+```bash
+gradle -p android/ci-check testDebugUnitTest -PsentinelMinSdk=26   # or android/host/gradlew
+gradle -p android/ci-check compileDebugKotlin
+gradle -p android/ci-check lintDebug -PsentinelMinSdk=26            # NewApi is an error
+```
+
+`tests/kotlin_contract.rs` (in `cargo test --all-features`) ties the two sides together: every Kotlin
+`external fun` has its `Java_...` export in Rust and the other way round, and the ring plan Rust serializes
+(`FireRequest`) is pinned in `tests/fixtures/ring-plan-*.json`, which the Kotlin tests read too
+(`UPDATE_FIXTURES=1 cargo test --all-features --test kotlin_contract` rewrites them).
+
 Invariant tests guard the contract: `tests/generic_strings.rs` (no app-specific
 strings in the crate), `tests/correctness_properties.rs`
 (LoadContext-on-every-trigger), and `tests/manifest_process_topology.rs` (which

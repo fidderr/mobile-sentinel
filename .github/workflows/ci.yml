@@ -83,15 +83,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # 17 runs Gradle and the compiler; 21 (JAVA_HOME_21_X64) runs the Robolectric tests, which
+      # need it for Android 16. The last one listed is the default.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: |
+            21
+            17
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.1.0"
       - run: gradle -p android/ci-check compileDebugKotlin
       - run: gradle -p android/ci-check lintDebug -PsentinelMinSdk=26
+      - run: gradle -p android/ci-check testDebugUnitTest -PsentinelMinSdk=26
 
   android:
     name: android cross-check

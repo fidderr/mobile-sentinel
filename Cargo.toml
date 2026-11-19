@@ -18,6 +18,7 @@ exclude = [
     "android/builds/",
     "android/.gradle/",
     "android/ci-check/",
+    "android/**/src/test/",
     "sentinel/",
     "target/",
 ]
