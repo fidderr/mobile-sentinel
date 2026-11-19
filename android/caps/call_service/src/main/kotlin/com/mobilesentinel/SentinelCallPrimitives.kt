@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 
 /**
@@ -75,7 +76,11 @@ object SentinelCallPrimitives {
         val ctx = SentinelPrimitives.getAppContext() ?: throw IllegalStateException("no context")
         val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audio.mode = AudioManager.MODE_IN_COMMUNICATION
-        if (on) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            @Suppress("DEPRECATION")
+            audio.isSpeakerphoneOn = on
+            true
+        } else if (on) {
             val speaker = audio.availableCommunicationDevices
                 .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
             speaker != null && audio.setCommunicationDevice(speaker)
@@ -94,7 +99,12 @@ object SentinelCallPrimitives {
         try {
             val ctx = SentinelPrimitives.getAppContext() ?: return
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            audio.clearCommunicationDevice()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audio.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                audio.isSpeakerphoneOn = false
+            }
             audio.mode = AudioManager.MODE_NORMAL
         } catch (e: Throwable) {
             Log.w(TAG, "endAudio: ${e.message}", e)

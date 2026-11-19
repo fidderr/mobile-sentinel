@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
@@ -213,6 +214,7 @@ object SentinelSharePrimitives {
     fun saveToDownloads(path: String, name: String, mimeType: String): String {
         val context = SentinelPrimitives.getAppContext() ?: return ""
         val src = File(path)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToDownloadsFolder(src, name)
         return try {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
@@ -233,6 +235,18 @@ object SentinelSharePrimitives {
             Log.w(TAG, "saveToDownloads($path): ${e.message}", e)
             ""
         }
+    }
+
+    /** Before Android 10 there is no MediaStore.Downloads: the folder itself, which needs the storage permission. */
+    @Suppress("DEPRECATION")
+    private fun saveToDownloadsFolder(src: File, name: String): String = try {
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        dir.mkdirs()
+        src.copyTo(File(dir, name), overwrite = true)
+        "Download/$name"
+    } catch (e: Throwable) {
+        Log.w(TAG, "saveToDownloads(${src.path}): ${e.message}", e)
+        ""
     }
 }
 

@@ -108,8 +108,7 @@ class SentinelScannerActivity : Activity() {
         // Show over the lock screen + turn the screen on, matching the host's
         // lock-screen flags so scanning works when the phone is locked. It does not ask for
         // the phone to be unlocked: that puts the PIN prompt over the camera.
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        SentinelCompat.showOverLockScreen(this)
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED

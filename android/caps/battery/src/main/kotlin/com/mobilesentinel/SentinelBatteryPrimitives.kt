@@ -56,7 +56,8 @@ object SentinelBatteryPrimitives {
     fun backgroundAllowed(): Boolean {
         return try {
             val c: Context = SentinelPrimitives.getAppContext() ?: return true
-            !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+                !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
         } catch (e: Throwable) {
             Log.w(TAG, "backgroundAllowed: ${e.message}")
             true
@@ -71,7 +72,7 @@ object SentinelBatteryPrimitives {
     fun keptWhenUnused(): Boolean {
         return try {
             val c: Context = SentinelPrimitives.getAppContext() ?: return true
-            c.packageManager.isAutoRevokeWhitelisted
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || c.packageManager.isAutoRevokeWhitelisted
         } catch (e: Throwable) {
             Log.w(TAG, "keptWhenUnused: ${e.message}")
             true

@@ -11,6 +11,26 @@ change.
 
 ## [Unreleased]
 
+### Added
+
+- **Apps can run on Android older than 12: `min_sdk` in `sentinel.toml` now reaches every Kotlin module.** The
+  modules took a fixed `minSdk = 31`, so the manifest merger refused an app with a lower minimum. `build_sentinel`
+  passes the app's `minSdk` to Gradle as `-PsentinelMinSdk`; a module without it keeps 31, so an app that sets no
+  `min_sdk` is unchanged.
+- **Guards for every call newer than API 26.** `SentinelCompat` (core) holds the version differences: exact alarms
+  need no permission below Android 12 (`canScheduleExactAlarms` threw NoSuchMethodError there, so alarms were never
+  armed), `Vibrator` instead of `VibratorManager`, window flags instead of `setShowWhenLocked`/`setTurnScreenOn`
+  below 8.1. The kiosk's bars are hidden with `systemUiVisibility` below Android 11 (the insets controller threw an
+  Error that `catch (e: Exception)` does not catch). Also guarded: `isBackgroundRestricted` (28),
+  `isAutoRevokeWhitelisted` (30), call audio routing (31, the speaker switch before), foreground service types (29),
+  `getParcelableExtra` (33), `MediaRecorder(Context)` (31), `Activity.display` (30). `saveToDownloads` copies into the
+  Downloads folder itself below Android 10 (it needs the storage permission there).
+- **`permissions`: `POST_NOTIFICATIONS` below Android 13.** There is no such permission there: `status` says whether
+  notifications are on, and `request` opens the app's notification settings when they are off, instead of a dialog
+  that never comes.
+- **CI lint gate.** `gradle -p android/ci-check lintDebug -PsentinelMinSdk=26` fails on a new unguarded call
+  newer than API 26 (`NewApi` is an error).
+
 ## [0.6.0] - 2026-11-14
 
 ### Added

@@ -2,6 +2,7 @@ package com.mobilesentinel
 
 import android.app.Activity
 import android.app.Application
+import android.os.Build
 import android.os.Bundle
 import android.content.Context
 import android.provider.Settings
@@ -239,7 +240,8 @@ object SentinelDisplayPrimitives {
                 var modeId = 0
                 var rate = 0f
                 if (wanted != 0f) {
-                    val display = activity.display
+                    @Suppress("DEPRECATION")
+                    val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) activity.display else activity.windowManager.defaultDisplay
                     val modes = display?.supportedModes?.map {
                         floatArrayOf(it.modeId.toFloat(), it.physicalWidth.toFloat(), it.physicalHeight.toFloat(), it.refreshRate)
                     } ?: emptyList()

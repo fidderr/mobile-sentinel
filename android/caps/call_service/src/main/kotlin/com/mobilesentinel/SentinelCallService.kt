@@ -15,6 +15,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -78,14 +79,24 @@ class SentinelCallService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun Intent.parcelable(): Intent? = getParcelableExtra(EXTRA_DATA, Intent::class.java)
+    private fun Intent.parcelable(): Intent? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(EXTRA_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableExtra(EXTRA_DATA)
+        }
 
     private fun goForeground(withScreen: Boolean) {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         if (camera) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         if (withScreen) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         try {
-            startForeground(NOTIFICATION_ID, notification(withScreen), types)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification(withScreen), types)
+            } else {
+                startForeground(NOTIFICATION_ID, notification(withScreen))
+            }
         } catch (e: Throwable) {
             // Without the permission for one of the types: at least the rest.
             Log.e(TAG, "startForeground failed: ${e.message}", e)

@@ -84,8 +84,7 @@ class SentinelUnlockActivity : Activity() {
         super.onCreate(savedInstanceState)
         SentinelPrimitives.init(applicationContext)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        SentinelCompat.showOverLockScreen(this)
         setContentView(buildViews())
         // Back leads nowhere: there is nothing behind this screen but the lock screen.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

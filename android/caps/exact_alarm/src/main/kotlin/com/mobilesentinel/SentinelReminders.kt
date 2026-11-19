@@ -86,7 +86,7 @@ object SentinelReminders {
             // To the minute where the app may. Left to itself Android puts this off by 75% of the
             // time until it is due, up to an hour: set the night before, that is past the ring it
             // is about, and it is then dropped.
-            if (manager.canScheduleExactAlarms()) {
+            if (SentinelCompat.exactAlarmsAllowed(manager)) {
                 manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
             } else {
                 manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)

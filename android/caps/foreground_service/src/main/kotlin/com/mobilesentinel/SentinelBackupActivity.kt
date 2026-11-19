@@ -70,8 +70,7 @@ class SentinelBackupActivity : Activity() {
         super.onCreate(savedInstanceState)
         SentinelPrimitives.init(applicationContext)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        SentinelCompat.showOverLockScreen(this)
         setContentView(buildViews())
         loadRing()
     }

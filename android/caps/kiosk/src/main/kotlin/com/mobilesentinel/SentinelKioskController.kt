@@ -388,6 +388,15 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         engageOn(activity)
     }
 
+    @Suppress("DEPRECATION")
+    private fun applyLegacyImmersive(window: android.view.Window) {
+        var flags = android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        if (hideStatusBar) flags = flags or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        if (hideNavBar) flags = flags or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (hideStatusBar || hideNavBar) flags = flags or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        window.decorView.systemUiVisibility = flags
+    }
+
     /**
      * Apply the lock to the target [activity] that is on screen: exclude it from
      * recents, immersive policy, show-when-locked, and consume Back. Runs when
@@ -433,25 +442,29 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // them again temporarily on swipe-down.
         try {
             val window = activity.window
-            val controller = window.insetsController
-            if (hideStatusBar || hideNavBar) {
-                window.setDecorFitsSystemWindows(false)
-                var mask = 0
-                if (hideStatusBar) mask = mask or android.view.WindowInsets.Type.statusBars()
-                if (hideNavBar) mask = mask or android.view.WindowInsets.Type.navigationBars()
-                controller?.hide(mask)
-                controller?.systemBarsBehavior =
-                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                // Make sure any bar we are NOT hiding is shown.
-                val showMask = (android.view.WindowInsets.Type.statusBars()
-                        or android.view.WindowInsets.Type.navigationBars()) and mask.inv()
-                if (showMask != 0) controller?.show(showMask)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                applyLegacyImmersive(window)
             } else {
-                window.setDecorFitsSystemWindows(true)
-                controller?.show(
-                    android.view.WindowInsets.Type.statusBars()
-                            or android.view.WindowInsets.Type.navigationBars()
-                )
+                val controller = window.insetsController
+                if (hideStatusBar || hideNavBar) {
+                    window.setDecorFitsSystemWindows(false)
+                    var mask = 0
+                    if (hideStatusBar) mask = mask or android.view.WindowInsets.Type.statusBars()
+                    if (hideNavBar) mask = mask or android.view.WindowInsets.Type.navigationBars()
+                    controller?.hide(mask)
+                    controller?.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    // Make sure any bar we are NOT hiding is shown.
+                    val showMask = (android.view.WindowInsets.Type.statusBars()
+                            or android.view.WindowInsets.Type.navigationBars()) and mask.inv()
+                    if (showMask != 0) controller?.show(showMask)
+                } else {
+                    window.setDecorFitsSystemWindows(true)
+                    controller?.show(
+                        android.view.WindowInsets.Type.statusBars()
+                                or android.view.WindowInsets.Type.navigationBars()
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "immersive mode failed: ${e.message}")
@@ -460,8 +473,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         // Runtime assertion — the manifest attributes may not engage if the
         // activity reaches top via some OEM paths.
         try {
-            activity.setShowWhenLocked(true)
-            activity.setTurnScreenOn(true)
+            SentinelCompat.showOverLockScreen(activity)
             // A challenge can take longer than the screen timeout.
             activity.window.addFlags(KEEP_AWAKE_FLAGS)
         } catch (e: Exception) {

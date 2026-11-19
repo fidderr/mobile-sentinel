@@ -463,7 +463,7 @@ object SentinelRing {
             val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pi = watchdogIntent(context, PendingIntent.FLAG_UPDATE_CURRENT) ?: return
             val at = System.currentTimeMillis() + WATCHDOG_LEAD_MS
-            if (!am.canScheduleExactAlarms()) {
+            if (!SentinelCompat.exactAlarmsAllowed(am)) {
                 am.set(AlarmManager.RTC_WAKEUP, at, pi)
             } else {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)

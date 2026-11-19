@@ -1,6 +1,9 @@
 package com.mobilesentinel
 
+import android.app.NotificationManager
+import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import android.content.Intent
@@ -34,6 +37,7 @@ object SentinelPermissionPrimitives {
     @JvmStatic
     fun requestRuntimePermission(permission: String): Int {
         val c = SentinelPrimitives.getAppContext() ?: return 1
+        if (isImplicitNotificationPermission(permission)) return requestNotificationsBelow33(c)
         return try {
             val granted = c.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
             if (granted) {
@@ -60,9 +64,35 @@ object SentinelPermissionPrimitives {
         }
     }
 
+    /** Before Android 13 there is no notification permission: notifications are on until the user switches them off. */
+    private fun isImplicitNotificationPermission(permission: String): Boolean =
+        permission == "android.permission.POST_NOTIFICATIONS" && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+
+    private fun notificationsEnabled(c: Context): Boolean = try {
+        c.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
+    } catch (e: Throwable) {
+        false
+    }
+
+    /** Nothing to ask in a dialog there: when they are off, the app's notification settings open instead. */
+    private fun requestNotificationsBelow33(c: Context): Int {
+        if (notificationsEnabled(c)) return 0
+        try {
+            c.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "notification settings: ${e.message}")
+        }
+        return 1
+    }
+
     @JvmStatic
     fun checkPermission(permission: String): Boolean {
         val c = SentinelPrimitives.getAppContext() ?: return false
+        if (isImplicitNotificationPermission(permission)) return notificationsEnabled(c)
         return try {
             c.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
         } catch (e: Throwable) {

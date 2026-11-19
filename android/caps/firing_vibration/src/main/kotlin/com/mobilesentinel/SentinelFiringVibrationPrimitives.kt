@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.os.VibratorManager
 import android.util.Log
 
 /**
@@ -66,8 +65,7 @@ object SentinelFiringVibrationPrimitives {
 
     private fun vibrator(context: Context): Vibrator? {
         return try {
-            val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-            manager?.defaultVibrator
+            SentinelCompat.vibrator(context)
         } catch (e: Throwable) {
             Log.w(TAG, "vibrator(): ${e.message}", e)
             null

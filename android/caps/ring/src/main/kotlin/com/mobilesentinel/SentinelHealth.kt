@@ -36,7 +36,7 @@ object SentinelHealth {
         }
         val nm = c.getSystemService(NotificationManager::class.java)
         read("exact_alarms") {
-            c.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+            SentinelCompat.exactAlarmsAllowed(c.getSystemService(AlarmManager::class.java))
         }
         read("notifications") { nm.areNotificationsEnabled() }
         read("full_screen") {
@@ -47,10 +47,11 @@ object SentinelHealth {
             c.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName)
         }
         read("background_allowed") {
-            !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+                !c.getSystemService(ActivityManager::class.java).isBackgroundRestricted
         }
         read("kept_when_unused") {
-            c.packageManager.isAutoRevokeWhitelisted
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || c.packageManager.isAutoRevokeWhitelisted
         }
         read("channel_importance") {
             nm.getNotificationChannel(channelId)?.importance ?: -1
