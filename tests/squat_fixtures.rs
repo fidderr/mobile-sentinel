@@ -392,3 +392,59 @@ fn every_guard_is_needed() {
     };
     assert_eq!(count(&fast, strict), 0, "jolt limit");
 }
+
+/// What `adb emu sensor set acceleration` can do (the device scenario in AlarmFree): a squat's
+/// acceleration set every 0.25 to 0.45 s (the shell's sleep and the adb round trip), the value of
+/// that moment held until the next set.
+#[test]
+fn a_squat_set_by_hand_in_steps_counts() {
+    let mut wrong = Vec::new();
+    for (period, depth, lo, hi, seed) in [
+        (3.0, 0.6, 0.25, 0.45, 1u64),
+        (3.0, 0.6, 0.25, 0.45, 2),
+        (3.0, 0.6, 0.25, 0.45, 3),
+        (3.0, 0.5, 0.2, 0.5, 4),
+        (4.0, 0.7, 0.25, 0.45, 5),
+        (2.5, 0.5, 0.25, 0.45, 6),
+    ] {
+        let mut rng = Rng(seed);
+        let truth = squats(3, period, depth, 1.0, 2.0);
+        let mut sets = vec![(0.0, 0.0)];
+        let mut t = 0.0;
+        while t < 2.0 + 3.0 * (period + 1.0) + 2.0 {
+            t += lo + (hi - lo) * rng.next();
+            sets.push((t, truth(t)));
+        }
+        let scene = Scene {
+            seconds: t,
+            accel: Box::new(move |t| {
+                let held = sets
+                    .iter()
+                    .rev()
+                    .find(|(at, _)| *at <= t)
+                    .map_or(0.0, |s| s.1);
+                [0.0, 0.0, held]
+            }),
+            orientation: Box::new(|_| [0.0; 3]),
+        };
+        let samples: Vec<_> = sample_scene(&scene, 5)
+            .into_iter()
+            .map(|(t, [x, y, z])| (t as f64 * 1e-9, x, y, z))
+            .collect();
+        let got = count(&samples, SquatConfig::default());
+        // The held steps are a coarse squat: one in three may slip by, none may count twice.
+        if !(2..=3).contains(&got) {
+            wrong.push(format!(
+                "T={period} D={depth} sets {lo}-{hi}: counted {got}"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{}",
+        wrong.join(
+            "
+"
+        )
+    );
+}
