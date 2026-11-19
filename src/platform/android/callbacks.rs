@@ -158,8 +158,9 @@ pub extern "system" fn Java_com_mobilesentinel_SentinelBridge_nativeOnAccelerome
     x: jni::sys::jdouble,
     y: jni::sys::jdouble,
     z: jni::sys::jdouble,
+    timestamp_ns: jni::sys::jlong,
 ) {
-    crate::platform::android::sensor_state::on_accelerometer_data(x, y, z);
+    crate::platform::android::sensor_state::on_accelerometer_data(x, y, z, timestamp_ns);
 }
 
 /// Called from Kotlin when step count updates.

@@ -13,6 +13,16 @@ change.
 
 ### Added
 
+- **Squat counter.** `sensors::start_squat_counter()`, `squat_count()`, `reset_squat_count()`, `stop_squat_counter()`: a repetition
+  detector in Rust (gravity low-pass, vertical linear acceleration, a down/bottom/top lobe state machine, depth by double integration,
+  rotation and jolt rejection) next to the shake counter. `sensors::SquatDetector` and `SquatConfig` are public: pure, taking
+  `(t, x, y, z)` samples. The accelerometer callback now passes the sensor event's timestamp (`SentinelBridge.onAccelerometerData` and
+  the JNI export take a fifth, `Long`, argument), and `startAccelerometer()` keeps its one listener when called twice.
+- **Accelerometer recorder** for tuning: `sensors::start_recording(path)` / `stop_recording()` write every raw sample to a CSV.
+  `tests/fixtures/squat/*.csv` (synthetic ones plus any recording with an `# expect:` line) are run through the detector by
+  `cargo test`. See `docs/SQUAT_TUNING.md`.
+- **Contract test for JNI parameter lists:** `external_signatures_match_the_rust_exports` compares the number and primitive types of
+  every Kotlin `external fun` with its Rust export (a changed signature used to compile on both sides and crash on the phone).
 - **Kotlin tests.** JVM tests (JUnit 4, Robolectric 4.18.1) for alarm arming, the boot replay, the alarm receiver, the ring service,
   the vibrator, permissions and the version guards, run across Android 8 to 16 with `gradle -p android/ci-check testDebugUnitTest
   -PsentinelMinSdk=26` (needs a JDK 21 for Android 16). `tests/kotlin_contract.rs` checks every JNI `external fun` against its Rust

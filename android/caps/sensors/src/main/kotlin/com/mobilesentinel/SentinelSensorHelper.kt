@@ -49,10 +49,12 @@ object SentinelSensorHelper {
     }
 
     /**
-     * Start accelerometer updates. Delivers (x, y, z) to Rust via bridge.
+     * Start accelerometer updates. Delivers (x, y, z) and the event's own timestamp (nanoseconds,
+     * the sensor clock) to Rust via bridge. Starting twice keeps the one listener.
      */
     @JvmStatic
     fun startAccelerometer(): Boolean {
+        if (accelListener != null) return true
         val sm = manager() ?: return false
         val sensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return false
 
@@ -61,7 +63,7 @@ object SentinelSensorHelper {
                 val x = event.values[0].toDouble()
                 val y = event.values[1].toDouble()
                 val z = event.values[2].toDouble()
-                SentinelBridge.onAccelerometerData(x, y, z)
+                SentinelBridge.onAccelerometerData(x, y, z, event.timestamp)
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

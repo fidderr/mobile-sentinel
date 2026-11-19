@@ -3,8 +3,12 @@
 //! Consumer UI polls the values via the public API.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
+
+use crate::features::sensors::recorder::Recorder;
+use crate::features::sensors::squat::SquatDetector;
 
 /// Global sensor state — written by JNI callbacks, read by consumer UI.
 pub struct SensorState {
@@ -12,6 +16,10 @@ pub struct SensorState {
     pub shake_count: AtomicI32,
     /// Current step count (relative to when step counter was started).
     pub step_count: AtomicI32,
+    /// Squats counted by the squat detector since it was started or reset.
+    pub squat_count: AtomicI32,
+    /// Whether the squat detector gets the accelerometer samples.
+    pub squat_active: AtomicBool,
     /// Whether accelerometer is currently active.
     pub accel_active: AtomicBool,
     /// Whether step counter is currently active.
@@ -21,6 +29,8 @@ pub struct SensorState {
 static STATE: Lazy<SensorState> = Lazy::new(|| SensorState {
     shake_count: AtomicI32::new(0),
     step_count: AtomicI32::new(0),
+    squat_count: AtomicI32::new(0),
+    squat_active: AtomicBool::new(false),
     accel_active: AtomicBool::new(false),
     steps_active: AtomicBool::new(false),
 });
@@ -33,6 +43,59 @@ pub fn reset_shake_count() {
 /// Get current shake count.
 pub fn get_shake_count() -> i32 {
     STATE.shake_count.load(Ordering::Relaxed)
+}
+
+/// Reset the squat count and forget the signal so far.
+pub fn reset_squat_count() {
+    STATE.squat_count.store(0, Ordering::Relaxed);
+    if let Ok(mut detector) = SQUAT_DETECTOR.lock() {
+        detector.reset();
+    }
+}
+
+/// Get current squat count.
+pub fn get_squat_count() -> i32 {
+    STATE.squat_count.load(Ordering::Relaxed)
+}
+
+/// Start the accelerometer and count squats from it.
+pub fn start_squat_counter() {
+    reset_squat_count();
+    STATE.squat_active.store(true, Ordering::Relaxed);
+    start_accelerometer();
+}
+
+/// Stop counting squats and stop the accelerometer.
+pub fn stop_squat_counter() {
+    STATE.squat_active.store(false, Ordering::Relaxed);
+    stop_accelerometer();
+}
+
+/// Write every accelerometer sample to `path` (CSV) until [`stop_recording`]. The accelerometer
+/// has to be running (`start_accelerometer` or `start_squat_counter`). Returns false if the file
+/// cannot be created.
+pub fn start_recording(path: &str) -> bool {
+    match Recorder::create(std::path::Path::new(path)) {
+        Ok(recorder) => {
+            if let Ok(mut slot) = RECORDER.lock() {
+                *slot = Some(recorder);
+                return true;
+            }
+            false
+        }
+        Err(e) => {
+            log::error!("[sensor_state] cannot record to {path}: {e}");
+            false
+        }
+    }
+}
+
+/// Stop recording and close the file. Returns how many samples were written.
+pub fn stop_recording() -> u64 {
+    match RECORDER.lock() {
+        Ok(mut slot) => slot.take().map_or(0, |r| r.samples()),
+        Err(_) => 0,
+    }
 }
 
 /// Get current step count.
@@ -125,12 +188,37 @@ const SHAKE_COOLDOWN_MS: u64 = 300;
 /// Timestamp (unix ms) of the last counted shake, for cooldown gating.
 static LAST_SHAKE_TIME_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
-/// Called from JNI when accelerometer data arrives.
-/// Detects shakes by checking if the motion-only magnitude exceeds a
-/// threshold, gated by a cooldown so a single gesture counts once.
-pub(crate) fn on_accelerometer_data(x: f64, y: f64, z: f64) {
+static SQUAT_DETECTOR: Lazy<Mutex<SquatDetector>> =
+    Lazy::new(|| Mutex::new(SquatDetector::default()));
+
+static RECORDER: Lazy<Mutex<Option<Recorder>>> = Lazy::new(|| Mutex::new(None));
+
+/// Called from JNI when accelerometer data arrives, with the sensor's own timestamp
+/// (nanoseconds).
+/// Records the sample if a recording is open, feeds the squat detector if it is started, and
+/// detects shakes by checking if the motion-only magnitude exceeds a threshold, gated by a
+/// cooldown so a single gesture counts once.
+pub(crate) fn on_accelerometer_data(x: f64, y: f64, z: f64, timestamp_ns: i64) {
     if !STATE.accel_active.load(Ordering::Relaxed) {
         return;
+    }
+
+    if let Ok(mut slot) = RECORDER.lock() {
+        if let Some(recorder) = slot.as_mut() {
+            if recorder.write(timestamp_ns, x, y, z).is_err() {
+                log::error!("[sensor_state] recording failed, stopped");
+                *slot = None;
+            }
+        }
+    }
+
+    if STATE.squat_active.load(Ordering::Relaxed) {
+        if let Ok(mut detector) = SQUAT_DETECTOR.lock() {
+            detector.push(timestamp_ns as f64 * 1e-9, x, y, z);
+            STATE
+                .squat_count
+                .store(detector.count() as i32, Ordering::Relaxed);
+        }
     }
 
     // Squared magnitude of the raw acceleration vector (avoid sqrt).

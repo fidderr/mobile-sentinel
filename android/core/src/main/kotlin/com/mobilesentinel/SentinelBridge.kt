@@ -61,9 +61,9 @@ object SentinelBridge {
     // --- Sensor callbacks ---
 
     @JvmStatic
-    fun onAccelerometerData(x: Double, y: Double, z: Double) {
+    fun onAccelerometerData(x: Double, y: Double, z: Double, timestampNanos: Long) {
         try {
-            nativeOnAccelerometerData(x, y, z)
+            nativeOnAccelerometerData(x, y, z, timestampNanos)
         } catch (e: UnsatisfiedLinkError) {
             // Expected during init — sensors may fire before native lib loads
         }
@@ -97,7 +97,7 @@ object SentinelBridge {
     private external fun nativeOnBootCompleted()
 
     @JvmStatic
-    private external fun nativeOnAccelerometerData(x: Double, y: Double, z: Double)
+    private external fun nativeOnAccelerometerData(x: Double, y: Double, z: Double, timestampNanos: Long)
 
     @JvmStatic
     private external fun nativeOnStepCount(steps: Int)

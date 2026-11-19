@@ -73,7 +73,7 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `audio` | `audio` | `play(uri: &str, looping: bool) -> Result<PlaybackHandle>`, `play_as_alarm(uri, looping)` (on the alarm volume, as the ring will sound), `stop(&PlaybackHandle) -> Result<()>`, `set_volume(f32) -> Result<()>` | none — non-firing preview audio |
 | `overlay` | `overlay` | `is_granted() -> bool`, `request()` | `SYSTEM_ALERT_WINDOW` |
 | `permissions` | `permissions` | `status(&str) -> PermissionState`, `request(&str) -> PermissionState`, `open_app_settings()` | none |
-| `sensors` | `sensors` | `start_accelerometer()`, `stop_accelerometer()`, `shake_count() -> i32`, `reset_shake_count()`, `start_step_counter()`, `stop_step_counter()`, `step_count() -> i32` | `ACTIVITY_RECOGNITION` |
+| `sensors` | `sensors` | `start_accelerometer()`, `stop_accelerometer()`, `shake_count() -> i32`, `reset_shake_count()`, `start_squat_counter()`, `stop_squat_counter()`, `squat_count() -> i32`, `reset_squat_count()`, `start_recording(path) -> bool`, `stop_recording() -> u64`, `start_step_counter()`, `stop_step_counter()`, `step_count() -> i32` | `ACTIVITY_RECOGNITION` |
 | `torch` | `torch` | `on(Option<f32>)`, `off()`, `is_available() -> bool` | none |
 | `display` | `display` | `set_system_bar_color(u32)`, `set_brightness(f32)`, `brightness() -> f32`, `set_max_brightness()`, `restore_brightness()`, `keep_screen_on(bool)`, `set_requested_orientation(ScreenOrientation)`, `current_requested_orientation() -> Option<ScreenOrientation>`, `safe_area_insets() -> Option<SafeAreaInsets>` (with how far the keyboard covers the content), `system_dark() -> bool`, `uses_24_hour_clock() -> bool`, `set_light_system_bars(bool)`, `set_preferred_frame_rate(PreferredFrameRate) -> bool` (`Default`, `Highest`, `Rate(hz)`; opt-in refresh-rate request for native windows) | none; also supports build-time `screen_orientation = "portrait"` (etc.) in sentinel.toml to set the static default on the main activity |
 | `battery` | `battery` | `is_exempt() -> bool`, `request_exemption()`, `open_settings()` | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` |
@@ -156,7 +156,7 @@ if !overlay::is_granted() {
 }
 ```
 
-**Sensors** (shake + step counters):
+**Sensors** (shake, squat and step counters):
 
 ```rust
 // requires `sensors`
@@ -174,6 +174,18 @@ let steps = step_count();   // the step detector as steps happen, the step count
 
 The accelerometer thresholds the motion-only magnitude (gravity subtracted) with
 a short cooldown, so one gesture counts once.
+
+```rust
+start_squat_counter();      // starts the accelerometer too
+let squats = squat_count(); // repetitions of slowly lowering and raising the phone
+stop_squat_counter();
+```
+
+The squat counter uses the sensor's own timestamps and a detector in Rust (`sensors::SquatDetector`,
+all constants in `sensors::SquatConfig`; the pure detector takes `(t, x, y, z)` samples and can be used
+and tested off the phone). It rejects walking, shaking and arm pumping with a turning wrist, and cannot
+tell a squat from moving the phone straight up and down with the arms. How it works and how to tune it
+with real recordings: [SQUAT_TUNING.md](SQUAT_TUNING.md).
 
 ### Capability data types
 

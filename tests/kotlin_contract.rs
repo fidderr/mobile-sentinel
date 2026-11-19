@@ -64,7 +64,13 @@ fn jni_name(package: &str, class: &str, method: &str) -> String {
 
 /// JNI name -> where it is declared, for every `external fun` of the Kotlin sources.
 fn kotlin_externals() -> BTreeMap<String, String> {
+    kotlin_externals_with_parameters().0
+}
+
+/// The same, and the parameter types each one declares.
+fn kotlin_externals_with_parameters() -> (BTreeMap<String, String>, BTreeMap<String, Vec<String>>) {
     let mut found = BTreeMap::new();
+    let mut signatures = BTreeMap::new();
     for file in kotlin_sources() {
         let text = fs::read_to_string(&file).unwrap();
         let package = text
@@ -104,10 +110,20 @@ fn kotlin_externals() -> BTreeMap<String, String> {
                     jni_name(&package, &class, &method),
                     format!("{}: {class}.{method}", file.display()),
                 );
+                let params = rest
+                    .split_once('(')
+                    .and_then(|(_, r)| r.split_once(')'))
+                    .map(|(p, _)| p)
+                    .unwrap_or_default();
+                let types = params
+                    .split(',')
+                    .filter_map(|p| p.split_once(':').map(|(_, t)| t.trim().to_string()))
+                    .collect();
+                signatures.insert(jni_name(&package, &class, &method), types);
             }
         }
     }
-    found
+    (found, signatures)
 }
 
 /// Every `Java_...` name in the Rust sources, split into real `fn` exports and mentions in comments.
@@ -183,6 +199,80 @@ fn every_rust_export_has_a_kotlin_declaration() {
     assert!(
         orphans.is_empty(),
         "Rust exports these but no Kotlin `external fun` matches:\n{orphans:#?}"
+    );
+}
+
+/// The parameter types of every Rust `Java_...` export, after the JNIEnv and the class.
+fn rust_export_parameters() -> BTreeMap<String, Vec<String>> {
+    let mut found = BTreeMap::new();
+    for file in rust_sources() {
+        let text = fs::read_to_string(&file).unwrap();
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("fn Java_") {
+            let after = &rest[at + 3..];
+            let name: String = after
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let Some(args) = after[name.len()..]
+                .strip_prefix('(')
+                .and_then(|a| a.split_once(')'))
+            else {
+                rest = after;
+                continue;
+            };
+            let types: Vec<String> = args
+                .0
+                .split(',')
+                .filter_map(|p| p.split_once(':').map(|(_, t)| t.trim().to_string()))
+                .skip(2)
+                .collect();
+            found.insert(name, types);
+            rest = after;
+        }
+    }
+    found
+}
+
+/// A wrong parameter list compiles on both sides and crashes (or reads garbage) on the phone.
+#[test]
+fn external_signatures_match_the_rust_exports() {
+    let (_, kotlin) = kotlin_externals_with_parameters();
+    let rust = rust_export_parameters();
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for (name, kotlin_types) in &kotlin {
+        let Some(rust_types) = rust.get(name) else {
+            continue;
+        };
+        checked += 1;
+        let same = kotlin_types.len() == rust_types.len()
+            && kotlin_types.iter().zip(rust_types).all(|(k, r)| {
+                let r = r.rsplit("::").next().unwrap_or(r);
+                match k.as_str() {
+                    "Double" => r == "jdouble",
+                    "Float" => r == "jfloat",
+                    "Long" => r == "jlong",
+                    "Int" => r == "jint",
+                    "Boolean" => r == "jboolean",
+                    _ => true,
+                }
+            });
+        if !same {
+            wrong.push(format!(
+                "{name}: Kotlin {kotlin_types:?}, Rust {rust_types:?}"
+            ));
+        }
+    }
+    assert!(checked >= 8, "compared only {checked} signatures");
+    assert!(
+        wrong.is_empty(),
+        "parameter lists differ:
+{}",
+        wrong.join(
+            "
+"
+        )
     );
 }
 
