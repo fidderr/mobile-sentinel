@@ -9,12 +9,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.net.Uri
 import android.util.Log
 import java.io.File
 
 /**
- * A silent notification a while before an alarm rings. Nothing here touches the ring:
+ * A notification a while before an alarm rings, silent or with the phone's notification sound. Nothing here touches the ring:
  * it has its own OS alarm, and if it never comes the alarm still goes off.
  *
  * It can carry a button. A tap leaves a mark for Rust and starts it the way a boot does, so it
@@ -30,6 +32,9 @@ object SentinelReminders {
     // Android lets nobody raise the importance of a channel that exists, and this one has to
     // pop up, so it is a new one. It makes no sound and does not vibrate: it only shows.
     private const val CHANNEL = "sentinel_reminders_popup"
+
+    // Android fixes the sound per channel, so a reminder with the notification sound has its own.
+    const val SOUND_CHANNEL = "sentinel_reminders_sound"
     private const val OLD_CHANNEL = "sentinel_reminders"
 
     const val EXTRA_TITLE = "title"
@@ -40,6 +45,7 @@ object SentinelReminders {
     const val EXTRA_ACTION_LABEL = "action_label"
     const val EXTRA_DONE_TITLE = "done_title"
     const val EXTRA_UNDO_LABEL = "undo_label"
+    const val EXTRA_SOUND = "sound"
 
     const val ACTION_ACT = "com.mobilesentinel.REMINDER_ACT"
     const val ACTION_UNDO = "com.mobilesentinel.REMINDER_UNDO"
@@ -69,6 +75,7 @@ object SentinelReminders {
         actionLabel: String,
         doneTitle: String,
         undoLabel: String,
+        sound: Boolean,
     ): Boolean {
         val context = SentinelPrimitives.getAppContext() ?: return false
         return try {
@@ -81,6 +88,7 @@ object SentinelReminders {
                 .putExtra(EXTRA_ACTION_LABEL, actionLabel)
                 .putExtra(EXTRA_DONE_TITLE, doneTitle)
                 .putExtra(EXTRA_UNDO_LABEL, undoLabel)
+                .putExtra(EXTRA_SOUND, sound)
             val operation = pending(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT) ?: return false
             val manager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             // To the minute where the app may. Left to itself Android puts this off by 75% of the
@@ -142,13 +150,25 @@ object SentinelReminders {
     private fun builder(context: Context, intent: Intent, showsForMs: Long): Notification.Builder {
         val notifications = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notifications.deleteNotificationChannel(OLD_CHANNEL)
+        val sound = intent.getBooleanExtra(EXTRA_SOUND, false)
+        val channel = if (sound) SOUND_CHANNEL else CHANNEL
         notifications.createNotificationChannel(
             NotificationChannel(
-                CHANNEL,
-                intent.getStringExtra(EXTRA_CHANNEL_NAME) ?: CHANNEL,
+                channel,
+                intent.getStringExtra(EXTRA_CHANNEL_NAME) ?: channel,
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                setSound(null, null)
+                if (sound) {
+                    setSound(
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                } else {
+                    setSound(null, null)
+                }
                 enableVibration(false)
                 enableLights(false)
             },
@@ -156,7 +176,7 @@ object SentinelReminders {
         val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
             PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE)
         }
-        return Notification.Builder(context, CHANNEL)
+        return Notification.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setCategory(Notification.CATEGORY_REMINDER)
             .setVisibility(Notification.VISIBILITY_PUBLIC)

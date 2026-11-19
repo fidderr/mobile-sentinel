@@ -734,7 +734,7 @@ kit.note_activity()                                              // the user did
 kit.note_ui_up(&id)                                              // the alarm's screen is up, for the timing log
 kit.on_ring_end(hook: fn())                                      // called when the platform ended a ring while the app runs
 kit.take_ring_ends() -> Vec<(InstanceId, RingEnd)>               // rings that ended without the app: limit reached, solved on the backup screen
-kit.set_reminder(&id, at_ms, title, body, channel_name, lasts_ms) // a quiet notification before an alarm
+kit.set_reminder(&id, at_ms, title, body, channel_name, lasts_ms, button, sound) // a notification before an alarm, silent or with the notification sound (ReminderSound)
 kit.clear_reminder(&id)
 ```
 

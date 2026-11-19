@@ -11,6 +11,11 @@ change.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `AlarmKit::set_reminder` takes a `ReminderSound`: `Silent` (as before) or
+  `Notification`, which uses its own channel with the phone's notification sound.
+
 ### Added
 
 - **Kotlin tests.** JVM tests (JUnit 4, Robolectric 4.18.1) for alarm arming, the boot replay, the alarm receiver, the ring service,
