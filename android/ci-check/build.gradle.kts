@@ -16,3 +16,17 @@ allprojects {
         mavenCentral()
     }
 }
+
+// `lintDebug -PsentinelMinSdk=26` fails on a call newer than that minimum without a guard.
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
+            lint {
+                checkOnly += "NewApi"
+                error += "NewApi"
+                abortOnError = true
+                warningsAsErrors = false
+            }
+        }
+    }
+}

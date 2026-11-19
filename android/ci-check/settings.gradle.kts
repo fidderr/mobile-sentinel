@@ -2,6 +2,7 @@
 // they enable, so without this a module none of them uses can break unnoticed.
 //
 //   gradle -p android/ci-check compileDebugKotlin
+//   gradle -p android/ci-check lintDebug -PsentinelMinSdk=26   (NewApi is an error: every call newer than 26 needs a guard)
 rootProject.name = "sentinel-ci-check"
 
 include(":sentinel-core")
