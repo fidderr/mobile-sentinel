@@ -393,7 +393,7 @@ fn every_guard_is_needed() {
     assert_eq!(count(&fast, strict), 0, "jolt limit");
 }
 
-/// What `adb emu sensor set acceleration` can do (the device scenario in AlarmFree): a squat's
+/// What `adb emu sensor set acceleration` can do (an app's device scenario): a squat's
 /// acceleration set every 0.25 to 0.45 s (the shell's sleep and the adb round trip), the value of
 /// that moment held until the next set.
 #[test]
