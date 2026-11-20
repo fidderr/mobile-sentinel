@@ -8,24 +8,32 @@
 //!
 //! # Algorithm
 //!
-//! 1. Gravity is a slow low-pass of the raw vector (`gravity_tau_s`, longer than a squat, so it
-//!    does not follow the movement). The vertical linear acceleration is the part of
-//!    `raw - gravity` along the gravity direction, smoothed over about 0.1 s.
+//! 1. The vertical acceleration is the acceleration magnitude minus gravity (a slow low-pass of
+//!    the magnitude, `gravity_tau_s`), smoothed over about 0.1 s. Using the magnitude instead of
+//!    the part along a gravity vector matters: a phone held at the chest pitches 25 to 45 degrees
+//!    in a squat, and a lagging gravity vector turned that into several m/s^2 of fake
+//!    acceleration (real recordings, see `docs/SQUAT_TUNING.md`).
 //! 2. The smoothed signal is cut into *lobes*: runs of one sign that rise above `lobe_on` and fall
-//!    below `lobe_off`. Two lobes of the same sign closer than `merge_gap_s` are one lobe.
+//!    below `lobe_off`. Two lobes of the same sign closer than `merge_gap_s` are one lobe; lobes
+//!    too small or short to matter are skipped, and same-sign lobes split by them (less than
+//!    `split_gap_s` apart) are joined.
 //! 3. One repetition is the lobe sequence negative (speeding up downwards), positive (braking at
 //!    the bottom and speeding up upwards), negative (braking at the top). The closing negative
 //!    lobe is also the opening lobe of the next repetition, so repetitions without a pause count.
 //! 4. A candidate is counted only if:
 //!    * the time between the peaks of the two negative lobes is within `min_cycle_s..max_cycle_s`
-//!      (rejects walking, shaking and quick pumping),
-//!    * the lobe peaks reach their minimums and none exceeds `max_peak` (a jolt),
-//!    * the phone's orientation (direction of the raw vector) never turns more than
-//!      `max_rotation_deg` away from its direction at the start (rejects arm pumping with the
-//!      wrist turning),
-//!    * the depth is within `min_depth_m..max_depth_m`: the vertical acceleration is integrated
-//!      twice between the two negative peaks, where the velocity is zero (the top of the
-//!      movement); the small velocity left at the end is removed linearly.
+//!      and at least `min_rep_gap_s` after the previous count (rejects walking, shaking, quick
+//!      pumping, and the two halves of sitting down and standing up),
+//!    * the lobe peaks reach their minimums, none exceeds `max_peak` (a jolt), the bottom lobe is
+//!      at least `bottom_ratio` of the stronger outer lobe and each outer lobe at least
+//!      `edge_ratio` of the bottom lobe (rejects blips and putting the phone down),
+//!    * the phone's orientation (direction of the smoothed raw vector) never turns more than
+//!      `max_rotation_deg` away from its direction at the start, and ends within
+//!      `max_net_turn_deg` of it (rejects picking up and putting down; generous on purpose),
+//!    * the depth is within `min_depth_m..max_depth_m` (the lower limit is waived when all lobes
+//!      reach `strong_peak`): the vertical acceleration is integrated
+//!      twice between the start and the top of the movement, where the velocity is zero; the small
+//!      velocity left at the end is removed linearly. Only the lower limit does real work.
 //!
 //! # Known limit
 //!
@@ -35,8 +43,10 @@
 //!
 //! # Tuning
 //!
-//! Every constant is in [`SquatConfig`]. They are first guesses from the physics of a squat
-//! (depth 0.3 to 0.6 m in 1.5 to 4 s gives 0.3 to 3 m/s^2). Real recordings (see
+//! Every constant is in [`SquatConfig`]. They are tuned on real recordings of one person
+//! (`tests/fixtures/squat/real_*.csv`), deliberately generously: letting a cheat through costs
+//! less than failing someone who squats differently. Real squats peak at 2 to 8 m/s^2, well
+//! above the 0.3 to 3 of a smooth movement. Real recordings (see
 //! `sensors::start_recording`) dropped into `tests/fixtures/squat/` with an `# expect:` line are
 //! checked by `cargo test`, which is how they are meant to be tuned.
 
@@ -45,8 +55,10 @@ use std::collections::VecDeque;
 /// All tunable constants of the detector.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SquatConfig {
-    /// Time constant of the gravity low-pass (s). Must be well above a squat's duration, or the
-    /// estimate follows the movement and flattens it. 1.5 s passes about 95% of a 3 s squat.
+    /// Time constant of the gravity (acceleration magnitude) low-pass (s). Must be well above a
+    /// squat's duration, or the estimate follows the movement and flattens it. 1.5 s is best on
+    /// the real recordings: 3 s and longer lets sit-downs and arm pumps count, and loses slow
+    /// squats to drift.
     pub gravity_tau_s: f64,
     /// Time constant of the vertical acceleration smoothing (s). 0.05 s is a 0.1 s window: it
     /// removes sensor noise and tremor, and keeps the 0.3 s lobes of a fast squat.
@@ -70,27 +82,53 @@ pub struct SquatConfig {
     /// Shortest lobe (s). A real squat lobe lasts at least a third of a second; 0.15 s still lets
     /// a very fast squat through, and rejects a twitch.
     pub min_lobe_s: f64,
-    /// Smallest peak of the first lobe, speeding up downwards (m/s^2). A 0.2 m squat in 3 s
-    /// peaks at about 0.4, a normal one (0.45 m, 3 s) at about 1; the plan's first guess of 1.0
-    /// would miss slow squats.
+    /// Smallest peak of the first lobe, speeding up downwards (m/s^2). Real squats peak at 0.6
+    /// (the weakest, a sit-stand) to 6; the smooth-movement physics of a 3 s squat gives 0.4.
     pub down_min: f64,
     /// Smallest peak of the middle lobe, the bottom (m/s^2).
     pub up_min: f64,
     /// Smallest peak of the closing lobe, braking at the top (m/s^2). A little lower: people
     /// ease out of the top.
     pub top_brake_min: f64,
+    /// Same-sign lobes with only skipped (too small or short) lobes between them, closer than
+    /// this (s), are one lobe. Deep squats have the long braking lobe split by a 0.1 s dip.
+    pub split_gap_s: f64,
+    /// Shortest time (s) between two counts, measured at the closing lobe peaks. Real continuous
+    /// squats are 1.4 s apart or more; sitting down and standing up gives two repetitions 0.9 s
+    /// apart, which count as one.
+    pub min_rep_gap_s: f64,
+    /// Each outer lobe must be at least this fraction of the bottom lobe. Putting the phone down
+    /// ends in a 10 m/s^2 bottom lobe and a 0.8 m/s^2 closing lobe (0.08); real repetitions are
+    /// at least 0.13.
+    pub edge_ratio: f64,
+    /// The bottom lobe must be at least this fraction of the stronger outer lobe. Blips between
+    /// two repetitions are 0.15 to 0.3 of their neighbours; real bottoms are 0.5 and up.
+    pub bottom_ratio: f64,
+    /// The orientation at the end of a repetition may differ at most this far (degrees) from the
+    /// start. Squats come back to the start (up to 37 degrees when the arms swing); picking up and
+    /// putting down end 40 degrees or more away.
+    pub max_net_turn_deg: f64,
     /// Shortest repetition (s) between the peaks of the two negative lobes. Walking is 0.5 s, a
     /// shake or a quick pump 0.3 to 0.6 s; the quickest real squat is about 1 s.
     pub min_cycle_s: f64,
     /// Longest repetition (s). Slower than this is not a rep, it is lowering the phone.
     pub max_cycle_s: f64,
-    /// Smallest depth (m). A 0.2 m dip is a half squat with the phone at the chest.
+    /// Smallest depth (m). Blips between repetitions integrate to 0.04 to 0.15 m; real half
+    /// squats to 0.27 m and up (the integration overestimates, a real squat is about 0.5 m).
+    /// Not applied when all three lobes reach `strong_peak`.
     pub min_depth_m: f64,
-    /// Largest depth (m). Beyond this the integration has drifted or the phone was lifted.
+    /// A repetition whose three lobes all peak at least this high (m/s^2) is accepted at any
+    /// depth. Swinging the arms while squatting moves the phone little vertically (depth 0.03 to
+    /// 0.45 m) but the lobes stay at 1.5 and up; walking, the thing a shallow limit is for, has
+    /// its weakest lobe at 1.3 or lower.
+    pub strong_peak: f64,
+    /// Largest depth (m). Real squats integrate to up to 1.6 m (abrupt stops overshoot), so this
+    /// only catches a runaway integration.
     pub max_depth_m: f64,
     /// Most the phone's orientation may turn away from its start during a repetition (degrees).
-    /// Squatting with the phone held still turns it by 10 to 20 degrees; a pump with a turning
-    /// wrist by 40 or more.
+    /// Real squats turn it by 20 to 46 degrees (a deep squat with the phone at the chest the
+    /// most); picking up and putting down by 80 or more. Arm pumps with a turning wrist stay
+    /// below this too: a known limit.
     pub max_rotation_deg: f64,
     /// A lobe peak above this (m/s^2) is a jolt, a drop or a shake, not a squat; it also
     /// discards the lobes seen so far.
@@ -114,11 +152,17 @@ impl Default for SquatConfig {
             down_min: 0.4,
             up_min: 0.4,
             top_brake_min: 0.3,
+            max_net_turn_deg: 40.0,
+            split_gap_s: 0.2,
+            min_rep_gap_s: 1.1,
+            edge_ratio: 0.1,
+            bottom_ratio: 0.5,
             min_cycle_s: 0.8,
             max_cycle_s: 5.0,
-            min_depth_m: 0.20,
-            max_depth_m: 0.90,
-            max_rotation_deg: 35.0,
+            min_depth_m: 0.2,
+            max_depth_m: 2.0,
+            strong_peak: 1.4,
+            max_rotation_deg: 60.0,
             max_peak: 15.0,
             gap_reset_s: 1.0,
         }
@@ -149,8 +193,10 @@ struct Sample {
 pub struct SquatDetector {
     cfg: SquatConfig,
     count: u32,
+    last_count_t: f64,
     last_t: Option<f64>,
-    gravity: [f64; 3],
+    /// Slow low-pass of the acceleration magnitude: gravity, about 9.8.
+    gravity: f64,
     dir_sum: [f64; 3],
     av: f64,
     active: Option<Lobe>,
@@ -188,8 +234,9 @@ impl SquatDetector {
         Self {
             cfg,
             count: 0,
+            last_count_t: f64::NEG_INFINITY,
             last_t: None,
-            gravity: [0.0; 3],
+            gravity: 9.81,
             dir_sum: [0.0; 3],
             av: 0.0,
             active: None,
@@ -213,6 +260,7 @@ impl SquatDetector {
 
     fn restart(&mut self) {
         self.last_t = None;
+        self.last_count_t = f64::NEG_INFINITY;
         self.active = None;
         self.pending = None;
         self.prev_end = f64::NEG_INFINITY;
@@ -227,7 +275,7 @@ impl SquatDetector {
         let a = [x, y, z];
         let Some(last) = self.last_t else {
             self.last_t = Some(t);
-            self.gravity = a;
+            self.gravity = norm(a);
             self.dir_sum = unit(a);
             return false;
         };
@@ -244,19 +292,17 @@ impl SquatDetector {
         let kg = 1.0 - (-dt / self.cfg.gravity_tau_s).exp();
         let ks = 1.0 - (-dt / self.cfg.smooth_tau_s).exp();
         let kd = 1.0 - (-dt / self.cfg.direction_tau_s).exp();
-        let mut linear = [0.0; 3];
-        for i in 0..3 {
-            self.gravity[i] += kg * (a[i] - self.gravity[i]);
-            linear[i] = a[i] - self.gravity[i];
-        }
-        if norm(self.gravity) < 1.0 {
+        let mag = norm(a);
+        self.gravity += kg * (mag - self.gravity);
+        if self.gravity < 1.0 {
             // Free fall or a broken sensor: nothing to measure against.
             return false;
         }
-        let vertical = dot(linear, unit(self.gravity));
+        let vertical = mag - self.gravity;
         self.av += ks * (vertical - self.av);
-        let raw_dir = unit(a);
-        for (sum, raw) in self.dir_sum.iter_mut().zip(raw_dir) {
+        // The raw vector, not its unit vector: in a near free fall the direction is noise and
+        // must carry little weight.
+        for (sum, raw) in self.dir_sum.iter_mut().zip(a) {
             *sum += kd * (raw - *sum);
         }
 
@@ -325,12 +371,20 @@ impl SquatDetector {
             return false;
         }
         if lobe.t1 - lobe.t0 < cfg.min_lobe_s || lobe.peak < cfg.top_brake_min.min(cfg.up_min) {
-            self.history.clear();
             return false;
         }
-        if let Some(prev) = self.history.last() {
-            if prev.sign == lobe.sign || lobe.t0 - prev.t1 > cfg.max_gap_s {
+        if let Some(prev) = self.history.last_mut() {
+            let gap = lobe.t0 - prev.t1;
+            if gap > cfg.max_gap_s || (prev.sign == lobe.sign && gap > cfg.split_gap_s) {
                 self.history.clear();
+            } else if prev.sign == lobe.sign {
+                // A lobe split by a dip too small to be a lobe of its own.
+                prev.t1 = lobe.t1;
+                if lobe.peak > prev.peak {
+                    prev.peak = lobe.peak;
+                    prev.peak_t = lobe.peak_t;
+                }
+                return false;
             }
         }
         self.history.push(lobe);
@@ -342,6 +396,7 @@ impl SquatDetector {
             self.history = vec![last];
             if self.is_squat(&first, &bottom, &last) {
                 self.count += 1;
+                self.last_count_t = last.peak_t;
                 return true;
             }
         }
@@ -355,6 +410,9 @@ impl SquatDetector {
             || first.peak < cfg.down_min
             || bottom.peak < cfg.up_min
             || last.peak < cfg.top_brake_min
+            || bottom.peak < cfg.bottom_ratio * first.peak.max(last.peak)
+            || first.peak.min(last.peak) < cfg.edge_ratio * bottom.peak
+            || last.peak_t - self.last_count_t < cfg.min_rep_gap_s
         {
             return false;
         }
@@ -375,15 +433,22 @@ impl SquatDetector {
             return false;
         };
         let start_dir = window[0].dir;
+        let net_turn = dot(window[window.len() - 1].dir, start_dir)
+            .clamp(-1.0, 1.0)
+            .acos();
+        if net_turn.to_degrees() > cfg.max_net_turn_deg {
+            return false;
+        }
         let max_turn = window
             .iter()
             .map(|s| dot(s.dir, start_dir).clamp(-1.0, 1.0).acos())
             .fold(0.0, f64::max);
+        let depth = depth_of(window);
         if max_turn.to_degrees() > cfg.max_rotation_deg {
             return false;
         }
-        let depth = depth_of(window);
-        (cfg.min_depth_m..=cfg.max_depth_m).contains(&depth)
+        let strong = first.peak.min(bottom.peak).min(last.peak) >= cfg.strong_peak;
+        depth <= cfg.max_depth_m && (strong || depth >= cfg.min_depth_m)
     }
 }
 

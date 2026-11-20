@@ -184,8 +184,8 @@ fn synthetic_fixtures() -> Vec<Fixture> {
         },
         Fixture {
             name: "arm_pump_rotating_10",
-            note: "cheat: 10 up-and-down arm pumps of 1.6 s, 0.5 m, wrist turning 55 DEG each time; must not count",
-            expect: "0",
+            note: "known limit: 10 up-and-down arm pumps of 1.6 s, 0.5 m, wrist turning 55 DEG each time; counted since the rotation limit was loosened for real squats (they turn up to 46 DEG)",
+            expect: "10",
             scene: {
                 let up = squats(10, 1.6, 0.5, 0.0, 2.0);
                 Scene {
@@ -370,11 +370,15 @@ fn fixture_samples(name: &str) -> Vec<Sample> {
 #[test]
 fn every_guard_is_needed() {
     let rotating = fixture_samples("arm_pump_rotating_10");
-    let loose = SquatConfig {
-        max_rotation_deg: 180.0,
+    let strict = SquatConfig {
+        max_rotation_deg: 30.0,
         ..SquatConfig::default()
     };
-    assert_eq!(count(&rotating, loose), 10, "rotation limit");
+    assert_eq!(
+        count(&rotating, strict),
+        0,
+        "rotation limit (the default is loose: known limit)"
+    );
 
     let walking = fixture_samples("walking_30s");
     let loose = SquatConfig {
