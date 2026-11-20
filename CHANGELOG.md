@@ -11,6 +11,8 @@ change.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-20
+
 ### Changed
 
 - **Breaking:** `AlarmKit::set_reminder` takes a `ReminderSound`: `Silent` (as before) or

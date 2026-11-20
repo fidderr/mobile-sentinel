@@ -1,6 +1,6 @@
 [package]
 name = "mobile-sentinel"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.76.0"
 description = "Cross-platform Rust SDK, Android first — write app logic in Rust, Kotlin is just the thin JNI layer"
