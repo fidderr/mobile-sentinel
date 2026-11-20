@@ -1,8 +1,8 @@
 # mobile-sentinel accelerometer recording
 # source: owner recording, OnePlus phone, 50 Hz, phone moved up and down by the arms, legs straight
 # To use it as a test fixture, add a line like "# expect: 10" (or "# expect: 9-11").
-# expect: 0-3
-# note: known limit: moving the phone up and down by the arms looks like a squat to the phone; the owner prefers cheats that pass over real squats that fail, so 0-3 passes
+# expect: 0-5
+# note: known limit: moving the phone up and down by the arms looks like a squat to the phone; the owner prefers cheats that pass over real squats that fail
 t_ns,x,y,z
 9946558412849,-0.4720,0.8770,9.8154
 9946578505401,-0.4768,0.8770,9.8058

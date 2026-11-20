@@ -93,10 +93,14 @@ pub struct SquatConfig {
     /// Same-sign lobes with only skipped (too small or short) lobes between them, closer than
     /// this (s), are one lobe. Deep squats have the long braking lobe split by a 0.1 s dip.
     pub split_gap_s: f64,
-    /// Shortest time (s) between two counts, measured at the closing lobe peaks. Real continuous
-    /// squats are 1.4 s apart or more; sitting down and standing up gives two repetitions 0.9 s
-    /// apart, which count as one.
+    /// Shortest time (s) between two counts, measured at the closing lobe peaks. Real squats can
+    /// follow each other 0.9 to 1.0 s apart (fast bursts of half squats, arm swing).
     pub min_rep_gap_s: f64,
+    /// A count must also be at least this fraction of the previous interval (capped at
+    /// `max_cycle_s`) after the previous count. A slow squat has a second bump 0.5 times its own
+    /// length after the count (counted twice otherwise), sitting down plus standing up 0.3 times;
+    /// real changes of pace stay above 0.65. Works from 0.55 to 0.6.
+    pub min_gap_ratio: f64,
     /// Each outer lobe must be at least this fraction of the bottom lobe. Putting the phone down
     /// ends in a 10 m/s^2 bottom lobe and a 0.8 m/s^2 closing lobe (0.08); real repetitions are
     /// at least 0.13.
@@ -126,9 +130,9 @@ pub struct SquatConfig {
     /// only catches a runaway integration.
     pub max_depth_m: f64,
     /// Most the phone's orientation may turn away from its start during a repetition (degrees).
-    /// Real squats turn it by 20 to 46 degrees (a deep squat with the phone at the chest the
+    /// Real squats turn it by 20 to 64 degrees (fast squats with the phone at the chest the
     /// most); picking up and putting down by 80 or more. Arm pumps with a turning wrist stay
-    /// below this too: a known limit.
+    /// below this too: a known limit. Every value from 68 to 90 passes the recordings.
     pub max_rotation_deg: f64,
     /// A lobe peak above this (m/s^2) is a jolt, a drop or a shake, not a squat; it also
     /// discards the lobes seen so far.
@@ -154,7 +158,8 @@ impl Default for SquatConfig {
             top_brake_min: 0.3,
             max_net_turn_deg: 40.0,
             split_gap_s: 0.2,
-            min_rep_gap_s: 1.1,
+            min_rep_gap_s: 0.8,
+            min_gap_ratio: 0.58,
             edge_ratio: 0.1,
             bottom_ratio: 0.5,
             min_cycle_s: 0.8,
@@ -162,7 +167,7 @@ impl Default for SquatConfig {
             min_depth_m: 0.2,
             max_depth_m: 2.0,
             strong_peak: 1.4,
-            max_rotation_deg: 60.0,
+            max_rotation_deg: 75.0,
             max_peak: 15.0,
             gap_reset_s: 1.0,
         }
@@ -194,6 +199,7 @@ pub struct SquatDetector {
     cfg: SquatConfig,
     count: u32,
     last_count_t: f64,
+    last_interval: f64,
     last_t: Option<f64>,
     /// Slow low-pass of the acceleration magnitude: gravity, about 9.8.
     gravity: f64,
@@ -235,6 +241,7 @@ impl SquatDetector {
             cfg,
             count: 0,
             last_count_t: f64::NEG_INFINITY,
+            last_interval: 0.0,
             last_t: None,
             gravity: 9.81,
             dir_sum: [0.0; 3],
@@ -261,6 +268,7 @@ impl SquatDetector {
     fn restart(&mut self) {
         self.last_t = None;
         self.last_count_t = f64::NEG_INFINITY;
+        self.last_interval = 0.0;
         self.active = None;
         self.pending = None;
         self.prev_end = f64::NEG_INFINITY;
@@ -396,6 +404,11 @@ impl SquatDetector {
             self.history = vec![last];
             if self.is_squat(&first, &bottom, &last) {
                 self.count += 1;
+                self.last_interval = if self.last_count_t.is_finite() {
+                    (last.peak_t - self.last_count_t).min(self.cfg.max_cycle_s)
+                } else {
+                    0.0
+                };
                 self.last_count_t = last.peak_t;
                 return true;
             }
@@ -412,7 +425,10 @@ impl SquatDetector {
             || last.peak < cfg.top_brake_min
             || bottom.peak < cfg.bottom_ratio * first.peak.max(last.peak)
             || first.peak.min(last.peak) < cfg.edge_ratio * bottom.peak
-            || last.peak_t - self.last_count_t < cfg.min_rep_gap_s
+            || last.peak_t - self.last_count_t
+                < cfg
+                    .min_rep_gap_s
+                    .max(cfg.min_gap_ratio * self.last_interval)
         {
             return false;
         }

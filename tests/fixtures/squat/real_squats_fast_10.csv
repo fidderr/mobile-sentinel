@@ -2,7 +2,7 @@
 # source: owner recording, OnePlus phone, 50 Hz, same grip, fast
 # To use it as a test fixture, add a line like "# expect: 10" (or "# expect: 9-11").
 # expect: 9-10
-# note: the recording holds 9 regular cycles 1.5-1.9 s apart (the owner may have counted one more); 9 or 10 passes
+# note: the 10th squat overlaps the pick-up at the start and cannot be told apart from it; 9-10 passes (fast_10_take2 is exact)
 t_ns,x,y,z
 9450270339959,-0.4433,0.8913,9.8010
 9450290432563,-0.4481,0.9009,9.8010

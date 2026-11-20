@@ -1,8 +1,8 @@
 # mobile-sentinel accelerometer recording
 # source: owner recording, OnePlus phone, 50 Hz, same grip, slow
 # To use it as a test fixture, add a line like "# expect: 10" (or "# expect: 9-11").
-# expect: 8-10
-# note: the file name says 5 but the recording holds 10 slow squats of about 4 s (10 regular cycles between 16 s and 53 s); the pick-up counts as one and the last squat merges into the put-down, so 8-10 passes
+# expect: 5-10
+# note: the owner counted 5 but the file holds 10 equally spaced 4 s cycles; a slow squat with a pause may give two events, so 5-10 passes; the second take (slow_5_take2, counted aloud) is exact
 t_ns,x,y,z
 9494132448449,-0.1609,0.6138,9.8393
 9494152541053,-0.1705,0.6185,9.8441

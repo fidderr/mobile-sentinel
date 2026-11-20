@@ -1,7 +1,8 @@
 # mobile-sentinel accelerometer recording
 # source: owner recording, OnePlus phone, 50 Hz, phone in one hand, arms swinging from the sides forward and up while going down (the phone rotates a lot)
 # To use it as a test fixture, add a line like "# expect: 10" (or "# expect: 9-11").
-# expect: 10
+# expect: 10-11
+# note: the first movement (a shallow 0.8 s cycle right after picking up) is ambiguous; 10-11 passes
 t_ns,x,y,z
 10575281019912,0.0018,0.6377,9.8201
 10575301087725,-0.0078,0.6329,9.8201

@@ -2,7 +2,7 @@
 # source: owner recording, OnePlus phone, 50 Hz, same grip, half squats
 # To use it as a test fixture, add a line like "# expect: 10" (or "# expect: 9-11").
 # expect: 10-11
-# note: the recording holds 11 regular cycles 1.4-1.9 s apart (two at 1.0 s apart in the middle), so 10 or 11 passes
+# note: the first rep starts straight after 3.5 s of stillness and is shallow; whether it is a squat or the start of the movement is ambiguous, 10-11 passes (half_10_take2 is exact in the middle)
 t_ns,x,y,z
 9610911231684,-0.8076,0.8291,9.8010
 9610931324496,-0.8076,0.8291,9.7819
