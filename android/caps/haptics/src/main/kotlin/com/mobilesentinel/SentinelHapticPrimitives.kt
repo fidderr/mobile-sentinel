@@ -73,6 +73,33 @@ object SentinelHapticPrimitives {
     }
 
     /**
+     * Play a vibration waveform with a strength per segment.
+     *
+     * [timings] alternates wait/vibrate milliseconds; [amplitudes] holds one value per
+     * timing (0 = off, 1..255 = strength). Without amplitude control on the vibrator the
+     * timings play at fixed strength (a non-zero amplitude counts as on). No repeat.
+     *
+     * @return true if the call was issued, false on any failure.
+     */
+    @JvmStatic
+    fun vibrateWaveform(timings: LongArray, amplitudes: IntArray): Boolean {
+        return try {
+            val context = SentinelPrimitives.getAppContext() ?: return false
+            val vibrator = vibrator(context) ?: return false
+            val effect = if (vibrator.hasAmplitudeControl()) {
+                VibrationEffect.createWaveform(timings, amplitudes, -1)
+            } else {
+                VibrationEffect.createWaveform(timings, -1)
+            }
+            vibrator.vibrate(effect)
+            true
+        } catch (e: Throwable) {
+            Log.w(TAG, "vibrateWaveform(${timings.size} entries): ${e.message}", e)
+            false
+        }
+    }
+
+    /**
      * Cancel any ongoing vibration.
      *
      * @return true if the cancel was issued, false on any failure.

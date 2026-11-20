@@ -35,6 +35,24 @@ pub fn vibrate_pattern(pattern: &[u64]) {
     }
 }
 
+/// Play a vibration waveform with a strength per segment: `timings` are alternating
+/// wait/vibrate milliseconds, `amplitudes` (0 = off, 1..=255 = strength) has one value per
+/// timing. On a vibrator without amplitude control the timings play at fixed strength, where
+/// any non-zero amplitude counts as on. Mismatched lengths are cut to the shorter one.
+pub fn vibrate_waveform(timings: &[u64], amplitudes: &[u8]) {
+    let n = timings.len().min(amplitudes.len());
+    #[cfg(target_os = "android")]
+    {
+        if n > 0 {
+            let _ = android::vibrate_waveform(&timings[..n], &amplitudes[..n]);
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = n;
+    }
+}
+
 /// Cancel any ongoing vibration.
 pub fn cancel() {
     #[cfg(target_os = "android")]
@@ -59,7 +77,7 @@ pub fn has_vibrator() -> bool {
 mod android {
     use crate::platform::android::jni::with_jni_class;
     use jni::objects::JValue;
-    use jni::sys::jlong;
+    use jni::sys::{jint, jlong};
 
     const HAPTIC: &str = "com/mobilesentinel/SentinelHapticPrimitives";
 
@@ -92,6 +110,25 @@ mod android {
         })
     }
 
+    pub(super) fn vibrate_waveform(timings: &[u64], amplitudes: &[u8]) -> bool {
+        with_jni_class(HAPTIC, false, |env, class| {
+            let times = env.new_long_array(timings.len() as i32).ok()?;
+            let longs: Vec<jlong> = timings.iter().map(|&v| v as jlong).collect();
+            env.set_long_array_region(&times, 0, &longs).ok()?;
+            let amps = env.new_int_array(amplitudes.len() as i32).ok()?;
+            let ints: Vec<jint> = amplitudes.iter().map(|&v| jint::from(v)).collect();
+            env.set_int_array_region(&amps, 0, &ints).ok()?;
+            env.call_static_method(
+                class,
+                "vibrateWaveform",
+                "([J[I)Z",
+                &[JValue::Object(&times.into()), JValue::Object(&amps.into())],
+            )
+            .ok()
+            .and_then(|v| v.z().ok())
+        })
+    }
+
     pub(super) fn cancel_vibration() -> bool {
         with_jni_class(HAPTIC, false, |env, class| {
             env.call_static_method(class, "cancel", "()Z", &[])
@@ -106,5 +143,17 @@ mod android {
                 .ok()
                 .and_then(|v| v.z().ok())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waveform_is_a_no_op_on_host_for_any_lengths() {
+        vibrate_waveform(&[0, 70, 80], &[0, 170]);
+        vibrate_waveform(&[], &[]);
+        vibrate_waveform(&[0, 30], &[0, 70, 255]);
     }
 }

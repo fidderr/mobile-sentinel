@@ -18,6 +18,8 @@ change.
 
 ### Added
 
+- **`haptics::vibrate_waveform(timings, amplitudes)`**: a vibration pattern with a strength (0..=255) per segment. Without amplitude
+  control on the vibrator it plays the timings at fixed strength.
 - **Squat counter.** `sensors::start_squat_counter()`, `squat_count()`, `reset_squat_count()`, `stop_squat_counter()`: a repetition
   detector in Rust (gravity low-pass, vertical linear acceleration, a down/bottom/top lobe state machine, depth by double integration,
   rotation and jolt rejection) next to the shake counter. `sensors::SquatDetector` and `SquatConfig` are public: pure, taking

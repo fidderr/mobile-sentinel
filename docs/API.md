@@ -68,7 +68,7 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 |---|---|---|---|
 | `scanner` | `scanner` | `scan() -> Result<String>`, `is_available() -> bool` | `CAMERA`; bundles ZXing + `SentinelScannerActivity`. Blocks until scan/cancel. |
 | `camera` | `camera` | `capture_photo() -> Result<String>`, `is_available() -> bool` | none — delegates to the system camera (`ACTION_IMAGE_CAPTURE`) + `FileProvider`; returns saved JPEG path |
-| `haptics` | `haptics` | `vibrate(Duration)`, `vibrate_pattern(&[u64])`, `cancel()`, `has_vibrator() -> bool` | `VIBRATE` |
+| `haptics` | `haptics` | `vibrate(Duration)`, `vibrate_pattern(&[u64])`, `vibrate_waveform(&[u64], &[u8])`, `cancel()`, `has_vibrator() -> bool` | `VIBRATE` |
 | `home_widget` | `home_widget` | `set_text(title, detail)`, `can_add() -> bool`, `add() -> bool` | Home-screen widget with two lines the app sets; tapping it opens the app. No permissions, no periodic updates |
 | `audio` | `audio` | `play(uri: &str, looping: bool) -> Result<PlaybackHandle>`, `play_as_alarm(uri, looping)` (on the alarm volume, as the ring will sound), `stop(&PlaybackHandle) -> Result<()>`, `set_volume(f32) -> Result<()>` | none — non-firing preview audio |
 | `overlay` | `overlay` | `is_granted() -> bool`, `request()` | `SYSTEM_ALERT_WINDOW` |
