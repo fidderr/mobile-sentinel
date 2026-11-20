@@ -263,6 +263,15 @@ pub struct ReminderButton<'a> {
     pub undo_label: &'a str,
 }
 
+/// Whether a reminder makes the phone's notification sound. Android fixes the sound per
+/// channel, so each has its own, and the app names both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReminderSound {
+    #[default]
+    Silent,
+    Notification,
+}
+
 /// What was tapped on a reminder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReminderTap {
@@ -730,11 +739,12 @@ impl AlarmKit {
         let _ = RING_END_HOOK.set(hook);
     }
 
-    /// Show a silent notification at `at_ms`, replacing an earlier one for this alarm. It
+    /// Show a notification at `at_ms`, replacing an earlier one for this alarm. It
     /// has nothing to do with the ring, and may come a few minutes off on a dozing phone.
     /// It goes away after `lasts_ms`, when the ring is due. `channel_name` is what the user
     /// sees in the phone's settings. With a `button`, a tap on it ends up in
-    /// [`Self::take_reminder_taps`]. No-op off Android.
+    /// [`Self::take_reminder_taps`]. `sound` picks the notification channel: silent, or with the
+    /// phone's notification sound; give each its own `channel_name`. No-op off Android.
     #[allow(clippy::too_many_arguments)]
     pub fn set_reminder(
         &self,
@@ -745,6 +755,7 @@ impl AlarmKit {
         channel_name: &str,
         lasts_ms: i64,
         button: Option<ReminderButton<'_>>,
+        sound: ReminderSound,
     ) {
         #[cfg(target_os = "android")]
         {
@@ -766,7 +777,7 @@ impl AlarmKit {
                 env.call_static_method(
                     class,
                     "set",
-                    "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+                    "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
                     &[
                         JValue::Object(&id),
                         JValue::Long(at_ms),
@@ -777,6 +788,7 @@ impl AlarmKit {
                         JValue::Object(&label),
                         JValue::Object(&done_title),
                         JValue::Object(&undo_label),
+                        JValue::Bool(u8::from(sound == ReminderSound::Notification)),
                     ],
                 )
                 .ok()
@@ -784,7 +796,16 @@ impl AlarmKit {
             });
         }
         #[cfg(not(target_os = "android"))]
-        let _ = (id, at_ms, title, body, channel_name, lasts_ms, button);
+        let _ = (
+            id,
+            at_ms,
+            title,
+            body,
+            channel_name,
+            lasts_ms,
+            button,
+            sound,
+        );
     }
 
     /// What was tapped on reminders since the last call, the last tap per alarm: a tap and its

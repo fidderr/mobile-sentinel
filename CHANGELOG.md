@@ -11,6 +11,11 @@ change.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `AlarmKit::set_reminder` takes a `ReminderSound`: `Silent` (as before) or
+  `Notification`, which uses its own channel with the phone's notification sound.
+
 ### Added
 
 - **Squat counter.** `sensors::start_squat_counter()`, `squat_count()`, `reset_squat_count()`, `stop_squat_counter()`: a repetition
