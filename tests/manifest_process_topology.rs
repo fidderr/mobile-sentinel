@@ -126,6 +126,36 @@ fn sentinel_process_components() {
     );
 }
 
+/// The guardian's heads-up reaches MAIN through a receiver declared in the manifest, in MAIN (no
+/// android:process). A receiver registered at run time is queued while MAIN is cached on Android
+/// 14 and 15, and the ring's screen then does not come up until MAIN is back in front.
+#[test]
+fn job_heads_up_receiver_is_declared_in_main() {
+    let xml = fs::read_to_string(cap_manifest_path("jobs")).expect("read jobs manifest");
+    let components = extract_components(&xml);
+    let heads_up = components
+        .iter()
+        .find(|(n, _)| n.rsplit('.').next() == Some("SentinelJobHeadsUpReceiver"))
+        .expect("jobs manifest missing SentinelJobHeadsUpReceiver");
+    assert_eq!(
+        heads_up.1, None,
+        "SentinelJobHeadsUpReceiver must run in MAIN"
+    );
+    assert!(
+        xml.contains("com.mobilesentinel.JOB_HEADS_UP"),
+        "SentinelJobHeadsUpReceiver must filter on JOB_HEADS_UP"
+    );
+    let init =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "android/caps/jobs/src/main/kotlin/com/mobilesentinel/SentinelJobsInitializer.kt",
+        ))
+        .expect("read SentinelJobsInitializer");
+    assert!(
+        !init.contains("registerReceiver"),
+        "the heads-up receiver must not be registered at run time again"
+    );
+}
+
 /// Legacy components must be gone.
 #[test]
 fn legacy_components_are_removed() {

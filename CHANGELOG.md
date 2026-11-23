@@ -11,6 +11,15 @@ change.
 
 ## [Unreleased]
 
+## [0.7.1] - unreleased
+
+### Fixed
+
+- **The ring screen came up late or not at all on Android 14 and 15** when the app's main process was cached (in the background, not yet
+  frozen) at the alarm: the sound and the banner came, but the app heard of the ring only when the person opened it. The guardian's
+  `JOB_HEADS_UP` broadcast went to a receiver registered at run time, which Android 14+ queues for a cached app. The receiver is now
+  `SentinelJobHeadsUpReceiver`, declared in the jobs manifest, which the system does not queue.
+
 ## [0.7.0] - 2026-11-20
 
 ### Changed

@@ -3,8 +3,9 @@
     <!--
         Jobs library init. Merged into the consumer manifest by Gradle ONLY
         when this module is a dependency (the `jobs` feature is enabled).
-        Registers the JOB_HEADS_UP receiver so a live MAIN process is told to
-        run the job (forwarded to Rust) instead of being relaunched.
+        Declares the JOB_HEADS_UP receiver so a live MAIN process is told to
+        run the job (forwarded to Rust) instead of being relaunched. In the manifest,
+        as a receiver registered at run time is queued while MAIN is cached.
     -->
     <application>
         <provider
@@ -13,6 +14,16 @@
             android:directBootAware="true"
             android:exported="false"
             android:initOrder="89" />
+        <!-- In MAIN: the guardian's news that a job fired. Not queued while MAIN is cached. -->
+        <receiver
+            android:name="com.mobilesentinel.SentinelJobHeadsUpReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mobilesentinel.JOB_HEADS_UP" />
+            </intent-filter>
+        </receiver>
         <!-- In :sentinel: see the class. Starts nothing that is not running already. -->
         <provider
             android:name="com.mobilesentinel.SentinelGuardianStarter"
