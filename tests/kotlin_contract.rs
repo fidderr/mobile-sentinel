@@ -276,6 +276,69 @@ fn external_signatures_match_the_rust_exports() {
     );
 }
 
+/// The signature `RegisterNatives` is given (`NATIVE_METHODS` in `platform/android/jni.rs`) must be the
+/// one the Kotlin declaration has. A wrong one fails at every launch, is logged as a warning, and the
+/// method is found by name after all, which hides it.
+#[test]
+fn registered_jni_signatures_match_the_kotlin_declarations() {
+    let (_, kotlin) = kotlin_externals_with_parameters();
+    let jni = fs::read(root().join("src/platform/android/jni.rs")).unwrap();
+    let jni = String::from_utf8_lossy(&jni);
+    let table = jni
+        .split_once("const NATIVE_METHODS")
+        .and_then(|(_, rest)| rest.split_once("];"))
+        .map(|(table, _)| table)
+        .expect("NATIVE_METHODS not found in jni.rs");
+    let literals: Vec<&str> = table
+        .split('"')
+        .enumerate()
+        .filter_map(|(i, part)| (i % 2 == 1).then_some(part))
+        .collect();
+    assert!(
+        literals.len() >= 24 && literals.len() % 3 == 0,
+        "NATIVE_METHODS did not parse: {literals:?}"
+    );
+    let descriptor = |kotlin_type: &str| match kotlin_type {
+        "Double" => "D".to_string(),
+        "Float" => "F".to_string(),
+        "Long" => "J".to_string(),
+        "Int" => "I".to_string(),
+        "Boolean" => "Z".to_string(),
+        "String" => "Ljava/lang/String;".to_string(),
+        "ByteArray" => "[B".to_string(),
+        other => panic!("no JNI descriptor known for the Kotlin type {other}"),
+    };
+    let mut wrong = Vec::new();
+    for entry in literals.chunks(3) {
+        let (class_path, method, signature) = (entry[0], entry[1], entry[2]);
+        let (package, class) = class_path.rsplit_once('/').unwrap();
+        let name = jni_name(&package.replace('/', "."), class, method);
+        let Some(types) = kotlin.get(&name) else {
+            wrong.push(format!(
+                "{class_path}.{method} is registered but not declared in Kotlin"
+            ));
+            continue;
+        };
+        let expected = format!(
+            "({})V",
+            types.iter().map(|t| descriptor(t)).collect::<String>()
+        );
+        if signature != expected {
+            wrong.push(format!(
+                "{class_path}.{method}: registered as {signature}, Kotlin declares {expected}"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{}",
+        wrong.join(
+            "
+"
+        )
+    );
+}
+
 #[test]
 fn the_app_implemented_names_are_still_declared_in_kotlin() {
     let kotlin = kotlin_externals();
