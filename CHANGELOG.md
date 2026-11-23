@@ -26,7 +26,7 @@ change.
   heads-up does no harm. A debug build with the file `sentinel/debug_hold_heads_up` ignores one broadcast, for device tests.
 - **A ring resumed by the watchdog is never without one.** The alarm receiver arms the next watchdog before it resumes the ring, and the
   ring service arms it when it starts instead of at its second tick: a kill of the alarm process in the first second left only
-  Android's own service restart, whose delay grows to 40 s. A debug build with the file `sentinel/debug_die_after_watchdog_resume` ends the alarm process once, 0.3 s after the watchdog resumed a ring, so a device test can hit that moment.
+  Android's own service restart, whose delay grows to 40 s. A debug build with the file `sentinel/debug_die_after_watchdog_resume` ends the alarm process once, right after the watchdog asked for the resume, so a device test can hit that moment.
 - `SentinelBridge.nativeOnAccelerometerData` was registered with the JNI signature `(DDD)V` while Kotlin declares `(DDDJ)V` (the sensor
   timestamp added in 0.7.0). `RegisterNatives` failed with a warning at every launch and the method was found by name instead. A test now
   compares every registered signature with its Kotlin declaration.

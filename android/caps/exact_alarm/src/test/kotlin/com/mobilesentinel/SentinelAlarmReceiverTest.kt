@@ -142,8 +142,10 @@ class SentinelAlarmReceiverTest {
     fun aDebugBuildTakesTheDieFileOnTheWatchdogResume() {
         ringGoing()
         app.applicationInfo.flags = app.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        org.robolectric.shadows.ShadowProcess.clearKilledProcesses()
         deliver(SentinelRing.WATCHDOG_ID, null)
         assertFalse(dieFile().exists())
+        assertTrue(org.robolectric.shadows.ShadowProcess.wasKilled(android.os.Process.myPid()))
     }
 
     @Test
@@ -151,8 +153,10 @@ class SentinelAlarmReceiverTest {
     fun aReleaseBuildLeavesTheDieFileAlone() {
         ringGoing()
         app.applicationInfo.flags = app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE.inv()
+        org.robolectric.shadows.ShadowProcess.clearKilledProcesses()
         deliver(SentinelRing.WATCHDOG_ID, null)
         assertTrue(dieFile().exists())
+        assertFalse(org.robolectric.shadows.ShadowProcess.wasKilled(android.os.Process.myPid()))
     }
 
     @Test
