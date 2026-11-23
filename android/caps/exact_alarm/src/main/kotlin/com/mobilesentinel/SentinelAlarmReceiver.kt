@@ -44,6 +44,9 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
             val jobId = instanceId.removeSuffix(WATCHDOG_SUFFIX)
 
             if (isWatchdog) {
+                // The next one before the service is back: a kill in its first seconds is
+                // then answered by this alarm and not only by Android's slow service restart.
+                if (SentinelRing.list(app).isNotEmpty()) SentinelRing.armWatchdog(app)
                 SentinelRing.resumeSaved(app)
             } else if (jobId.isNotBlank()) {
                 SentinelRing.logTiming(app, "delivered", jobId)

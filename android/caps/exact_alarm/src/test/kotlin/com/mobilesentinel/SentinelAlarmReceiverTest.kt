@@ -90,6 +90,32 @@ class SentinelAlarmReceiverTest {
     }
 
     /** The watchdog brings back a ring that is still going; it never starts a new one. */
+    private fun watchdogs() = scheduled().filter {
+        shadowOf(it.operation).savedIntent.getStringExtra("instance_id") == SentinelRing.WATCHDOG_ID
+    }
+
+    /** A ring brought back by the watchdog has a watchdog of its own at once, not a second later. */
+    @Test
+    @Config(sdk = [33])
+    fun theWatchdogArmsTheNextOneWhileARingGoes() {
+        writeJobFile("a1")
+        SentinelActiveJobs.mark(context, "a1")
+        SentinelRing.start(context, "a1", plan)
+        assertEquals(SentinelRing.ACTION_RING, shadowOf(app).nextStartedService.action)
+        assertTrue(watchdogs().isEmpty())
+        deliver(SentinelRing.WATCHDOG_ID, null)
+        assertEquals(1, watchdogs().size)
+        assertEquals(SentinelRing.ACTION_RESUME, shadowOf(app).nextStartedService.action)
+    }
+
+    /** With nothing ringing the watchdog is a stray one: it brings nothing back and must not keep itself going. */
+    @Test
+    @Config(sdk = [33])
+    fun theWatchdogArmsNothingWhenNothingRings() {
+        deliver(SentinelRing.WATCHDOG_ID, null)
+        assertTrue(watchdogs().isEmpty())
+    }
+
     @Test
     @Config(sdk = [33])
     fun theWatchdogDoesNotActivateAJob() {

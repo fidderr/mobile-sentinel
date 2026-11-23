@@ -269,6 +269,8 @@ class SentinelForegroundService : Service() {
         showForeground()
         if (!ticking) {
             ticking = true
+            // Not left to the second tick: a kill in the first second has to be answered too.
+            SentinelRing.armWatchdog(this)
             SentinelRing.holdCpu(this, CPU_HOLD_MS)
             handler.post(tick)
         }

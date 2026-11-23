@@ -156,6 +156,29 @@ class SentinelForegroundServiceTest {
         assertNotNull(notification(c))
     }
 
+    private fun watchdogs() = shadowOf(context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager)
+        .scheduledAlarms.filter { shadowOf(it.operation).savedIntent.getStringExtra("instance_id") == SentinelRing.WATCHDOG_ID }
+
+    /** A kill in the first second of a ring must find a watchdog armed: the first tick is not the time to arm it. */
+    @Test
+    @Config(sdk = [33])
+    fun aRingHasAWatchdogFromTheMomentItStarts() {
+        ringing("""{"sound_uri":"silent://"}""")
+        assertEquals(1, watchdogs().size)
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun aRingResumedAfterAKillHasAWatchdogFromTheMomentItStarts() {
+        createJob("a1")
+        SentinelRing.start(context, "a1", """{"sound_uri":"silent://"}""", false)
+        val alarms = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        for (a in shadowOf(alarms).scheduledAlarms.toList()) alarms.cancel(a.operation!!)
+        assertTrue(watchdogs().isEmpty())
+        command(Robolectric.buildService(SentinelForegroundService::class.java).create(), SentinelRing.ACTION_RESUME)
+        assertEquals(1, watchdogs().size)
+    }
+
     @Test
     @Config(sdk = [33])
     fun pauseSilencesTheOutputsAndRingBringsThemBack() {
