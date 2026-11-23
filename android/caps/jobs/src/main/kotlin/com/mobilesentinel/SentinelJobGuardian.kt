@@ -327,12 +327,16 @@ object SentinelJobGuardian {
         Log.w(TAG, "heads-up for ${job.id} not taken up in ${HEADS_UP_TAKEN_WITHIN_MS}ms — starting the screen")
         SentinelDiag.log(context, "sentinel", "heads-up for ${job.id} not taken up: the guardian starts the screen")
         startMainActivity(context)
+        // A MAIN that is running does not learn of the ring from a screen that starts: tell it again, once.
+        sendHeadsUpBroadcast(context, job.id, track = false)
     }
 
-    internal fun sendHeadsUpBroadcast(context: Context, jobId: String) {
+    internal fun sendHeadsUpBroadcast(context: Context, jobId: String, track: Boolean = true) {
         try {
-            File(File(SentinelStorage.filesDir(context), TAKEN_DIR), jobId).delete()
-            headsUpAt[jobId] = SystemClock.elapsedRealtime()
+            if (track) {
+                File(File(SentinelStorage.filesDir(context), TAKEN_DIR), jobId).delete()
+                headsUpAt[jobId] = SystemClock.elapsedRealtime()
+            }
             val intent = Intent(ACTION_JOB_HEADS_UP).apply {
                 setPackage(context.packageName)
                 putExtra(EXTRA_JOB_ID, jobId)

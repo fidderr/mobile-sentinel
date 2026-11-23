@@ -81,11 +81,11 @@ class SentinelJobHeadsUpReceiver : BroadcastReceiver() {
 
     /**
      * For the device tests of the guardian's fallback: a debug build with the file
-     * `sentinel/debug_hold_heads_up` ignores the broadcast. A release build never does.
+     * `sentinel/debug_hold_heads_up` ignores one broadcast (and removes the file). A release build never does.
      */
     private fun heldBackForTest(context: Context): Boolean {
         val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        return debuggable && File(SentinelStorage.filesDir(context), HOLD_FILE).exists()
+        return debuggable && File(SentinelStorage.filesDir(context), HOLD_FILE).delete()
     }
 
     private companion object {

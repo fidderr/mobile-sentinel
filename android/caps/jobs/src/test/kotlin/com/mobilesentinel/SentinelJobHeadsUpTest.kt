@@ -122,7 +122,7 @@ class SentinelJobHeadsUpTest {
     }
 
     @Test
-    fun aDebugBuildCanHoldTheHeadsUpBackForTheDeviceTests() {
+    fun aDebugBuildCanHoldOneHeadsUpBackForTheDeviceTests() {
         activeJob("r5")
         File(files(), "sentinel").mkdirs()
         File(files(), "sentinel/debug_hold_heads_up").writeText("")
@@ -130,6 +130,9 @@ class SentinelJobHeadsUpTest {
         headsUp("r5")
         assertNull(shadowOf(app).nextStartedActivity)
         assertFalse(taken("r5"))
+        headsUp("r5")
+        assertNotNull(shadowOf(app).nextStartedActivity)
+        assertTrue(taken("r5"))
     }
 
     @Test
@@ -173,9 +176,12 @@ class SentinelJobHeadsUpTest {
         val started = shadowOf(app).nextStartedActivity
         assertNotNull("the guardian did not start the screen", started)
         assertEquals(screen, started.component?.className)
+        // And MAIN is told once more, for its Rust to take the ring up.
+        assertEquals(2, shadowOf(app).broadcastIntents.count { it.action == SentinelJobGuardian.ACTION_JOB_HEADS_UP })
         ShadowSystemClock.advanceBy(Duration.ofMillis(2_100))
         look(job)
         assertNull("started twice", shadowOf(app).nextStartedActivity)
+        assertEquals(2, shadowOf(app).broadcastIntents.count { it.action == SentinelJobGuardian.ACTION_JOB_HEADS_UP })
     }
 
     @Test
