@@ -33,9 +33,18 @@ object SentinelJobGuardian {
     const val ACTION_JOB_HEADS_UP = SentinelActiveJobs.ACTION_JOB_HEADS_UP
     const val EXTRA_JOB_ID = SentinelActiveJobs.EXTRA_JOB_ID
 
+    /** How long after the heads-up MAIN has to take the ring up before the guardian does it itself. */
+    private const val HEADS_UP_TAKEN_WITHIN_MS = 2_000L
+
+    /** One file per job, in MAIN's hands: the receiver writes it when it took the ring up. */
+    private const val TAKEN_DIR = "sentinel/headsup"
+
     private val guarding = AtomicBoolean(false)
     /** From the poll loop, and from the alarm receiver on the main thread. */
     private val headsUpSent = ConcurrentHashMap.newKeySet<String>()
+
+    /** When each job's heads-up was sent (elapsed realtime), until the guardian has looked whether it was taken up. */
+    private val headsUpAt = ConcurrentHashMap<String, Long>()
 
     // All policy (how long between launches, how long a UI may be silent, how
     // far the allowance grows after a kill) comes from the job config that
@@ -85,6 +94,7 @@ object SentinelJobGuardian {
     @JvmStatic
     fun clearHeadsUpFor(jobId: String) {
         headsUpSent.remove(jobId)
+        headsUpAt.remove(jobId)
     }
 
     private fun pollLoop(context: Context) {
@@ -99,6 +109,7 @@ object SentinelJobGuardian {
                 if (unlocked && !sawUnlocked) {
                     Log.i(TAG, "pollLoop: the user unlocked, screens can start now")
                     headsUpSent.clear()
+                    headsUpAt.clear()
                     lastLaunchAtMs = 0L
                     lastLaunchWallMs = 0L
                 }
@@ -111,6 +122,8 @@ object SentinelJobGuardian {
                     uiFailures = 0
                     lastLaunchWallMs = 0L
                     headsUpSent.clear()
+                    headsUpAt.clear()
+                    File(SentinelStorage.filesDir(context), TAKEN_DIR).listFiles()?.forEach { it.delete() }
                     guarding.set(false)
                     // A job that became active just now found this loop still running, and
                     // left it to this loop.
@@ -139,6 +152,7 @@ object SentinelJobGuardian {
                         // MAIN is dead — start it. Clear heads-up tracking
                         // so we re-send after it comes back up.
                         headsUpSent.remove(jobId)
+                        headsUpAt.remove(jobId)
                         val now = SystemClock.elapsedRealtime()
                         val minLaunchGap = config?.optLong("min_launch_interval_ms", 3_000L) ?: 3_000L
                         if (lastLaunchAtMs != 0L && now - lastLaunchAtMs < minLaunchGap) {
@@ -174,6 +188,7 @@ object SentinelJobGuardian {
                             }
                             headsUpSent.add(jobId)
                         }
+                        checkHeadsUpTaken(context, job, SystemClock.elapsedRealtime())
                         // Opt-in liveness check. Each kill doubles the allowed
                         // silence, up to the configured cap, so a UI that needs
                         // long to start is not killed in a loop.
@@ -254,6 +269,7 @@ object SentinelJobGuardian {
         SentinelDiag.log(context, "sentinel", "UI frozen for more than ${timeoutMs}ms: restarting the app, kill #$livenessKills")
         Log.w(TAG, "UI frozen for more than ${timeoutMs}ms — killing MAIN (pid $mainPid), kill #$livenessKills")
         headsUpSent.remove(jobId)
+        headsUpAt.remove(jobId)
         android.os.Process.killProcess(mainPid)
     }
 
@@ -278,8 +294,45 @@ object SentinelJobGuardian {
         }
     }
 
-    private fun sendHeadsUpBroadcast(context: Context, jobId: String) {
+    /**
+     * MAIN's end of the heads-up: it took the ring up (forwarded it to Rust and has a screen up
+     * or on its way). Written by [SentinelJobHeadsUpReceiver] in MAIN.
+     */
+    @JvmStatic
+    fun noteHeadsUpTaken(context: Context, jobId: String) {
         try {
+            val dir = File(SentinelStorage.filesDir(context), TAKEN_DIR)
+            dir.mkdirs()
+            File(dir, jobId).writeText("${android.os.Process.myPid()} ${System.currentTimeMillis()}")
+        } catch (e: Throwable) {
+            Log.w(TAG, "noteHeadsUpTaken($jobId) failed: ${e.message}")
+        }
+    }
+
+    private fun headsUpTaken(context: Context, jobId: String): Boolean =
+        File(File(SentinelStorage.filesDir(context), TAKEN_DIR), jobId).exists()
+
+    /**
+     * The heads-up is one broadcast to another process, and Android may hold it back (a cached
+     * app's queue) or MAIN may not act on it. Some seconds after it was sent, with no sign from
+     * MAIN, the guardian starts the screen itself, as it does for a MAIN that is dead. Once per
+     * heads-up; MAIN takes a ring up only once, so a late heads-up does no harm.
+     */
+    internal fun checkHeadsUpTaken(context: Context, job: SentinelActiveJobs.ActiveJob, now: Long) {
+        val sentAt = headsUpAt[job.id] ?: return
+        if (now - sentAt < HEADS_UP_TAKEN_WITHIN_MS) return
+        headsUpAt.remove(job.id)
+        if (headsUpTaken(context, job.id)) return
+        if (SentinelRing.uiFailed(context) || SentinelActiveJobs.ringEnded(context, job.id) || SentinelRing.appOnScreen(context)) return
+        Log.w(TAG, "heads-up for ${job.id} not taken up in ${HEADS_UP_TAKEN_WITHIN_MS}ms — starting the screen")
+        SentinelDiag.log(context, "sentinel", "heads-up for ${job.id} not taken up: the guardian starts the screen")
+        startMainActivity(context)
+    }
+
+    internal fun sendHeadsUpBroadcast(context: Context, jobId: String) {
+        try {
+            File(File(SentinelStorage.filesDir(context), TAKEN_DIR), jobId).delete()
+            headsUpAt[jobId] = SystemClock.elapsedRealtime()
             val intent = Intent(ACTION_JOB_HEADS_UP).apply {
                 setPackage(context.packageName)
                 putExtra(EXTRA_JOB_ID, jobId)

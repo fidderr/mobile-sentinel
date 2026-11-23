@@ -19,6 +19,14 @@ change.
   frozen) at the alarm: the sound and the banner came, but the app heard of the ring only when the person opened it. The guardian's
   `JOB_HEADS_UP` broadcast went to a receiver registered at run time, which Android 14+ queues for a cached app. The receiver is now
   `SentinelJobHeadsUpReceiver`, declared in the jobs manifest, which the system does not queue.
+- **The guardian now checks that its heads-up was taken up.** Two seconds after it sends `JOB_HEADS_UP`, with no sign from MAIN (the
+  receiver leaves one per job in `sentinel/headsup/`), it starts the app's screen itself, once, as it does for a dead MAIN. Whatever
+  holds the broadcast back in future, the ring no longer ends up as sound without a screen. MAIN's receiver starts a job's screen
+  at most once in three seconds, and Rust already treats a heads-up for a ring that is firing as a re-engage, so a late second
+  heads-up does no harm. A debug build with the file `sentinel/debug_hold_heads_up` ignores the broadcast, for device tests.
+- **A ring resumed by the watchdog is never without one.** The alarm receiver arms the next watchdog before it resumes the ring, and the
+  ring service arms it when it starts instead of at its second tick: a kill of the alarm process in the first second left only
+  Android's own service restart, whose delay grows to 40 s.
 
 ## [0.7.0] - 2026-11-20
 
