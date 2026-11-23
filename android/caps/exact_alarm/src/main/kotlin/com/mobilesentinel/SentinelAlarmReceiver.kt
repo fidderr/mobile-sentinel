@@ -3,7 +3,11 @@ package com.mobilesentinel
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.io.File
 
 /**
  * Universal-SDK alarm receiver — the slim Kotlin shim in `:sentinel`.
@@ -47,7 +51,7 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
                 // The next one before the service is back: a kill in its first seconds is
                 // then answered by this alarm and not only by Android's slow service restart.
                 if (SentinelRing.list(app).isNotEmpty()) SentinelRing.armWatchdog(app)
-                SentinelRing.resumeSaved(app)
+                if (SentinelRing.resumeSaved(app)) endAfterResumeForTest(app)
             } else if (jobId.isNotBlank()) {
                 SentinelRing.logTiming(app, "delivered", jobId)
                 val active = SentinelActiveJobs.mark(app, jobId)
@@ -82,8 +86,21 @@ class SentinelAlarmReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * For the device test of the watchdog: a debug build with the file `sentinel/debug_die_after_watchdog_resume`
+     * ends this process once, 0.3 s after the watchdog resumed a ring, which is the moment the next watchdog has
+     * to exist already. A release build never does.
+     */
+    private fun endAfterResumeForTest(context: Context) {
+        val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (!debuggable || !File(SentinelStorage.filesDir(context), DIE_FILE).delete()) return
+        Log.w(TAG, "debug build: this process ends in 300 ms, after the watchdog resume")
+        Handler(Looper.getMainLooper()).postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
+    }
+
     companion object {
         const val TAG = "MobileSentinel.AlarmRx"
+        private const val DIE_FILE = "sentinel/debug_die_after_watchdog_resume"
         const val WATCHDOG_SUFFIX = "#watchdog"
         private const val DELIVERY_WAKE_MS = 15_000L
         const val ACTION = "com.mobilesentinel.ALARM_DISPATCH"

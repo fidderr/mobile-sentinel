@@ -124,4 +124,44 @@ class SentinelAlarmReceiverTest {
         assertFalse(SentinelActiveJobs.isActive(context, "a1"))
         assertNull(shadowOf(app).nextStartedService)
     }
+
+    private fun dieFile() = java.io.File(SentinelStorage.filesDir(context), "sentinel/debug_die_after_watchdog_resume")
+
+    private fun ringGoing() {
+        writeJobFile("a1")
+        SentinelActiveJobs.mark(context, "a1")
+        SentinelRing.start(context, "a1", plan)
+        shadowOf(app).nextStartedService
+        dieFile().parentFile?.mkdirs()
+        dieFile().writeText("")
+    }
+
+    /** The device test of the watchdog: a debug build ends its process once after a resume, and says so by taking the file. */
+    @Test
+    @Config(sdk = [33])
+    fun aDebugBuildTakesTheDieFileOnTheWatchdogResume() {
+        ringGoing()
+        app.applicationInfo.flags = app.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        deliver(SentinelRing.WATCHDOG_ID, null)
+        assertFalse(dieFile().exists())
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun aReleaseBuildLeavesTheDieFileAlone() {
+        ringGoing()
+        app.applicationInfo.flags = app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE.inv()
+        deliver(SentinelRing.WATCHDOG_ID, null)
+        assertTrue(dieFile().exists())
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun theDieFileIsNotTakenWhenNothingWasResumed() {
+        dieFile().parentFile?.mkdirs()
+        dieFile().writeText("")
+        app.applicationInfo.flags = app.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
+        deliver(SentinelRing.WATCHDOG_ID, null)
+        assertTrue(dieFile().exists())
+    }
 }
