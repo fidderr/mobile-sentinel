@@ -229,4 +229,46 @@ class SentinelJobHeadsUpTest {
         look(job)
         assertNull(shadowOf(app).nextStartedActivity)
     }
+
+    private fun headsUpsSent() = shadowOf(app).broadcastIntents.count { it.action == SentinelJobGuardian.ACTION_JOB_HEADS_UP }
+
+    @Test
+    fun beforeTheFirstUnlockTheGuardianStartsNothingAndSendsNothingMore() {
+        val job = activeJob("g7")
+        sent(job)
+        shadowOf(context.getSystemService(android.os.UserManager::class.java)).setUserUnlocked(false)
+        headsUp("g7")
+        assertFalse("a screen cannot have been taken up before the unlock", taken("g7"))
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_100))
+        look(job)
+        assertNull(shadowOf(app).nextStartedActivity)
+        assertEquals("the heads-up went out again before the unlock", 1, headsUpsSent())
+    }
+
+    @Test
+    fun theBackupScreenIsNotCoveredByTheGuardian() {
+        val job = activeJob("g8")
+        sent(job)
+        SentinelRing.markUiFailed(context)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_100))
+        look(job)
+        assertNull(shadowOf(app).nextStartedActivity)
+        assertEquals(1, headsUpsSent())
+    }
+
+    @Test
+    fun twoJobsAreLookedAtEachOnTheirOwn() {
+        val a = activeJob("g9a")
+        val b = activeJob("g9b")
+        sent(a)
+        sent(b)
+        SentinelJobGuardian.noteHeadsUpTaken(context, a.id)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_100))
+        look(a)
+        assertNull("the job MAIN took up got a screen", shadowOf(app).nextStartedActivity)
+        look(b)
+        assertNotNull(shadowOf(app).nextStartedActivity)
+        // Two from the loop, one more for the job that was not taken up.
+        assertEquals(3, headsUpsSent())
+    }
 }

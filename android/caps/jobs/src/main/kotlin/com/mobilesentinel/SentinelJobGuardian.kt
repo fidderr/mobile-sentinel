@@ -324,6 +324,9 @@ object SentinelJobGuardian {
         headsUpAt.remove(job.id)
         if (headsUpTaken(context, job.id)) return
         if (SentinelRing.uiFailed(context) || SentinelActiveJobs.ringEnded(context, job.id) || SentinelRing.appOnScreen(context)) return
+        // Before the first unlock no screen can start and the receiver leaves no sign: the ring
+        // service asks for the unlock, and the first unlock sends the heads-up again.
+        if (!SentinelBoot.screenCanStart(context, SentinelActiveJobs.activityOf(job))) return
         Log.w(TAG, "heads-up for ${job.id} not taken up in ${HEADS_UP_TAKEN_WITHIN_MS}ms — starting the screen")
         SentinelDiag.log(context, "sentinel", "heads-up for ${job.id} not taken up: the guardian starts the screen")
         startMainActivity(context)
