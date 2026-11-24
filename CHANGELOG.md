@@ -11,7 +11,7 @@ change.
 
 ## [Unreleased]
 
-## [0.7.1] - unreleased
+## [0.7.1] - 2026-11-24
 
 ### Fixed
 
