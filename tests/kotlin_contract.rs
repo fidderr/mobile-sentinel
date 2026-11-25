@@ -482,3 +482,382 @@ fn every_key_kotlin_reads_from_the_plan_exists_in_it() {
         "Kotlin reads plan keys that FireRequest does not serialize (renamed?): {missing:?}"
     );
 }
+
+// ---- The Kotlin methods Rust calls by name ------------------------------------------------------------------------------
+//
+// Rust calls them with `call_static_method(class, "name", "(descriptor)ret", ..)`. The JVM looks the method up by name and
+// descriptor at the call, and a pending `NoSuchMethodError` there ends the process: a member of a Kotlin `object` without
+// `@JvmStatic` is no static method (seen on a phone, 2026-11-26), and a changed parameter changes the descriptor. Both lists
+// are read from the sources, none is kept by hand: the calls from `src/**/*.rs`, the members from the Kotlin modules.
+
+/// (class path, method, descriptor, file) of every `call_static_method` whose class is one of ours, and how many were left out.
+fn rust_static_calls() -> (Vec<(String, String, String, String)>, usize) {
+    let (mut found, mut skipped) = (Vec::new(), 0);
+    for file in rust_sources() {
+        let text = fs::read_to_string(&file).unwrap();
+        // `const NAME: &str = "com/mobilesentinel/Class";`
+        let mut consts = BTreeMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            let rest = line
+                .strip_prefix("const ")
+                .or_else(|| line.strip_prefix("pub const "));
+            if let Some(rest) = rest {
+                if let (Some((name, _)), Some(q)) = (rest.split_once(':'), rest.find('"')) {
+                    let value: String = rest[q + 1..].chars().take_while(|c| *c != '"').collect();
+                    consts.insert(name.trim().to_string(), value);
+                }
+            }
+        }
+        // The class of a call is the argument of the `with_jni_class(` before it.
+        let mut classes: Vec<(usize, Option<String>)> = Vec::new();
+        let mut at = 0;
+        while let Some(i) = text[at..].find("with_jni_class(") {
+            let start = at + i + "with_jni_class(".len();
+            let arg: String = text[start..].chars().take_while(|c| *c != ',').collect();
+            let arg = arg.trim();
+            let class = match arg.strip_prefix('"') {
+                Some(lit) => Some(lit.trim_end_matches('"').to_string()),
+                None => consts.get(arg).cloned(),
+            };
+            classes.push((start, class));
+            at = start;
+        }
+        let mut at = 0;
+        while let Some(i) = text[at..].find("call_static_method(") {
+            let start = at + i + "call_static_method(".len();
+            at = start;
+            // `class, "name", "(sig)ret"` with white space between the parts.
+            let mut parts = text[start..].splitn(4, ',');
+            let (Some(_receiver), Some(name), Some(sig)) =
+                (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let (name, sig) = (name.trim(), sig.trim());
+            if !name.starts_with('"') || !sig.starts_with("\"(") {
+                continue;
+            }
+            let name = name.trim_matches('"').to_string();
+            let sig: String = sig
+                .trim_start_matches('"')
+                .chars()
+                .take_while(|c| *c != '"')
+                .collect();
+            let class = classes
+                .iter()
+                .rev()
+                .find(|(pos, _)| *pos < start)
+                .and_then(|(_, c)| c.clone());
+            match class {
+                Some(class) if class.starts_with("com/mobilesentinel/") => {
+                    found.push((class, name, sig, file.display().to_string()));
+                }
+                _ => skipped += 1,
+            }
+        }
+    }
+    (found, skipped)
+}
+
+/// The JVM descriptor of a Kotlin type as written in a signature, `None` for a class the file does not name.
+fn kotlin_descriptor(
+    ty: &str,
+    imports: &BTreeMap<String, String>,
+    package: &str,
+    ours: &BTreeSet<String>,
+) -> Option<String> {
+    let ty = ty.trim().trim_end_matches('?').trim();
+    let primitive = match ty {
+        "Boolean" => "Z",
+        "Int" => "I",
+        "Long" => "J",
+        "Float" => "F",
+        "Double" => "D",
+        "Byte" => "B",
+        "Short" => "S",
+        "Char" => "C",
+        "Unit" => "V",
+        "ByteArray" => "[B",
+        "IntArray" => "[I",
+        "LongArray" => "[J",
+        "FloatArray" => "[F",
+        "DoubleArray" => "[D",
+        "BooleanArray" => "[Z",
+        _ => "",
+    };
+    if !primitive.is_empty() {
+        return Some(primitive.to_string());
+    }
+    if let Some(inner) = ty.strip_prefix("Array<").and_then(|t| t.strip_suffix('>')) {
+        return Some(format!(
+            "[{}",
+            kotlin_descriptor(inner, imports, package, ours)?
+        ));
+    }
+    let path = match ty {
+        "String" => "java/lang/String".to_string(),
+        "Any" => "java/lang/Object".to_string(),
+        _ => match imports.get(ty) {
+            Some(full) => full.replace('.', "/"),
+            None if ours.contains(&format!("{}/{ty}", package.replace('.', "/"))) => {
+                format!("{}/{ty}", package.replace('.', "/"))
+            }
+            None => return None,
+        },
+    };
+    Some(format!("L{path};"))
+}
+
+/// Splits parameters at the commas outside of `<>` and `()`.
+fn split_parameters(params: &str) -> Vec<String> {
+    let (mut out, mut depth, mut current) = (Vec::new(), 0i32, String::new());
+    for c in params.chars() {
+        match c {
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth == 0 {
+            out.push(std::mem::take(&mut current));
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+/// The class a top-level line declares, as a path (`com/mobilesentinel/Name`).
+fn declared_class(line: &str, package: &str) -> Option<String> {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return None;
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let i = words
+        .iter()
+        .position(|w| matches!(*w, "object" | "class" | "interface"))?;
+    let name: String = words
+        .get(i + 1)?
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    Some(format!("{}/{name}", package.replace('.', "/")))
+}
+
+/// One Kotlin member as the JVM sees it: (class path, JVM name, static, descriptor, `None` when a type is not known).
+type Member = (String, String, bool, Option<String>);
+
+fn kotlin_members() -> Vec<Member> {
+    let mut parsed = Vec::new();
+    let mut ours = BTreeSet::new();
+    for file in kotlin_sources() {
+        let text = fs::read_to_string(&file).unwrap();
+        let package = text
+            .lines()
+            .find_map(|l| l.strip_prefix("package "))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let mut imports = BTreeMap::new();
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("import ") {
+                let rest = rest.trim();
+                if let Some((_, last)) = rest.rsplit_once('.') {
+                    imports.insert(last.to_string(), rest.to_string());
+                }
+            }
+        }
+        ours.extend(text.lines().filter_map(|l| declared_class(l, &package)));
+        parsed.push((text, package, imports));
+    }
+    let mut members = Vec::new();
+    for (text, package, imports) in &parsed {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut class: Option<String> = None;
+        for (n, line) in lines.iter().enumerate() {
+            if let Some(c) = declared_class(line, package) {
+                class = Some(c);
+            }
+            let Some(class) = &class else { continue };
+            // @JvmStatic on the line, or among the annotation lines right above it.
+            let is_static = line.contains("@JvmStatic")
+                || lines[..n]
+                    .iter()
+                    .rev()
+                    .take_while(|l| l.trim_start().starts_with('@'))
+                    .any(|l| l.contains("@JvmStatic"));
+            if let Some(at) = line.find("fun ") {
+                let rest = &line[at + 4..];
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                // The parameter list may go over several lines.
+                let mut joined = String::from(rest);
+                let mut k = n;
+                while joined.matches('(').count() > joined.matches(')').count()
+                    && k + 1 < lines.len()
+                {
+                    k += 1;
+                    joined.push(' ');
+                    joined.push_str(lines[k].trim());
+                }
+                let Some((_, after)) = joined.split_once('(') else {
+                    continue;
+                };
+                let (mut depth, mut end) = (1, 0);
+                for (i, c) in after.char_indices() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                let (params, tail) = (&after[..end], &after[end + 1..]);
+                let ret = tail
+                    .trim_start()
+                    .strip_prefix(':')
+                    .map(|t| {
+                        t.trim()
+                            .split(['=', '{'])
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| "Unit".to_string());
+                let mut descriptor = Some(String::from("("));
+                for p in split_parameters(params) {
+                    let Some((_, ty)) = p.split_once(':') else {
+                        continue;
+                    };
+                    let ty = ty.split('=').next().unwrap_or("");
+                    descriptor = match (descriptor, kotlin_descriptor(ty, imports, package, &ours))
+                    {
+                        (Some(d), Some(t)) => Some(d + &t),
+                        _ => None,
+                    };
+                }
+                let descriptor = descriptor.and_then(|d| {
+                    kotlin_descriptor(&ret, imports, package, &ours).map(|r| format!("{d}){r}"))
+                });
+                members.push((class.clone(), name, is_static, descriptor));
+                continue;
+            }
+            // A property: the JVM sees `getName()` and, for a var, `setName(..)`.
+            let trimmed = line.trim_start();
+            let after = ["var ", "val "].iter().find_map(|kw| {
+                trimmed
+                    .strip_prefix(kw)
+                    .or_else(|| trimmed.split(&format!(" {kw}")).nth(1))
+            });
+            if let Some(after) = after {
+                let name: String = after
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                let ty = after
+                    .split_once(':')
+                    .map(|(_, t)| t.split('=').next().unwrap_or("").trim().to_string())
+                    .unwrap_or_default();
+                if !name.is_empty() && !ty.is_empty() {
+                    let mut cap = name.clone();
+                    cap[..1].make_ascii_uppercase();
+                    let d = kotlin_descriptor(&ty, imports, package, &ours);
+                    members.push((
+                        class.clone(),
+                        format!("get{cap}"),
+                        is_static,
+                        d.as_ref().map(|d| format!("(){d}")),
+                    ));
+                    members.push((
+                        class.clone(),
+                        format!("set{cap}"),
+                        is_static,
+                        d.as_ref().map(|d| format!("({d})V")),
+                    ));
+                }
+            }
+        }
+    }
+    members
+}
+
+#[test]
+fn every_kotlin_method_rust_calls_by_name_exists_static_with_that_descriptor() {
+    let (calls, skipped) = rust_static_calls();
+    // The ones left out have a class that is not one of ours (an Android class) or a class the file does not name by a constant.
+    assert!(
+        calls.len() >= 100,
+        "found only {} calls ({skipped} left out)",
+        calls.len()
+    );
+    assert!(
+        skipped <= 8,
+        "{skipped} calls could not be given a class: the reading of the Rust sources broke"
+    );
+    let members = kotlin_members();
+    assert!(
+        members.len() > 200,
+        "found only {} Kotlin members",
+        members.len()
+    );
+    let mut wrong = Vec::new();
+    let mut unchecked = 0;
+    for (class, name, sig, file) in &calls {
+        let same: Vec<&Member> = members
+            .iter()
+            .filter(|m| &m.0 == class && &m.1 == name)
+            .collect();
+        if same.is_empty() {
+            wrong.push(format!(
+                "{class}.{name}{sig}  <- {file}: no such member in the Kotlin sources"
+            ));
+        } else if !same.iter().any(|m| m.2) {
+            wrong.push(format!(
+                "{class}.{name}  <- {file}: not static (a member of an object needs @JvmStatic for the JNI call)"
+            ));
+        } else if !same
+            .iter()
+            .any(|m| m.2 && (m.3.as_deref() == Some(sig.as_str()) || m.3.is_none()))
+        {
+            let have: Vec<String> = same
+                .iter()
+                .filter(|m| m.2)
+                .filter_map(|m| m.3.clone())
+                .collect();
+            wrong.push(format!(
+                "{class}.{name}  <- {file}: Rust asks for {sig}, Kotlin has {have:?}"
+            ));
+        }
+    }
+    // A parameter of a type the test cannot name (no import, no class of ours) leaves that descriptor unchecked: the name and
+    // @JvmStatic still are.
+    for (class, name, _, _) in &calls {
+        let all_unknown = members
+            .iter()
+            .filter(|m| &m.0 == class && &m.1 == name && m.2)
+            .all(|m| m.3.is_none());
+        unchecked += usize::from(all_unknown);
+    }
+    eprintln!(
+        "{} Rust calls checked against the Kotlin sources ({skipped} left out, {unchecked} without a descriptor check)",
+        calls.len()
+    );
+    assert!(
+        unchecked <= 3,
+        "{unchecked} calls have a Kotlin type the test cannot name"
+    );
+    assert!(
+        wrong.is_empty(),
+        "Rust calls these Kotlin methods and the JVM would not find them:\n{}",
+        wrong.join("\n")
+    );
+}
