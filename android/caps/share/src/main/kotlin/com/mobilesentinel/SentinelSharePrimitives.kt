@@ -267,6 +267,21 @@ object SentinelSharePrimitives {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !storageGranted(context)
     }
 
+    /** Set by the last save below Android 10: it found the permission missing and no way left to ask for it with a dialog. */
+    @Volatile
+    private var storageBlocked = false
+
+    /**
+     * Whether the last save failed for want of the storage permission that Android will no longer ask the person for (they chose
+     * "never ask again"): the only way to allow it is the app's own settings page. A host asks this after a failed save, next to
+     * [downloadsPermissionMissing], and sends the person there. Up to Android 9 only; false from Android 10.
+     */
+    @JvmStatic
+    fun downloadsPermissionBlocked(): Boolean {
+        val context = SentinelPrimitives.getAppContext() ?: return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && storageBlocked && !storageGranted(context)
+    }
+
     private fun storageGranted(context: Context) =
         context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
 
@@ -276,8 +291,19 @@ object SentinelSharePrimitives {
      * (the dialog pauses the activity, and the caller can be the very thread that has to handle that).
      */
     private fun legacyStorageGranted(context: Context): Boolean {
+        storageBlocked = false
         if (storageGranted(context)) return true
         val activity = SentinelActivityTracker.currentResumedActivity ?: return false
+        // Asked before and Android says no rationale: the person chose "never ask again" (or the permission is fixed by policy), and
+        // a request now would show no dialog at all.
+        val prefs = context.getSharedPreferences(ASKED_PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(ASKED_KEY, false) &&
+            !activity.shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        ) {
+            storageBlocked = true
+            return false
+        }
+        prefs.edit().putBoolean(ASKED_KEY, true).apply()
         activity.runOnUiThread {
             try {
                 activity.requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_REQUEST_CODE)
@@ -289,6 +315,8 @@ object SentinelSharePrimitives {
     }
 
     private const val STORAGE_REQUEST_CODE = 0x5E12
+    private const val ASKED_PREFS = "mobilesentinel_share"
+    private const val ASKED_KEY = "asked_storage"
 }
 
 /** The share capability's own FileProvider (a subclass, so it can coexist

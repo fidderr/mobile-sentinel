@@ -30,6 +30,11 @@ change.
 - `health::applies(check) -> bool`: whether a check exists on this phone. The "kept when unused" setting is there from Android 11;
   below it the report says it is fine (nothing can be wrong), and an app that lists every check showed an "OK" for a setting the
   phone does not have. An app lists the checks that apply. Always `true` off Android. `HealthReport` is unchanged.
+- `share::downloads_permission_blocked() -> bool`: the last failed `save_to_downloads` found the storage permission missing and
+  Android will no longer ask for it (the person chose "never ask again", so a request shows no dialog): the only way is the app's own
+  settings page (`permissions::open_app_settings`). The capability remembers in its own preferences that it asked once, and a save
+  that finds the permission missing, an earlier ask and no rationale says blocked instead of asking again. Android 9 and below only,
+  `false` elsewhere. Additive.
 - `share::downloads_permission_missing() -> bool`: whether a failed `save_to_downloads` is failing for want of the storage
   permission (Android 9 and below, not granted), so the app can say "allow storage access, then save again". Always `false`
   elsewhere. Additive: a patch release in 0.x.

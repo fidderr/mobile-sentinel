@@ -212,6 +212,21 @@ pub fn downloads_permission_missing() -> bool {
     }
 }
 
+/// Whether the last [`save_to_downloads`] failed because the storage permission is missing and Android will no longer ask for it
+/// (the person chose "never ask again"): no dialog can come, and the only way is the app's own settings page
+/// (`permissions::open_app_settings`). Ask after a failure, next to [`downloads_permission_missing`], which is also
+/// true then. Android 9 and below only, `false` elsewhere.
+pub fn downloads_permission_blocked() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        android::downloads_permission_blocked()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        false
+    }
+}
+
 /// A file name that does not exist yet in `dir`: `name`, `name (1)`, ...
 #[cfg(any(windows, test))]
 fn unique_in(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
@@ -251,6 +266,7 @@ mod tests {
     #[test]
     fn off_android_nothing_is_missing_for_a_save() {
         assert!(!downloads_permission_missing());
+        assert!(!downloads_permission_blocked());
     }
 
     #[test]
@@ -384,6 +400,14 @@ mod android {
                 .ok()?;
             let jstr: JString = obj.into();
             env.get_string(&jstr).ok().map(Into::into)
+        })
+    }
+
+    pub(super) fn downloads_permission_blocked() -> bool {
+        with_jni_class(SHARE, false, |env, class| {
+            env.call_static_method(class, "downloadsPermissionBlocked", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
         })
     }
 
