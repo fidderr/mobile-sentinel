@@ -13,6 +13,9 @@ change.
 
 ### Fixed
 
+- **The kiosk's window set-up no longer stops at a call the phone does not have.** `engageOn` (immersive mode, lock-screen
+  flags, keeping the alarm out of Recents) caught `Exception`, which does not stop a `NoSuchMethodError`; one call that slipped past
+  a guard would have ended the app's process and skipped the rest of the set-up, the key guard included. It now catches `Throwable`.
 - **Saving to Downloads on Android 9 and below asks for the storage permission.** `share::save_to_downloads` there copies into the
   public Downloads folder, which needs `WRITE_EXTERNAL_STORAGE` (the share capability declares it up to API 28), and nothing asked
   for it, so the save failed with "Permission denied". The capability now asks through the resumed activity and, on a thread that

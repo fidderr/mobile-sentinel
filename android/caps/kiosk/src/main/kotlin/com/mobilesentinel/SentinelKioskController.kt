@@ -433,7 +433,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
         try {
             val am = activity.getSystemService(android.app.ActivityManager::class.java)
             am?.appTasks?.firstOrNull()?.setExcludeFromRecents(true)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "setExcludeFromRecents failed: ${e.message}")
         }
 
@@ -466,7 +466,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
                     )
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "immersive mode failed: ${e.message}")
         }
 
@@ -476,7 +476,7 @@ object SentinelKioskController : Application.ActivityLifecycleCallbacks {
             SentinelCompat.showOverLockScreen(activity)
             // A challenge can take longer than the screen timeout.
             activity.window.addFlags(KEEP_AWAKE_FLAGS)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "keeping the alarm on screen failed: ${e.message}")
         }
 
