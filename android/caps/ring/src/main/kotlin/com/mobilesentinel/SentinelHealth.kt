@@ -60,6 +60,7 @@ object SentinelHealth {
             nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_NONE
         }
         read("boot_signal_missed") { bootSignalMissed(c) }
+        read("api_level") { Build.VERSION.SDK_INT }
         return out.toString()
     }
 

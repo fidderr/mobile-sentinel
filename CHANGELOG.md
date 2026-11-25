@@ -27,6 +27,10 @@ change.
 
 ### Added
 
+- `health::HealthReport::applies(check)` and `HealthReport::for_api_level(level)`: whether a check exists on this phone. The "kept when unused" setting is
+  there from Android 11; below it `is_ok` says true (nothing can be wrong) and an app that lists every check showed an "OK" for a
+  setting the phone does not have. An app lists the checks that apply. Additive: the snapshot gained `api_level`, an unknown level
+  (0) applies everything.
 - `share::downloads_permission_missing() -> bool`: whether a failed `save_to_downloads` is failing for want of the storage
   permission (Android 9 and below, not granted), so the app can say "allow storage access, then save again". Always `false`
   elsewhere. Additive: a patch release in 0.x.
