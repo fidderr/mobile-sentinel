@@ -169,7 +169,9 @@ pub fn open_url(url: &str) -> Result<(), SentinelError> {
 }
 
 /// Copy a file into the user's Downloads folder as `name`. Returns a
-/// human-readable location of the copy (e.g. `Download/report.pdf`).
+/// human-readable location of the copy (e.g. `Download/report.pdf`). Never waits for the
+/// person: on Android 9 and below without the storage permission it asks for it and fails
+/// (see [`downloads_permission_missing`]).
 pub fn save_to_downloads(path: &str, name: &str, mime_type: &str) -> Result<String, SentinelError> {
     #[cfg(target_os = "android")]
     {
@@ -192,6 +194,21 @@ pub fn save_to_downloads(path: &str, name: &str, mime_type: &str) -> Result<Stri
     {
         let _ = (path, name, mime_type);
         Err(SentinelError::unavailable("share::save_to_downloads"))
+    }
+}
+
+/// Whether [`save_to_downloads`] is failing for want of a permission the person has not given: on Android 9 and below the
+/// Downloads folder needs the storage permission (a dialog), from Android 10 and on other platforms nothing is needed. The
+/// failed save has asked for it through the system dialog and gone on at once, it never waits for the answer; ask this after
+/// a failure to tell the person to allow it, then save again.
+pub fn downloads_permission_missing() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        android::downloads_permission_missing()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        false
     }
 }
 
@@ -230,6 +247,11 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn off_android_nothing_is_missing_for_a_save() {
+        assert!(!downloads_permission_missing());
+    }
 
     #[test]
     fn an_email_needs_an_address_and_clean_paths() {
@@ -362,6 +384,14 @@ mod android {
                 .ok()?;
             let jstr: JString = obj.into();
             env.get_string(&jstr).ok().map(Into::into)
+        })
+    }
+
+    pub(super) fn downloads_permission_missing() -> bool {
+        with_jni_class(SHARE, false, |env, class| {
+            env.call_static_method(class, "downloadsPermissionMissing", "()Z", &[])
+                .ok()
+                .and_then(|v| v.z().ok())
         })
     }
 

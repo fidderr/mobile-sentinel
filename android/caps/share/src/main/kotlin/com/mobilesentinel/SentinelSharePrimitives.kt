@@ -9,8 +9,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.Looper
-import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -259,44 +257,37 @@ object SentinelSharePrimitives {
     }
 
     /**
-     * Up to Android 9 the Downloads folder needs WRITE_EXTERNAL_STORAGE, a permission the user grants in a dialog (the
-     * capability declares it up to API 28 only). When it is not granted yet the dialog is asked for and, on a thread that
-     * is not the main one, this waits for the answer: the dialog pauses the activity, and the activity is resumed when it
-     * closes. On the main thread the dialog is only asked for (a wait there would be an ANR) and the caller gets "not
-     * saved"; the next try finds the answer.
+     * Whether saving to Downloads needs a permission that is not granted: up to Android 9 the public folder needs
+     * WRITE_EXTERNAL_STORAGE (a runtime permission; the capability declares it up to API 28 only), from Android 10 nothing is
+     * needed. A host asks this after a save failed, to tell the person to allow it.
+     */
+    fun downloadsPermissionMissing(): Boolean {
+        val context = SentinelPrimitives.getAppContext() ?: return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !storageGranted(context)
+    }
+
+    private fun storageGranted(context: Context) =
+        context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * When the permission is missing the system dialog is asked for, through the resumed activity, and the call says no at
+     * once: the answer comes whenever the person gives it, on the UI thread of the app, and nothing here may wait for it
+     * (the dialog pauses the activity, and the caller can be the very thread that has to handle that).
      */
     private fun legacyStorageGranted(context: Context): Boolean {
-        val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
-        fun granted() = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
-        if (granted()) return true
+        if (storageGranted(context)) return true
         val activity = SentinelActivityTracker.currentResumedActivity ?: return false
         activity.runOnUiThread {
             try {
-                activity.requestPermissions(arrayOf(permission), STORAGE_REQUEST_CODE)
+                activity.requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_REQUEST_CODE)
             } catch (e: Throwable) {
                 Log.w(TAG, "storage permission dialog: ${e.message}")
             }
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) return false
-        if (waitFor(DIALOG_APPEARS_MS) { SentinelActivityTracker.currentResumedActivity == null }) {
-            waitFor(DIALOG_ANSWER_MS) { SentinelActivityTracker.currentResumedActivity != null }
-        }
-        return granted()
-    }
-
-    private fun waitFor(timeoutMs: Long, done: () -> Boolean): Boolean {
-        val end = SystemClock.uptimeMillis() + timeoutMs
-        while (!done()) {
-            if (SystemClock.uptimeMillis() >= end) return false
-            Thread.sleep(POLL_MS)
-        }
-        return true
+        return false
     }
 
     private const val STORAGE_REQUEST_CODE = 0x5E12
-    private const val DIALOG_APPEARS_MS = 3_000L
-    private const val DIALOG_ANSWER_MS = 120_000L
-    private const val POLL_MS = 100L
 }
 
 /** The share capability's own FileProvider (a subclass, so it can coexist

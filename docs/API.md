@@ -81,7 +81,7 @@ re-exported at the crate root (so you write `mobile_sentinel::camera::…`).
 | `foregrounding` | `foregrounding` | `finish_activity()`, `move_to_back()`, `on_back(callback)` | none |
 | `media_picker` | `media_picker` | `pick_file(&[&str]) -> Result<String>`, `pick_files(&[&str], multiple: bool) -> Result<Vec<PickedFile>>` | none; `SentinelFilePickerActivity`. Use instead of `<input type="file">` in a WebView. Blocks until the user picked or cancelled. |
 | `clipboard` | `clipboard` | `set_text(&str) -> Result<()>`, `get_text() -> Result<Option<String>>`, `has_text() -> bool` | none |
-| `share` | `share` | `text(&str, Option<&str>) -> Result<()>`, `url(&str, Option<&str>) -> Result<()>`, `file(&str, &str) -> Result<()>`, `open(path, mime) -> Result<()>`, `open_url(&str) -> Result<()>`, `save_to_downloads(path, name, mime) -> Result<String>` | `WRITE_EXTERNAL_STORAGE`, up to Android 9 |
+| `share` | `share` | `text(&str, Option<&str>) -> Result<()>`, `url(&str, Option<&str>) -> Result<()>`, `file(&str, &str) -> Result<()>`, `open(path, mime) -> Result<()>`, `open_url(&str) -> Result<()>`, `save_to_downloads(path, name, mime) -> Result<String>`, `downloads_permission_missing() -> bool` | `WRITE_EXTERNAL_STORAGE`, up to Android 9 |
 | `secure_storage` | `secure_storage` | `set(&str, &str) -> Result<()>`, `get(&str) -> Result<Option<String>>`, `delete(&str) -> Result<()>`, `clear() -> Result<()>` | none — private to the app, **not encrypted** |
 | `sms` | `sms` | `send(number, message) -> Result<()>`, `is_available() -> bool` | `SEND_SMS` **POLICY-SENSITIVE** |
 | `phone` | `phone` | `dial(&str) -> Result<()>` (opens the dialer), `is_in_call() -> bool` | none |

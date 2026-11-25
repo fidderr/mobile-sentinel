@@ -16,13 +16,20 @@ change.
 - **The kiosk's window set-up no longer stops at a call the phone does not have.** `engageOn` (immersive mode, lock-screen
   flags, keeping the alarm out of Recents) caught `Exception`, which does not stop a `NoSuchMethodError`; one call that slipped past
   a guard would have ended the app's process and skipped the rest of the set-up, the key guard included. It now catches `Throwable`.
-- **Saving to Downloads on Android 9 and below asks for the storage permission.** `share::save_to_downloads` there copies into the
-  public Downloads folder, which needs `WRITE_EXTERNAL_STORAGE` (the share capability declares it up to API 28), and nothing asked
-  for it, so the save failed with "Permission denied". The capability now asks through the resumed activity and, on a thread that
-  is not the main one, waits for the answer (the dialog pauses the activity, it is resumed when the dialog closes). On the main
-  thread it only asks and the call fails; the next call finds the answer. Android 10 and newer are unchanged (MediaStore, no
-  permission). The lint gate (`lintDebug -PsentinelMinSdk=26`) also passes at 28 and 29; a call newer than the minimum without a
-  guard (checked with `MediaStore.Downloads` at 28) is an error.
+- **Saving to Downloads on Android 9 and below asks for the storage permission, and never waits for the answer.**
+  `share::save_to_downloads` there copies into the public Downloads folder, which needs `WRITE_EXTERNAL_STORAGE` (the share
+  capability declares it up to API 28), and nothing asked for it, so the save failed with "Permission denied". The capability
+  now asks through the resumed activity and the call fails at once; the next call, after the person allowed it, saves. It does
+  not wait for the dialog on any thread: the dialog pauses the activity, and a caller on the thread of the native UI (which is
+  not the Java main looper) would have held the app's `onPause` for the whole wait. Android 10 and newer are unchanged
+  (MediaStore, no permission). The lint gate (`lintDebug -PsentinelMinSdk=26`) also passes at 28 and 29; a call newer than the
+  minimum without a guard (checked with `MediaStore.Downloads` at 28) is an error.
+
+### Added
+
+- `share::downloads_permission_missing() -> bool`: whether a failed `save_to_downloads` is failing for want of the storage
+  permission (Android 9 and below, not granted), so the app can say "allow storage access, then save again". Always `false`
+  elsewhere. Additive: a patch release in 0.x.
 
 ## [0.7.1] - 2026-11-24
 
