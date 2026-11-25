@@ -72,12 +72,7 @@ pub struct HealthReport {
     /// The phone restarted with the app on it, and never told the app. On some phones a
     /// setting of the maker's does that ("auto-start"), which no app can read.
     pub boot_signal_missed: bool,
-    /// The Android API level the phone runs, 0 when it is not known (not on Android, or not read).
-    api_level: u32,
 }
-
-/// `Build.VERSION_CODES.R`: the first Android that has the "remove permissions if app is unused" setting.
-const AUTO_REVOKE_API: u32 = 30;
 
 impl Default for HealthReport {
     fn default() -> Self {
@@ -92,7 +87,6 @@ impl Default for HealthReport {
             channel_importance: -1,
             total_silence: false,
             boot_signal_missed: false,
-            api_level: 0,
         }
     }
 }
@@ -100,24 +94,6 @@ impl Default for HealthReport {
 impl HealthReport {
     fn parse(json: &str) -> Self {
         serde_json::from_str(json).unwrap_or_default()
-    }
-
-    /// The report of a phone that runs this API level and allows everything (for tests of what an app lists).
-    pub fn for_api_level(api_level: u32) -> Self {
-        Self {
-            api_level,
-            ..Default::default()
-        }
-    }
-
-    /// Whether this check exists on this phone: the "kept when unused" setting is there from Android 11. A phone whose level
-    /// is not known (0) counts as having every check. An app lists only the checks that apply, so it does not show an "OK"
-    /// for a setting the phone does not have.
-    pub fn applies(&self, check: Check) -> bool {
-        match check {
-            Check::KeptWhenUnused => self.api_level == 0 || self.api_level >= AUTO_REVOKE_API,
-            _ => true,
-        }
     }
 
     /// Whether this check is fine.
@@ -189,6 +165,21 @@ impl HealthReport {
     }
 }
 
+/// Whether this check exists on this phone: the "kept when unused" setting is there from Android 11, and below it the report
+/// says it is fine, which an app that lists every check would show as an "OK" for a setting the phone does not have. An app
+/// lists the checks that apply. Always true off Android.
+pub fn applies(check: Check) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        jni::applies(check.key())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = check;
+        true
+    }
+}
+
 /// Read what the phone allows. `channel_id` is the alarm notification channel.
 pub fn report(channel_id: &str) -> HealthReport {
     #[cfg(target_os = "android")]
@@ -240,6 +231,22 @@ mod jni {
         })
     }
 
+    /// A check that cannot be asked about exists.
+    pub(super) fn applies(check: &str) -> bool {
+        with_jni_class(HEALTH, true, |env, class| {
+            let check = jni_str(env, check)?;
+            env.call_static_method(
+                class,
+                "applies",
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&check.into())],
+            )
+            .ok()?
+            .z()
+            .ok()
+        })
+    }
+
     pub(super) fn open_settings(check: &str, channel_id: &str) -> bool {
         with_jni_class(HEALTH, false, |env, class| {
             let check = jni_str(env, check)?;
@@ -265,18 +272,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_unused_setting_exists_from_android_11() {
-        let at = HealthReport::for_api_level;
-        assert!(!at(28).applies(Check::KeptWhenUnused));
-        assert!(!at(29).applies(Check::KeptWhenUnused));
-        assert!(at(30).applies(Check::KeptWhenUnused));
-        assert!(at(36).applies(Check::KeptWhenUnused));
-        assert!(at(0).applies(Check::KeptWhenUnused));
-        assert!(HealthReport::parse("{}").applies(Check::KeptWhenUnused));
-        for check in [Check::ExactAlarms, Check::Overlay, Check::BootSignal] {
-            assert!(at(28).applies(check));
+    fn off_android_every_check_applies() {
+        for check in [Check::ExactAlarms, Check::KeptWhenUnused, Check::BootSignal] {
+            assert!(applies(check));
         }
-        assert!(!HealthReport::parse(r#"{"api_level": 28}"#).applies(Check::KeptWhenUnused));
     }
 
     #[test]

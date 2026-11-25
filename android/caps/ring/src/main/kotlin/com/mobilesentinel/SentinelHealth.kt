@@ -60,7 +60,6 @@ object SentinelHealth {
             nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_NONE
         }
         read("boot_signal_missed") { bootSignalMissed(c) }
-        read("api_level") { Build.VERSION.SDK_INT }
         return out.toString()
     }
 
@@ -92,6 +91,11 @@ object SentinelHealth {
         val file = bootSignalFile(c)
         return !file.exists() || file.lastModified() < boot
     }
+
+    /** Whether the check exists on this phone: "kept_when_unused" is a setting of Android 11 and up. [check] is a field of [snapshot]. */
+    @JvmStatic
+    fun applies(check: String): Boolean =
+        check != "kept_when_unused" || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
     /** Open the system page where [check] is changed. [check] is a field of [snapshot]. */
     @JvmStatic
