@@ -261,6 +261,7 @@ object SentinelSharePrimitives {
      * WRITE_EXTERNAL_STORAGE (a runtime permission; the capability declares it up to API 28 only), from Android 10 nothing is
      * needed. A host asks this after a save failed, to tell the person to allow it.
      */
+    @JvmStatic
     fun downloadsPermissionMissing(): Boolean {
         val context = SentinelPrimitives.getAppContext() ?: return false
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !storageGranted(context)
