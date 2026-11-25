@@ -11,6 +11,16 @@ change.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Saving to Downloads on Android 9 and below asks for the storage permission.** `share::save_to_downloads` there copies into the
+  public Downloads folder, which needs `WRITE_EXTERNAL_STORAGE` (the share capability declares it up to API 28), and nothing asked
+  for it, so the save failed with "Permission denied". The capability now asks through the resumed activity and, on a thread that
+  is not the main one, waits for the answer (the dialog pauses the activity, it is resumed when the dialog closes). On the main
+  thread it only asks and the call fails; the next call finds the answer. Android 10 and newer are unchanged (MediaStore, no
+  permission). The lint gate (`lintDebug -PsentinelMinSdk=26`) also passes at 28 and 29; a call newer than the minimum without a
+  guard (checked with `MediaStore.Downloads` at 28) is an error.
+
 ## [0.7.1] - 2026-11-24
 
 ### Fixed

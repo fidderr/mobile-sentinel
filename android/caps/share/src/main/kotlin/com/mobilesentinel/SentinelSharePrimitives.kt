@@ -1,12 +1,16 @@
 package com.mobilesentinel
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -214,7 +218,7 @@ object SentinelSharePrimitives {
     fun saveToDownloads(path: String, name: String, mimeType: String): String {
         val context = SentinelPrimitives.getAppContext() ?: return ""
         val src = File(path)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToDownloadsFolder(src, name)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToDownloadsFolder(context, src, name)
         return try {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
@@ -239,15 +243,60 @@ object SentinelSharePrimitives {
 
     /** Before Android 10 there is no MediaStore.Downloads: the folder itself, which needs the storage permission. */
     @Suppress("DEPRECATION")
-    private fun saveToDownloadsFolder(src: File, name: String): String = try {
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        dir.mkdirs()
-        src.copyTo(File(dir, name), overwrite = true)
-        "Download/$name"
+    private fun saveToDownloadsFolder(context: Context, src: File, name: String): String = try {
+        if (!legacyStorageGranted(context)) {
+            Log.w(TAG, "saveToDownloads(${src.path}): no storage permission")
+            ""
+        } else {
+            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            dir.mkdirs()
+            src.copyTo(File(dir, name), overwrite = true)
+            "Download/$name"
+        }
     } catch (e: Throwable) {
         Log.w(TAG, "saveToDownloads(${src.path}): ${e.message}", e)
         ""
     }
+
+    /**
+     * Up to Android 9 the Downloads folder needs WRITE_EXTERNAL_STORAGE, a permission the user grants in a dialog (the
+     * capability declares it up to API 28 only). When it is not granted yet the dialog is asked for and, on a thread that
+     * is not the main one, this waits for the answer: the dialog pauses the activity, and the activity is resumed when it
+     * closes. On the main thread the dialog is only asked for (a wait there would be an ANR) and the caller gets "not
+     * saved"; the next try finds the answer.
+     */
+    private fun legacyStorageGranted(context: Context): Boolean {
+        val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+        fun granted() = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        if (granted()) return true
+        val activity = SentinelActivityTracker.currentResumedActivity ?: return false
+        activity.runOnUiThread {
+            try {
+                activity.requestPermissions(arrayOf(permission), STORAGE_REQUEST_CODE)
+            } catch (e: Throwable) {
+                Log.w(TAG, "storage permission dialog: ${e.message}")
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) return false
+        if (waitFor(DIALOG_APPEARS_MS) { SentinelActivityTracker.currentResumedActivity == null }) {
+            waitFor(DIALOG_ANSWER_MS) { SentinelActivityTracker.currentResumedActivity != null }
+        }
+        return granted()
+    }
+
+    private fun waitFor(timeoutMs: Long, done: () -> Boolean): Boolean {
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (!done()) {
+            if (SystemClock.uptimeMillis() >= end) return false
+            Thread.sleep(POLL_MS)
+        }
+        return true
+    }
+
+    private const val STORAGE_REQUEST_CODE = 0x5E12
+    private const val DIALOG_APPEARS_MS = 3_000L
+    private const val DIALOG_ANSWER_MS = 120_000L
+    private const val POLL_MS = 100L
 }
 
 /** The share capability's own FileProvider (a subclass, so it can coexist
