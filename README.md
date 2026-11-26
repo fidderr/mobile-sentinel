@@ -519,8 +519,10 @@ ignored for an AAB (`--aab`), where Play decides.
 
 ## Platform support
 
-Android is the first real target (`aarch64-linux-android`, modules at compileSdk 34,
-minSdk 24; what an app runs on is its own `minSdk`). Every capability also has a **host fallback** so the crate builds and
+Android is the first real target (`aarch64-linux-android`, modules at compileSdk 34). A generated host (`generate = true`)
+gets `min_sdk = 31` unless its `sentinel.toml` sets another one (`[android] min_sdk`); the capabilities are written, lint-checked
+(`NewApi` is an error) and unit-tested down to Android 8 (API 26). A host can set `min_sdk = 28` (Android 9): what differs
+there, such as saving to Downloads with the storage permission, is covered by fallbacks and tests since 0.7.2. What an app runs on is its own `minSdk`. Every capability also has a **host fallback** so the crate builds and
 tests on desktop: capability functions return
 `SentinelError::PlatformUnsupported` or a safe default (`false`, `0`, `None`).
 This is what lets the recurrence engine, snooze policy, state store, recipe
