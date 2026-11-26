@@ -34,7 +34,8 @@ change.
   Android will no longer ask for it (the person chose "never ask again", so a request shows no dialog): the only way is the app's own
   settings page (`permissions::open_app_settings`). The capability remembers in its own preferences that it asked once, and a save
   that finds the permission missing, an earlier ask and no rationale says blocked instead of asking again. Android 9 and below only,
-  `false` elsewhere. Additive.
+  `false` elsewhere. Additive. It can also be `true` for a dialog that was never answered or a permission taken back in Settings
+  (no public API tells these from "never ask again"); the host then opens the settings page, where the person can still allow it.
 - `share::downloads_permission_missing() -> bool`: whether a failed `save_to_downloads` is failing for want of the storage
   permission (Android 9 and below, not granted), so the app can say "allow storage access, then save again". Always `false`
   elsewhere. Additive: a patch release in 0.x.

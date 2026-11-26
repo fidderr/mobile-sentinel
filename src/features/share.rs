@@ -216,6 +216,11 @@ pub fn downloads_permission_missing() -> bool {
 /// (the person chose "never ask again"): no dialog can come, and the only way is the app's own settings page
 /// (`permissions::open_app_settings`). Ask after a failure, next to [`downloads_permission_missing`], which is also
 /// true then. Android 9 and below only, `false` elsewhere.
+///
+/// The answer is `true` when an earlier ask is on record and Android shows no rationale. That is what "never ask again" looks like,
+/// but it is also what two other cases look like, which no public API tells apart: a dialog that was never answered (the app was
+/// stopped while it showed), and a permission that was taken back later in Settings. There a dialog could still have come.
+/// The result is the same for the person: the host opens the app's settings page, and the person can still allow the access there.
 pub fn downloads_permission_blocked() -> bool {
     #[cfg(target_os = "android")]
     {

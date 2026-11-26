@@ -275,6 +275,10 @@ object SentinelSharePrimitives {
      * Whether the last save failed for want of the storage permission that Android will no longer ask the person for (they chose
      * "never ask again"): the only way to allow it is the app's own settings page. A host asks this after a failed save, next to
      * [downloadsPermissionMissing], and sends the person there. Up to Android 9 only; false from Android 10.
+     *
+     * True means an earlier ask is on record and Android shows no rationale. That is "never ask again", and it is also a dialog
+     * that was never answered (the app stopped while it showed) or a permission taken back later in Settings, where a dialog could
+     * still have come; no public API tells them apart. The host then opens the settings page, where the person can still allow it.
      */
     @JvmStatic
     fun downloadsPermissionBlocked(): Boolean {
