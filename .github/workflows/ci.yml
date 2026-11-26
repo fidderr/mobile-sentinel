@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, hardening, alarm-reliability-qol, 'android9-tests**']
+    branches: [main, hardening, alarm-reliability-qol]
   pull_request:
 
 env:
