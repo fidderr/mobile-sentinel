@@ -11,6 +11,13 @@ change.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-26
+
+Android 9 (API 28) works as a host's `min_sdk`: the places where a call is newer than Android 9 have fallbacks and tests, saving
+to Downloads asks for the storage permission there (and says when Android will no longer ask), and the lint, the unit tests and a
+device smoke test cover it. Additive API only (`health::applies`, `share::downloads_permission_missing`,
+`share::downloads_permission_blocked`): a patch release.
+
 ### Tests
 
 - **Android 9 is tested on its own framework and on a real runtime.** Every Robolectric test that ran at Android 8 or at Android 13 alone now
