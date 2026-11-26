@@ -54,7 +54,7 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun startRingGoesThroughTheJniEntryWithTheAppContext() {
         createJob("a1")
         assertTrue(SentinelRing.startRing("a1", "{}", false))
@@ -63,7 +63,7 @@ class SentinelRingTest {
 
     /** The marker is the truth: a plan whose job is no longer active is not ringing, and is cleaned up. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aPlanWithoutAnActiveJobIsNotRinging() {
         SentinelRing.start(context, "gone", """{"title":"x"}""", false)
         assertTrue(SentinelRing.list(context).isEmpty())
@@ -73,7 +73,7 @@ class SentinelRingTest {
 
     /** An alarm must ring even when its plan cannot be read. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun anUnreadablePlanStillRingsWithDefaults() {
         createJob("a1")
         SentinelRing.start(context, "a1", "this is not json", false)
@@ -83,14 +83,14 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun stopDoesNothingForARingThatIsNotRinging() {
         assertTrue(SentinelRing.stop(context, "nope"))
         assertNull(shadowOf(app).nextStartedService)
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun stopTellsTheServiceWhichRingToEnd() {
         createJob("a1")
         SentinelRing.start(context, "a1", "{}", false)
@@ -102,7 +102,7 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun resumeSavedOnlyWhenSomethingRings() {
         assertFalse(SentinelRing.resumeSaved(context))
         assertNull(shadowOf(app).nextStartedService)
@@ -114,7 +114,7 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun pauseQuietAndLoudAreCommandsToTheService() {
         assertTrue(SentinelRing.pauseRing())
         assertEquals(SentinelRing.ACTION_PAUSE, shadowOf(app).nextStartedService.action)
@@ -152,7 +152,7 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun armingTheWatchdogTwiceKeepsOneAndCancelRemovesIt() {
         SentinelRing.armWatchdog(context)
         SentinelRing.armWatchdog(context)
@@ -162,7 +162,7 @@ class SentinelRingTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theUiFailedMarkRoundTrips() {
         assertFalse(SentinelRing.uiFailed(context))
         SentinelRing.markUiFailed(context)

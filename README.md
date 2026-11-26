@@ -589,6 +589,21 @@ gradle -p android/ci-check compileDebugKotlin
 gradle -p android/ci-check lintDebug -PsentinelMinSdk=26            # NewApi is an error
 ```
 
+Which Android versions are tested, and how (the minimum the SDK supports is Android 8, API 26):
+
+| What | Versions | How |
+|---|---|---|
+| Lint, `NewApi` as an error, every capability | minimum 26 | `lintDebug -PsentinelMinSdk=26`: a call newer than Android 8 without a guard fails the build. It also passes at 28 and 29. |
+| Unit tests, the real framework code | 26, 28 (Android 9), 29, 30, 31, 33, 34, 36 | Robolectric. Every test of an Android version branch (exact alarms, vibrator, saving a file, the window and the kiosk lock, the notification permission, the recorder) runs on both sides of its branch, Android 9 included. |
+| Every module loads | 28 and 36 | `android/ci-check/shared-tests`: compiled into the tests of every module, it links every class and loads every component of the merged manifest, also for a module without tests of its own. |
+| Device smoke test | Android 9 (API 28) and the newest (Android 17, API 37.2), emulators | CI job `device smoke`: `android/ci-check/smoke`, one instrumentation test on a real runtime. An exact alarm is armed and fires, the ring service runs in the foreground and starts its sound, vibration and audio calls return, a file is saved to Downloads, the kiosk lock hides the bars, and a window opens over the lock screen. Under 10 minutes a job. |
+
+The smoke test also runs on a connected device or emulator: build it with
+`gradle -p android/ci-check :sentinel-smoke:assembleDebugAndroidTest -PsentinelMinSdk=26`, then
+`bash android/ci-check/smoke/ci/run.sh` (installs it with all permissions granted and runs it). Not covered:
+phones themselves (OEM battery killers, vendor graphics), and Android 8 (API 26) on a device; it is only in the unit
+tests and the lint.
+
 `tests/kotlin_contract.rs` (in `cargo test --all-features`) ties the two sides together: every Kotlin
 `external fun` has its `Java_...` export in Rust and the other way round, and the ring plan Rust serializes
 (`FireRequest`) is pinned in `tests/fixtures/ring-plan-*.json`, which the Kotlin tests read too

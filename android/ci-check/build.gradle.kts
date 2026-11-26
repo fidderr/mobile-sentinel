@@ -62,3 +62,17 @@ subprojects {
         }
     }
 }
+
+// Every module is also loaded by shared-tests/ModuleLoadsTest on the Android 9 framework (and the newest one): all its
+// classes link and every component of its merged manifest loads, so a module with no tests of its own is still checked.
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
+            sourceSets.getByName("test").java.srcDir("$rootDir/shared-tests/kotlin")
+        }
+        tasks.withType<Test>().configureEach {
+            val classes = layout.buildDirectory.dir("tmp/kotlin-classes/debug")
+            doFirst { systemProperty("sentinel.classes", classes.get().asFile.path) }
+        }
+    }
+}

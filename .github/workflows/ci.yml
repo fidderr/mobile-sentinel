@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, hardening, alarm-reliability-qol]
+    branches: [main, hardening, alarm-reliability-qol, 'android9-tests**']
   pull_request:
 
 env:
@@ -108,3 +108,54 @@ jobs:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --target aarch64-linux-android --all-features
+
+  # The smoke test of android/ci-check/smoke on an emulator: the alarm, the ring service, vibration, audio, saving a file,
+  # the kiosk lock and a window over the lock screen on a real Android 9 and on the newest one. The emulator boots while the
+  # APK builds. Needs KVM (the same setup as AlarmFree's Emulators workflow).
+  device-smoke:
+    name: device smoke, ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android 9
+            avd: sdk28
+          - name: Android 17
+            avd: sdknewest
+    steps:
+      - uses: actions/checkout@v5
+      - name: KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.1.0"
+          cache-read-only: false
+      - name: Android image and AVD
+        run: bash android/ci-check/smoke/ci/avd.sh make ${{ matrix.avd }}
+      - name: Start the emulator
+        run: bash android/ci-check/smoke/ci/avd.sh start ${{ matrix.avd }}
+      - name: Build the smoke APK
+        run: gradle -p android/ci-check :sentinel-smoke:assembleDebugAndroidTest -PsentinelMinSdk=26
+      - name: Smoke test
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          bash android/ci-check/smoke/ci/avd.sh wait
+          bash android/ci-check/smoke/ci/run.sh
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: smoke-${{ matrix.avd }}
+          path: |
+            instrument.txt
+            logcat.txt
+            emulator.log
+          retention-days: 3

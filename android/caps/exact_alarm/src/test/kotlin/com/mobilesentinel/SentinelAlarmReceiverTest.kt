@@ -61,7 +61,7 @@ class SentinelAlarmReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun itArmsTheRingWatchdog() {
         writeJobFile("a1")
         deliver("a1", plan)
@@ -73,7 +73,7 @@ class SentinelAlarmReceiverTest {
 
     /** An alarm whose job was deleted (cancelled meanwhile) must not ring. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun withoutAJobFileNothingStarts() {
         deliver("ghost", plan)
         assertNull(shadowOf(app).nextStartedService)
@@ -81,7 +81,7 @@ class SentinelAlarmReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun withoutAPlanTheJobIsActiveButNoServiceStarts() {
         writeJobFile("a1")
         deliver("a1", null)
@@ -96,7 +96,7 @@ class SentinelAlarmReceiverTest {
 
     /** A ring brought back by the watchdog has a watchdog of its own at once, not a second later. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theWatchdogArmsTheNextOneWhileARingGoes() {
         writeJobFile("a1")
         SentinelActiveJobs.mark(context, "a1")
@@ -110,14 +110,14 @@ class SentinelAlarmReceiverTest {
 
     /** With nothing ringing the watchdog is a stray one: it brings nothing back and must not keep itself going. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theWatchdogArmsNothingWhenNothingRings() {
         deliver(SentinelRing.WATCHDOG_ID, null)
         assertTrue(watchdogs().isEmpty())
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theWatchdogDoesNotActivateAJob() {
         writeJobFile("a1")
         deliver("a1" + SentinelAlarmReceiver.WATCHDOG_SUFFIX, null)
@@ -138,7 +138,7 @@ class SentinelAlarmReceiverTest {
 
     /** The device test of the watchdog: a debug build ends its process once after a resume, and says so by taking the file. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aDebugBuildTakesTheDieFileOnTheWatchdogResume() {
         ringGoing()
         app.applicationInfo.flags = app.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE
@@ -149,7 +149,7 @@ class SentinelAlarmReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aReleaseBuildLeavesTheDieFileAlone() {
         ringGoing()
         app.applicationInfo.flags = app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE.inv()
@@ -160,7 +160,7 @@ class SentinelAlarmReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theDieFileIsNotTakenWhenNothingWasResumed() {
         dieFile().parentFile?.mkdirs()
         dieFile().writeText("")

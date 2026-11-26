@@ -82,21 +82,21 @@ class SentinelForegroundServiceTest {
     }
 
     @Test
-    @Config(sdk = [26, 30, 31, 33, 36])
+    @Config(sdk = [26, 28, 30, 31, 33, 36])
     fun theVibrationStartsOnAnyVersion() {
         ringing("""{"sound_uri":"silent://","vibrate":true,"vibration_pattern":[0,300,100,300]}""")
         assertTrue(vibrator.isVibrating)
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aSilentPlanThatDoesNotVibrateStaysQuiet() {
         ringing("""{"sound_uri":"silent://","vibrate":false}""")
         assertFalse(vibrator.isVibrating)
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theFullScreenIntentPointsAtTheAppScreen() {
         val c = ringing("""{"sound_uri":"silent://","vibrate":false,"activity_fqcn":"com.example.RingActivity","firing_full_screen":true}""")
         val n = notification(c)
@@ -105,7 +105,7 @@ class SentinelForegroundServiceTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun withoutFullScreenThereIsNoFullScreenIntent() {
         val c = ringing("""{"sound_uri":"silent://","vibrate":false,"activity_fqcn":"com.example.RingActivity","firing_full_screen":false}""")
         assertNull(notification(c).fullScreenIntent)
@@ -113,7 +113,7 @@ class SentinelForegroundServiceTest {
 
     /** Before the first unlock the app's screen cannot start: the unlock screen takes its place. */
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun whileLockedTheUnlockScreenStandsInForTheApp() {
         shadowOf(context.getSystemService(UserManager::class.java)).setUserUnlocked(false)
         SentinelStorage.isDirectBoot(context)
@@ -127,7 +127,7 @@ class SentinelForegroundServiceTest {
 
     /** The alarm was dismissed before the service got to it: no ring, and the service ends. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aRingWhoseJobIsNotActiveEndsTheService() {
         val c = command(Robolectric.buildService(SentinelForegroundService::class.java).create(), SentinelRing.ACTION_RING, "gone")
         assertTrue(shadowOf(c.get()).isStoppedBySelf)
@@ -135,7 +135,7 @@ class SentinelForegroundServiceTest {
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun stopEndsTheOutputsTheWatchdogAndTheService() {
         val c = ringing("""{"sound_uri":"silent://","vibrate":true}""")
         assertTrue(vibrator.isVibrating)
@@ -147,7 +147,7 @@ class SentinelForegroundServiceTest {
 
     /** Android restarts a killed sticky service with no intent: whatever still rings must come back. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aRestartWithoutAnIntentBringsTheRingBack() {
         createJob("a1")
         SentinelRing.start(context, "a1", """{"sound_uri":"silent://","vibrate":true}""", false)
@@ -161,14 +161,14 @@ class SentinelForegroundServiceTest {
 
     /** A kill in the first second of a ring must find a watchdog armed: the first tick is not the time to arm it. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aRingHasAWatchdogFromTheMomentItStarts() {
         ringing("""{"sound_uri":"silent://"}""")
         assertEquals(1, watchdogs().size)
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun aRingResumedAfterAKillHasAWatchdogFromTheMomentItStarts() {
         createJob("a1")
         SentinelRing.start(context, "a1", """{"sound_uri":"silent://"}""", false)
@@ -180,7 +180,7 @@ class SentinelForegroundServiceTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun pauseSilencesTheOutputsAndRingBringsThemBack() {
         var c = ringing("""{"sound_uri":"silent://","vibrate":true}""")
         command(c, SentinelRing.ACTION_PAUSE)

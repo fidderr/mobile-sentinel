@@ -37,7 +37,7 @@ class SentinelRemindersTest {
     }
 
     @Test
-    @Config(sdk = [26, 31, 34, 36])
+    @Config(sdk = [26, 28, 31, 34, 36])
     fun aSilentReminderUsesTheQuietChannel() {
         remind("quiet", sound = false)
         val shown = shadowOf(manager).allNotifications.single()
@@ -47,7 +47,7 @@ class SentinelRemindersTest {
     }
 
     @Test
-    @Config(sdk = [26, 31, 34, 36])
+    @Config(sdk = [26, 28, 31, 34, 36])
     fun aReminderWithSoundUsesItsOwnChannelWithTheNotificationSound() {
         remind("loud", sound = true)
         val shown = shadowOf(manager).allNotifications.single()

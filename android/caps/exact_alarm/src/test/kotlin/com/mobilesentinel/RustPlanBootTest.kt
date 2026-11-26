@@ -29,7 +29,7 @@ class RustPlanBootTest {
     private fun fixture(name: String) = File(System.getProperty("sentinel.fixtures")!!, name).readText()
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun theLateWindowOfTheFullPlanLetsAMissedAlarmRing() {
         val now = System.currentTimeMillis()
         SentinelExactAlarmPrimitives.scheduleExactAlarm("alarm-1", now - 120_000, fixture("ring-plan-full.json"))
@@ -40,7 +40,7 @@ class RustPlanBootTest {
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun theMinimalPlanAllowsNoLateness() {
         val now = System.currentTimeMillis()
         SentinelExactAlarmPrimitives.scheduleExactAlarm("alarm-1", now - 120_000, fixture("ring-plan-minimal.json"))

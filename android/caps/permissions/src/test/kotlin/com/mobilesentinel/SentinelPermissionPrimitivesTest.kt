@@ -51,7 +51,7 @@ class SentinelPermissionPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [26, 30, 32])
+    @Config(sdk = [26, 28, 30, 32])
     fun below13RequestingWhenOnAsksNothing() {
         notificationsSwitch(true)
         assertEquals(0, SentinelPermissionPrimitives.requestRuntimePermission(post))
@@ -60,7 +60,7 @@ class SentinelPermissionPrimitivesTest {
 
     /** There is no dialog to show below 13: the app's notification settings open instead. */
     @Test
-    @Config(sdk = [26, 30, 32])
+    @Config(sdk = [26, 28, 30, 32])
     fun below13RequestingWhenOffOpensTheNotificationSettings() {
         notificationsSwitch(false)
         assertEquals(1, SentinelPermissionPrimitives.requestRuntimePermission(post))
@@ -85,7 +85,7 @@ class SentinelPermissionPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun otherPermissionsUseTheGrant() {
         val camera = "android.permission.CAMERA"
         assertFalse(SentinelPermissionPrimitives.checkPermission(camera))

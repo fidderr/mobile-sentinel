@@ -30,7 +30,7 @@ import java.time.Duration
  * does not, the guardian brings the screen up itself.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [28, 33])
 class SentinelJobHeadsUpTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val app get() = context as Application

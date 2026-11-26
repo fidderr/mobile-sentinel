@@ -48,7 +48,7 @@ class SentinelCompatTest {
 
     /** VibratorManager only exists from Android 12: below it the plain service has to be used. */
     @Test
-    @Config(sdk = [26, 30])
+    @Config(sdk = [26, 28, 30])
     fun belowAndroid12TheVibratorComesFromThePlainService() {
         assertEquals(null, context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE))
         assertNotNull(SentinelCompat.vibrator(context))
@@ -85,7 +85,7 @@ class SentinelCompatTest {
 
     /** Rust sends an unset option as JSON null; Android's own optString would turn it into the text "null". */
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun optStringTreatsJsonNullAsMissing() {
         val json = org.json.JSONObject("""{"a":null,"b":"x","n":7}""")
         assertEquals("", SentinelCompat.optString(json, "a"))

@@ -53,7 +53,7 @@ class RustRingPlanTest {
     }
 
     @Test
-    @Config(sdk = [26, 31, 33, 36])
+    @Config(sdk = [26, 28, 31, 33, 36])
     fun theFullPlanRingsWithEverythingItSays() {
         val n = ring(fixture("ring-plan-full.json"))
         assertEquals("Wake up", n.extras.getString(Notification.EXTRA_TITLE))
@@ -68,7 +68,7 @@ class RustRingPlanTest {
 
     /** A plan with no app screen: `activity_fqcn` is JSON null, which must not become the class "null". */
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun aPlanWithoutAnAppScreenHasNoFullScreenIntent() {
         val n = ring(fixture("ring-plan-minimal.json"))
         assertNull("the notification points at a screen named 'null'", n.fullScreenIntent)

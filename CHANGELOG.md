@@ -11,6 +11,21 @@ change.
 
 ## [Unreleased]
 
+### Tests
+
+- **Android 9 is tested on its own framework and on a real runtime.** Every Robolectric test that ran at Android 8 or at Android 13 alone now
+  also runs at API 28 (the ones about a newer behaviour stay where it exists). New tests for each version branch: saving a file below
+  Android 10 (the Downloads folder, the storage permission asked for and never waited for, on any thread, and the query that names it), the kiosk lock's bars and key guard (also after a window call the phone lacks) below
+  Android 11, the recorder below Android 12; the existing ones for exact alarms and the vibrator below 12 and the notification
+  permission below 13 run at 28 too. Each fails when its fallback is taken out.
+- **Every module is loaded on Android 9 and on Android 16** by one shared test (`android/ci-check/shared-tests`) that is compiled into
+  the tests of all modules: all classes link, and every component of the merged manifest is a class that loads. Lint stays at
+  minimum 26 for every module.
+- **A device smoke test** (`android/ci-check/smoke`, CI job `device smoke`) runs on an Android 9 (API 28) emulator and on the newest
+  (Android 17, API 37.2): an exact alarm is armed and fires, the ring service runs in the foreground and plays, vibration and audio
+  calls return, a file is saved to Downloads, the kiosk lock applies to a window, and a window opens over the lock screen. Locally:
+  `bash android/ci-check/smoke/ci/run.sh` on a connected device after `assembleDebugAndroidTest`.
+
 ### Fixed
 
 - **The kiosk's window set-up no longer stops at a call the phone does not have.** `engageOn` (immersive mode, lock-screen

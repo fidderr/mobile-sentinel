@@ -51,7 +51,7 @@ class SentinelBootReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun everyBootActionReArms() {
         for (action in listOf(
             Intent.ACTION_BOOT_COMPLETED,
@@ -65,7 +65,7 @@ class SentinelBootReceiverTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun otherBroadcastsDoNothing() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("x", now + 3_600_000, null)
         reboot(Intent.ACTION_TIME_CHANGED)
@@ -74,7 +74,7 @@ class SentinelBootReceiverTest {
 
     /** The phone was off through the alarm's time: it still rings, a second after boot, if its plan allows. */
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun anAlarmThatPassedWhileOffStillRingsInsideItsLateWindow() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("late", now - 60_000, """{"late_ring_window_ms":600000}""")
         reboot(Intent.ACTION_BOOT_COMPLETED)
@@ -83,7 +83,7 @@ class SentinelBootReceiverTest {
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun anAlarmTooLateIsDroppedFromTheRecord() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("old", now - 3_600_000, """{"late_ring_window_ms":600000}""")
         SentinelExactAlarmPrimitives.scheduleExactAlarm("nowindow", now - 1_000, null)
@@ -105,7 +105,7 @@ class SentinelBootReceiverTest {
 
     /** Before the first unlock the app's files are closed: nothing can be read, so nothing is armed. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun nothingIsArmedWhileTheFilesAreLocked() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("x", now + 3_600_000, null)
         val users = shadowOf(context.getSystemService(UserManager::class.java))

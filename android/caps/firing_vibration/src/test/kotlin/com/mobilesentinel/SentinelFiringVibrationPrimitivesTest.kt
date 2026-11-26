@@ -38,7 +38,7 @@ class SentinelFiringVibrationPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [26, 33])
+    @Config(sdk = [26, 28, 33])
     fun anEmptyPatternMeansNoVibration() {
         assertFalse(SentinelFiringVibrationPrimitives.startVibration(longArrayOf()))
         assertFalse(shadowOf(vibrator()).isVibrating)
@@ -46,7 +46,7 @@ class SentinelFiringVibrationPrimitivesTest {
 
     /** Below Android 13 the alarm usage travels as audio attributes. */
     @Test
-    @Config(sdk = [26, 30])
+    @Config(sdk = [26, 28, 30])
     fun belowAndroid13TheUsageIsAnAudioAttribute() {
         SentinelFiringVibrationPrimitives.startVibration(pattern)
         assertEquals(

@@ -63,7 +63,7 @@ class SentinelExactAlarmPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun settingTheSameIdAgainReplacesTheAlarm() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("a1", at, null)
         SentinelExactAlarmPrimitives.scheduleExactAlarm("a1", at + 60_000, null)
@@ -72,7 +72,7 @@ class SentinelExactAlarmPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [26, 33, 36])
+    @Config(sdk = [26, 28, 33, 36])
     fun cancelRemovesTheAlarmAndItsRecord() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("a1", at, null)
         SentinelExactAlarmPrimitives.scheduleExactAlarm("a2", at, null)
@@ -82,7 +82,7 @@ class SentinelExactAlarmPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun cancellingAnAlarmThatIsNotSetIsFine() {
         assertTrue(SentinelExactAlarmPrimitives.cancelExactAlarm("nothing"))
         assertTrue(scheduled().isEmpty())
@@ -90,7 +90,7 @@ class SentinelExactAlarmPrimitivesTest {
 
     /** The ring's watchdog re-arms itself every few seconds and must not be replayed at boot. */
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theWatchdogIsNotRecorded() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("ring#watchdog", at, null)
         assertEquals(1, scheduled().size)
@@ -98,14 +98,14 @@ class SentinelExactAlarmPrimitivesTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun theArmedRecordKeepsIdsThatNeedEncoding() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("a/b c#1", at, """{"x":1}""")
         assertEquals("""{"x":1}""", SentinelArmedAlarms.all(context).getValue("a/b c#1").metadataJson)
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [28, 33])
     fun anUnreadableRecordIsDroppedNotFatal() {
         SentinelExactAlarmPrimitives.scheduleExactAlarm("good", at, null)
         val dir = java.io.File(SentinelStorage.filesDir(context), "sentinel/armed")
